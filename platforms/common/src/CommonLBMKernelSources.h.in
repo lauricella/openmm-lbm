@@ -1,0 +1,30 @@
+#ifndef OPENMM_COMMONLBMKERNELSOURCES_H_
+#define OPENMM_COMMONLBMKERNELSOURCES_H_
+
+/* -------------------------------------------------------------------------- *
+ *                                 openmm-lbm                                 *
+ * -------------------------------------------------------------------------- *
+ * Copyright (c) 2026 the Authors (see README.md).                            *
+ * Derived from the OpenMM example plugin (openmm/openmmexampleplugin),       *
+ * portions copyright (c) 2014 Stanford University and the Authors.           *
+ * SPDX-License-Identifier: MIT                                               *
+ * -------------------------------------------------------------------------- */
+
+#include <string>
+
+namespace LBMPlugin {
+
+/**
+ * This class is a central holding place for the source code of common kernels.
+ * The CMake build script inserts declarations into it based on the .cc files in the
+ * kernels subfolder.
+ */
+
+class CommonLBMKernelSources {
+public:
+@KERNEL_FILE_DECLARATIONS@
+};
+
+} // namespace LBMPlugin
+
+#endif /*OPENMM_COMMONLBMKERNELSOURCES_H_*/

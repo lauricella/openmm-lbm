@@ -1,0 +1,14 @@
+/* -------------------------------------------------------------------------- *
+ *                                 openmm-lbm                                 *
+ * -------------------------------------------------------------------------- *
+ * Copyright (c) 2026 the Authors (see README.md).                            *
+ * Derived from the OpenMM example plugin (openmm/openmmexampleplugin),       *
+ * portions copyright (c) 2014 Stanford University and the Authors.           *
+ * SPDX-License-Identifier: MIT                                               *
+ * -------------------------------------------------------------------------- */
+
+#include "CommonLBMKernelSources.h"
+
+using namespace LBMPlugin;
+using namespace std;
+

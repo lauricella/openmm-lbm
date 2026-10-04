@@ -1,0 +1,190 @@
+/* -------------------------------------------------------------------------- *
+ *                                 openmm-lbm                                 *
+ * -------------------------------------------------------------------------- *
+ * Copyright (c) 2026 the Authors (see README.md).                            *
+ * Derived from the OpenMM example plugin (openmm/openmmexampleplugin),       *
+ * portions copyright (c) 2014 Stanford University and the Authors.           *
+ * SPDX-License-Identifier: MIT                                               *
+ * -------------------------------------------------------------------------- */
+
+%module openmmlbm
+
+/*
+ * The OpenMM typemaps accept NumPy arrays and call isNumpyAvailable(), which the OpenMM Python
+ * wrappers define in their own header.i; a plugin has to provide it.
+ */
+%{
+#include <numpy/arrayobject.h>
+#include "openmm/Vec3.h"
+
+// The OpenMM typemaps generate code that refers to the unqualified type Vec3.
+using OpenMM::Vec3;
+
+int isNumpyAvailable() {
+    static bool initialized = false;
+    static bool available = false;
+    if (!initialized) {
+        initialized = true;
+        available = (_import_array() >= 0);
+    }
+    return available;
+}
+%}
+
+%import(module="openmm") "swig/OpenMMSwigHeaders.i"
+%include "swig/typemaps.i"
+%fragment("Vec3_to_PyVec3");
+%include <std_string.i>
+%include <std_vector.i>
+
+%{
+#include "LBMForce.h"
+#include "OpenMM.h"
+#include "OpenMMAmoeba.h"
+#include "OpenMMDrude.h"
+#include "openmm/RPMDIntegrator.h"
+#include "openmm/RPMDMonteCarloBarostat.h"
+%}
+
+%pythoncode %{
+import openmm as mm
+import openmm.unit as unit
+%}
+
+/*
+ * The OpenMM typemaps are written for the unqualified type Vec3; extend them to OpenMM::Vec3.
+ */
+%apply const Vec3& { const OpenMM::Vec3& };
+%apply Vec3 { OpenMM::Vec3 };
+
+/*
+ * Output arguments of type std::vector<double>&, returned as Python lists.
+ */
+%typemap(in, numinputs=0) std::vector<double>& OUTPUT (std::vector<double> temp) {
+    $1 = &temp;
+}
+%typemap(argout) std::vector<double>& OUTPUT {
+    PyObject* list = PyList_New($1->size());
+    for (int i = 0; i < (int) $1->size(); i++)
+        PyList_SET_ITEM(list, i, PyFloat_FromDouble((*$1)[i]));
+    %append_output(list);
+}
+
+/*
+ * Add units to function outputs.
+ */
+%pythonappend LBMPlugin::LBMForce::getFluidDensity() const %{
+    val = unit.Quantity(val, unit.dalton/unit.nanometer**3)
+%}
+%pythonappend LBMPlugin::LBMForce::getKinematicViscosity() const %{
+    val = unit.Quantity(val, unit.nanometer**2/unit.picosecond)
+%}
+%pythonappend LBMPlugin::LBMForce::getFriction() const %{
+    val = unit.Quantity(val, 1/unit.picosecond)
+%}
+%pythonappend LBMPlugin::LBMForce::getTemperature() const %{
+    val = unit.Quantity(val, unit.kelvin)
+%}
+%pythonappend LBMPlugin::LBMForce::getBodyAcceleration() const %{
+    val = unit.Quantity(val, unit.nanometer/unit.picosecond**2)
+%}
+%pythonappend LBMPlugin::LBMForce::getInitialFluidVelocity() const %{
+    val = unit.Quantity(val, unit.nanometer/unit.picosecond)
+%}
+%pythonappend LBMPlugin::LBMForce::getFluidFields(OpenMM::Context& context) %{
+    val = (unit.Quantity(val[0], unit.dalton/unit.nanometer**3), unit.Quantity(val[1], unit.nanometer/unit.picosecond))
+%}
+
+/*
+ * Convert C++ exceptions to Python exceptions.
+ */
+%exception {
+    try {
+        $action
+    } catch (std::exception &e) {
+        PyErr_SetString(PyExc_Exception, const_cast<char*>(e.what()));
+        return NULL;
+    }
+}
+
+namespace LBMPlugin {
+
+class LBMForce : public OpenMM::Force {
+public:
+    LBMForce();
+
+    %apply int& OUTPUT {int& nx};
+    %apply int& OUTPUT {int& ny};
+    %apply int& OUTPUT {int& nz};
+    void getGridSize(int& nx, int& ny, int& nz) const;
+    %clear int& nx;
+    %clear int& ny;
+    %clear int& nz;
+    void setGridSize(int nx, int ny, int nz);
+
+    double getFluidDensity() const;
+    void setFluidDensity(double density);
+    double getKinematicViscosity() const;
+    void setKinematicViscosity(double viscosity);
+    double getFriction() const;
+    void setFriction(double friction);
+    double getTemperature() const;
+    void setTemperature(double temperature);
+    int getRandomNumberSeed() const;
+    void setRandomNumberSeed(int seed);
+    OpenMM::Vec3 getBodyAcceleration() const;
+    void setBodyAcceleration(const OpenMM::Vec3& acceleration);
+    OpenMM::Vec3 getInitialFluidVelocity() const;
+    void setInitialFluidVelocity(const OpenMM::Vec3& velocity);
+    int getFluidMomentumRemovalFrequency() const;
+    void setFluidMomentumRemovalFrequency(int frequency);
+
+    int getNumParticles() const;
+    int addParticle(int particle);
+    int getParticle(int index) const;
+    void setParticle(int index, int particle);
+
+
+    %apply std::vector<double>& OUTPUT {std::vector<double>& state};
+    void getFluidState(OpenMM::Context& context, std::vector<double>& state) const;
+    %clear std::vector<double>& state;
+    void setFluidState(OpenMM::Context& context, const std::vector<double>& state);
+
+    void updateParametersInContext(OpenMM::Context& context);
+    bool usesPeriodicBoundaryConditions() const;
+
+    /*
+     * Add methods for casting a Force to an LBMForce.
+     */
+    %extend {
+        /*
+         * Get the density and velocity of the fluid at every lattice node, as the tuple
+         * (density, velocity) of two lists.
+         */
+        PyObject* getFluidFields(OpenMM::Context& context) {
+            std::vector<double> density;
+            std::vector<OpenMM::Vec3> velocity;
+            self->getFluidFields(context, density, velocity);
+            PyObject* densityList = PyList_New(density.size());
+            for (int i = 0; i < (int) density.size(); i++)
+                PyList_SET_ITEM(densityList, i, PyFloat_FromDouble(density[i]));
+            PyObject* velocityList = PyList_New(velocity.size());
+            for (int i = 0; i < (int) velocity.size(); i++)
+                PyList_SET_ITEM(velocityList, i, Vec3_to_PyVec3(velocity[i]));
+            PyObject* fields = PyTuple_New(2);
+            PyTuple_SET_ITEM(fields, 0, densityList);
+            PyTuple_SET_ITEM(fields, 1, velocityList);
+            return fields;
+        }
+
+        static LBMPlugin::LBMForce& cast(OpenMM::Force& force) {
+            return dynamic_cast<LBMPlugin::LBMForce&>(force);
+        }
+
+        static bool isinstance(OpenMM::Force& force) {
+            return (dynamic_cast<LBMPlugin::LBMForce*>(&force) != NULL);
+        }
+    }
+};
+
+}

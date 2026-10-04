@@ -1,10 +1,79 @@
 # openmm-lbm
 OpenMM plugin coupling molecular dynamics to a lattice Boltzmann fluid (D3Q19, regularized collision, Guo forcing) for coarse-grained simulations with hydrodynamics. Particles exchange friction and thermal noise with the fluid. Native OpenMM plugin with Reference, CUDA, OpenCL and HIP platforms.
 
+**Status: early development (0.1.0).** The plugin structure, the API, the fluid storage and the
+tests are in place on all platforms; the fluid update and the particle-fluid coupling are not
+implemented yet, so `LBMForce` currently applies no force.
+
 ## Requirements
 
 - OpenMM 8.3 to 8.6 (the plugin is built against, and tested with, each minor version in this range).
 - CMake, SWIG and Python to build the plugin and its Python wrapper.
+
+## Building
+
+The plugin is built like other OpenMM plugins, against an existing OpenMM installation, and is
+usually installed into that same installation. With OpenMM from conda-forge:
+
+```bash
+conda create -n lbm -c conda-forge openmm=8.6 cmake make swig numpy cxx-compiler pytest
+conda activate lbm
+# optional: the CUDA platform needs nvcc (for example conda-forge cuda-nvcc, matching the
+# CUDA version of OpenMM); the OpenCL platform needs ocl-icd and the OpenCL headers.
+mkdir build && cd build
+cmake .. -DOPENMM_DIR=$CONDA_PREFIX -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX
+make -j
+make install
+make PythonInstall
+```
+
+CMake builds every platform it finds (`LBM_BUILD_CUDA_LIB`, `LBM_BUILD_OPENCL_LIB`,
+`LBM_BUILD_HIP_LIB`) and stops with an error if OpenMM is older than 8.3.
+
+## Testing
+
+```bash
+cd build
+ctest --output-on-failure          # C++ tests: serialization, Reference, and each GPU platform
+                                   # in single, mixed and double precision
+cd ../python/tests && python -m pytest
+```
+
+## Usage
+
+```python
+import openmm as mm
+import openmm.unit as unit
+from openmmlbm import LBMForce
+
+system = ...                                   # a periodic System with a rectangular box
+force = LBMForce()
+force.setGridSize(30, 30, 30)                  # cubic lattice cells spanning the box
+force.setFluidDensity(602.214*unit.dalton/unit.nanometer**3)
+force.setKinematicViscosity(1.0035*unit.nanometer**2/unit.picosecond)
+force.setFriction(5/unit.picosecond)
+force.setTemperature(300*unit.kelvin)
+for i in range(system.getNumParticles()):
+    force.addParticle(i)
+system.addForce(force)
+
+integrator = mm.VerletIntegrator(0.01*unit.picosecond)   # drag and noise are part of LBMForce
+context = mm.Context(system, integrator, mm.Platform.getPlatformByName('CUDA'),
+                     {'Precision': 'mixed'})
+density, velocity = force.getFluidFields(context)
+```
+
+The fluid is stored in the "mixed" type of the platform: single precision in `single` mode, double
+precision in `mixed` and `double` mode. `mixed` is recommended for production.
+
+The state of the fluid is not part of OpenMM checkpoints: save and restore it with
+`getFluidState()` and `setFluidState()`.
+
+## Documentation
+
+- [docs/theory.md](docs/theory.md): model, units and conventions.
+- [docs/architecture.md](docs/architecture.md): structure of the code.
+- [CONTRIBUTING.md](CONTRIBUTING.md): rules for contributors.
 
 ## Authors
 
@@ -16,4 +85,9 @@ OpenMM plugin coupling molecular dynamics to a lattice Boltzmann fluid (D3Q19, r
 
 ## License
 
-MIT License, copyright the Authors listed above. See [LICENSE](LICENSE).
+MIT License, copyright the Authors listed above. See [LICENSE](LICENSE), which also contains the
+notice of the OpenMM example plugin from which the plugin structure is derived.
+
+## Citing
+
+See [CITATION.cff](CITATION.cff).

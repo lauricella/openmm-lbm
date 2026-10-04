@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "main"
+      - "develop"
+  pull_request:
+    branches:
+      - "main"
+      - "develop"
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    name: OpenMM ${{ matrix.openmm-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every minor version of the supported range (see CONTRIBUTING.md).
+        openmm-version: ["8.3", "8.4", "8.5", "8.6"]
+
+    steps:
+      - name: "Check out"
+        uses: actions/checkout@v4
+
+      - name: "Select the OpenMM version"
+        run: sed -i "s/@OPENMM_VERSION@/${{ matrix.openmm-version }}.*/" devtools/conda-envs/build-ubuntu.yml
+
+      - uses: conda-incubator/setup-miniconda@v3
+        name: "Install dependencies"
+        with:
+          activate-environment: build
+          environment-file: devtools/conda-envs/build-ubuntu.yml
+          miniforge-version: latest
+          python-version: "3.11"
+        env:
+          # The CI hosts have no NVIDIA driver: the CUDA platform is built but not tested.
+          CONDA_OVERRIDE_CUDA: "12.9"
+
+      - name: "List conda packages"
+        shell: bash -l {0}
+        run: conda list
+
+      - name: "Configure"
+        shell: bash -l {0}
+        run: |
+          mkdir build
+          cd build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENMM_DIR=${CONDA_PREFIX} \
+            -DCMAKE_INSTALL_PREFIX=${CONDA_PREFIX}
+
+      - name: "Build"
+        shell: bash -l {0}
+        run: |
+          cd build
+          make -j2 install
+          make -j2 PythonInstall
+
+      - name: "List plugins"
+        shell: bash -l {0}
+        run: |
+          python -c "import openmm as mm; print('---Loaded---', *mm.pluginLoadedLibNames, '---Failed---', *mm.Platform.getPluginLoadFailures(), sep='\n')"
+
+      - name: "Run C++ tests"
+        shell: bash -l {0}
+        run: |
+          cd build
+          ctest --output-on-failure --exclude-regex "TestCuda|TestHip"
+
+      - name: "Run Python tests"
+        shell: bash -l {0}
+        run: |
+          cd python/tests
+          python -m pytest -v

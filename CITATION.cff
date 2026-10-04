@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "openmm-lbm: lattice Boltzmann fluid plugin for OpenMM"
+version: 0.1.0
+license: MIT
+authors:
+  - given-names: Luis
+    family-names: Coronas
+  - given-names: Marco
+    family-names: Lauricella
+  - given-names: Andrea
+    family-names: Montessori
+  - given-names: Simone
+    family-names: Melchionna
+  - given-names: Fabio
+    family-names: Sterpone
