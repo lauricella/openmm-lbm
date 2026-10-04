@@ -1,0 +1,14 @@
+name: build
+channels:
+  - conda-forge
+dependencies:
+  # The conda-forge OpenMM HIP platform links ROCm 6 (libamdhip64.so.6), hence HIP 6.3.
+  - cmake
+  - cxx-compiler
+  - hip-devel 6.3.*
+  - hip-runtime-amd 6.3.*
+  - hipcc 6.3.*
+  - make
+  - openmm 8.6.*
+  - python
+  - rocm-device-libs

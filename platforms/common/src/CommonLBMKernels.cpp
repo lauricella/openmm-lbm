@@ -19,6 +19,22 @@ using namespace LBMPlugin;
 using namespace OpenMM;
 using namespace std;
 
+/**
+ * Download an array of floats or doubles into a vector of doubles.  ComputeArray::download() converts
+ * types only from OpenMM 8.4, and the plugin supports OpenMM 8.3.
+ */
+static void downloadAsDouble(const ComputeArray& array, vector<double>& data) {
+    data.resize(array.getSize());
+    if (array.getElementSize() == sizeof(double))
+        array.download(data.data());
+    else {
+        vector<float> values(array.getSize());
+        array.download(values.data());
+        for (size_t i = 0; i < values.size(); i++)
+            data[i] = values[i];
+    }
+}
+
 void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& force, const LBMLatticeParameters& lattice) {
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
@@ -69,8 +85,8 @@ void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<doubl
     int numNodes = lattice.getNumNodes();
     computeMomentsKernel->execute(numNodes);
     vector<double> rho, j;
-    this->density.download(rho, true);
-    momentum.download(j, true);
+    downloadAsDouble(this->density, rho);
+    downloadAsDouble(momentum, j);
     double velocityScale = lattice.getVelocityScale();
     density.resize(numNodes);
     velocity.resize(numNodes);
@@ -82,7 +98,7 @@ void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<doubl
 
 void CommonCalcLBMForceKernel::getFluidState(ContextImpl& context, vector<double>& state) {
     ContextSelector selector(cc);
-    populations.download(state, true);
+    downloadAsDouble(populations, state);
 }
 
 void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<double>& state) {
