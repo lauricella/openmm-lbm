@@ -47,11 +47,19 @@ reproducible and understandable by someone who arrives without any prior context
 - **Reference values** (smoke tests, single-particle drag and finite-size mobility, …) live in a versioned file, with tolerances and provenance.
 - **Continuous integration.** GitHub CI runs Reference and OpenCL on CPU. GPU tests are run on a GPU machine, and their outcome is recorded (machine, date, version).
 
+## Supported OpenMM versions
+
+- **Supported range: OpenMM 8.3 to 8.6.** The range is declared in `README.md`, and CMake stops with an error below the minimum. The minimum is 8.3 because the plugin uses `ComputeSort`, which entered the OpenMM common compute layer in 8.3.0.
+- **What "supported" means.** A compiled plugin is tied to the OpenMM version it was built against. "Supported" therefore means that the plugin builds, and passes all tests, against every minor version in the range.
+- **Test matrix.** Continuous integration builds and tests against every minor version in the range (Reference and OpenCL on CPU). GPU tests run on the minimum and on the maximum version.
+- **New OpenMM releases** are added to the test matrix and, once the tests pass, to the supported range.
+- **Raising the minimum** requires a written reason, recorded in `CHANGELOG.md`.
+
 ## Determinism and portability
 
 - **No atomic operations in the plugin kernels.** Per-cell sums use sorting with unique keys followed by segmented reductions. Given the same input and seed, results are bitwise identical on the same device. Tests use fixed seeds.
 - **Portable kernels.** They are written only in the OpenMM common compute dialect (`platforms/common/src/kernels/*.cc`). No CUDA-specific code is allowed outside the kernel factories.
-- **Dependencies.** OpenMM >= 8.3 (needed for `ComputeSort` in the common layer), CMake, SWIG and Python only. No thrust or CUB.
+- **Dependencies.** OpenMM in the supported range (see above), CMake, SWIG and Python only. No thrust or CUB.
 
 ## Licensing and code provenance
 
