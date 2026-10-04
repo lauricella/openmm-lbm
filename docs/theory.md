@@ -81,7 +81,8 @@ same step (for example `getState(getForces=True)`) reuse the forces already comp
 ## 3. Units and conversions (implemented)
 
 The public API uses OpenMM units: nm, ps, Da (g/mol), K and kJ/mol. Internally the plugin works in
-lattice units. The conversion is computed in one place, `LBMForceImpl::computeLatticeParameters()`:
+lattice units only, as is usual for lattice Boltzmann [7]. The conversion is computed in one place,
+`LBMForceImpl::computeLatticeParameters()`:
 
 | Quantity | Lattice unit | OpenMM value |
 |---|---|---|
@@ -119,6 +120,19 @@ m_c. There are two interface differences:
   integrator and the System.
 - Its body force argument is a force per cell divided by the density, that is g dx^3 for an
   acceleration g. openmm-lbm takes the acceleration g directly.
+
+**The time step is set by the molecular dynamics.** In a stand-alone LB simulation dt is a numerical
+parameter, chosen to keep the Mach number small [7]. Here the fluid advances once per integrator step,
+so dt is the step size of OpenMM. Viscosity and resolution are therefore coupled: tau - 1/2 =
+3 nu dt/dx^2. With dt = 0.01 ps:
+
+| dx | water, nu = 1.0035 nm^2/ps | 5 x water |
+|---|---|---|
+| 0.5 nm | tau = 0.62 | tau = 1.10 |
+| 0.25 nm | tau = 0.98 | tau = 2.91 |
+
+Typical velocities are far below the lattice sound speed. A 100 Da bead at 298 K has Ma = 5e-3, so
+the fluid is in the quasi-incompressible regime for which the model is accurate.
 
 **Nearest node.** Lattice node (i, j, k) sits at (i dx, j dx, k dx). A particle at x belongs to the
 node i = round(x/dx) mod n, after wrapping x into the box. Node i therefore owns the interval
@@ -174,3 +188,4 @@ resolution about 1e-7 on populations of order 0.05), so `mixed` is recommended f
 4. LBFAST, arXiv:2609.09160 (2026), eq. 3.
 5. P. Ahlrichs and B. Dünweg, J. Chem. Phys. 111, 8225 (1999): frictional particle-fluid coupling.
 6. B. Dünweg and A. J. C. Ladd, Adv. Polym. Sci. 221, 89 (2009): review of lattice Boltzmann for soft matter.
+7. J. Latt, Choice of units in lattice Boltzmann simulations, LBMethod.org (2008).
