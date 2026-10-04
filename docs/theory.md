@@ -68,6 +68,13 @@ atomic operations:
 
 The result is bitwise reproducible.
 
+**Momentum removal.** When it is enabled, on the steps that are multiples of the removal
+frequency, the momentum of the fluid is removed right after the moments are computed and before the
+coupling. The plugin sums rho and j over the lattice, computes u_cm = sum(j)/sum(rho) and applies
+j <- j - rho u_cm at every node; Pi^neq is left unchanged. The populations are then rebuilt from
+the corrected moments by the collision. The sums use two-stage reductions without atomic
+operations.
+
 **Fluid update.** The fluid is advanced once per time step. Further force evaluations within the
 same step (for example `getState(getForces=True)`) reuse the forces already computed.
 
@@ -86,6 +93,36 @@ lattice units. The conversion is computed in one place, `LBMForceImpl::computeLa
 | acceleration | dx/dt^2 | g_lattice = g dt^2/dx |
 | force on a cell | m_c dx/dt^2 | F_lattice = F dt^2/(m_c dx) |
 | kinematic viscosity | dx^2/dt | tau = 3 nu dt/dx^2 + 1/2 > 1/2 |
+| particle mass | m_c | m_lattice = m/m_c, with m from the System |
+| friction (to be implemented) | 1/dt | gamma_lattice = gamma dt |
+| thermal energy (to be implemented) | m_c dx^2/dt^2 | kT_lattice = kT dt^2/(m_c dx^2) |
+
+With these units the drag and the noise keep their form on the lattice (time step 1):
+F_lattice = -gamma_lattice m_lattice (v_lattice - u_lattice) + sqrt(2 gamma_lattice m_lattice
+kT_lattice) xi. This is the physical force times dt^2/(m_c dx), as it must be. Forces return to
+OpenMM multiplied by m_c dx/dt^2, in Da nm/ps^2 = kJ/mol/nm.
+
+**Example** (water-like fluid used for the SOD1 runs):
+
+- rho0 = 602.2 Da/nm^3, nu = 5.0175 nm^2/ps, box 15 nm with 30 nodes, dt = 0.01 ps;
+- this gives dx = 0.5 nm, m_c = 75.275 Da and tau = 1.1021;
+- the velocity unit is 50 nm/ps (lattice sound speed 28.9 nm/ps) and the force unit is
+  3.764e5 kJ/mol/nm;
+- at T = 298 K, kT_lattice = 1.3166e-5;
+- gamma = 5 /ps gives gamma_lattice = 0.05.
+
+**Correspondence with the reference implementation.** These conversions coincide with those of the
+CUDA lattice Boltzmann plugin of the DragOpenMM project, which uses the same base units dx, dt and
+m_c. There are two interface differences:
+
+- That plugin takes dt and the box from explicit arguments. openmm-lbm reads them from the
+  integrator and the System.
+- Its body force argument is a force per cell divided by the density, that is g dx^3 for an
+  acceleration g. openmm-lbm takes the acceleration g directly.
+
+**Nearest node.** Lattice node (i, j, k) sits at (i dx, j dx, k dx). A particle at x belongs to the
+node i = round(x/dx) mod n, after wrapping x into the box. Node i therefore owns the interval
+[(i - 1/2) dx, (i + 1/2) dx).
 
 The thermal energy is kT = k_B T with k_B = `BOLTZ` of OpenMM, in kJ/mol. The body force on the
 fluid is set as an acceleration (`setBodyAcceleration()`); the force density on a node is
