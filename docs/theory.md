@@ -180,6 +180,41 @@ The Reference platform always uses double precision.
 Weak uniform forces and the conservation of momentum are limited by single precision (relative
 resolution about 1e-7 on populations of order 0.05), so `mixed` is recommended for production.
 
+## 6. Stability checks (to be implemented)
+
+The model is accurate only in the quasi-incompressible regime and for relaxation times in a moderate
+range. The plugin checks both.
+
+**At Context creation.**
+- A relaxation time tau <= 1/2 is an error, as it is today.
+- A warning is printed on stderr if tau is outside [0.505, 2], the range used by the reference
+  implementation.
+
+**During the simulation.**
+- Every N steps the plugin computes the largest Mach number of the fluid, Ma = max |u|/c_s, with
+  u = j/rho and c_s = 1/sqrt(3) in lattice units.
+- N is set with `setMachCheckFrequency()`; the default is 100 and 0 disables the check.
+- If Ma exceeds the limit set with `setMachNumberLimit()` (default 0.3), the plugin throws an
+  `OpenMMException` that reports the step and the value.
+- `getFluidMachNumber(context)` returns the current value, for monitoring.
+- The reduction has two stages and no atomic operations, like the removal of the fluid momentum.
+
+**Why 0.3.** It is the usual limit of the incompressible approximation: density fluctuations scale
+as Ma^2, about 9% at Ma = 0.3. In addition, the second-order equilibrium of D3Q19 lacks the u^3
+terms, so the viscous stress has an error of order Ma^3, and the stability margin shrinks quickly
+as tau approaches 1/2. Beyond 0.3 the state is no longer physical, so the simulation is stopped.
+In the target applications Ma is between 1e-3 and 1e-2: a 100 Da particle at 298 K with dx = 0.5 nm
+and dt = 0.01 ps gives Ma = 5e-3.
+
+**Debug builds** (CMake option `-DLBM_DEBUG=ON`, which defines the macro `LBM_DEBUG`):
+- a warning is printed on stderr the first time Ma exceeds 0.1, where the accuracy starts to degrade;
+- the lattice parameters are printed when a Context is created: dx, dt, m_c, tau,
+  kT/(m_c c_s^2).
+
+**Lattice parameters.** `getLatticeParametersInContext(context, dx, dt, tau)` returns the lattice
+spacing, the lattice time step and the relaxation time, in the style of
+`NonbondedForce::getPMEParametersInContext()`.
+
 ## References
 
 1. J. Latt and B. Chopard, Math. Comput. Simul. 72, 165 (2006): regularized collision.
