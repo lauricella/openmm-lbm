@@ -1,0 +1,162 @@
+# Getting started
+
+This page checks the installation, runs a first simulation with a lattice Boltzmann fluid and explains
+each step. The [lattice](lattice.md) page explains how to choose the parameters, and the
+[API reference](api_reference.md) describes every method.
+
+## Checking the installation
+
+Build and install the plugin as described in the [README](../../README.md#building). The module
+`openmmlbm` must then import in the same Python environment as OpenMM:
+
+```python
+import openmm as mm
+from openmmlbm import LBMForce
+
+system = mm.System()
+system.addForce(LBMForce())
+print('openmm-lbm is installed, OpenMM', mm.Platform.getOpenMMVersion())
+print('platforms:', [mm.Platform.getPlatform(i).getName() for i in range(mm.Platform.getNumPlatforms())])
+```
+
+If `addForce()` fails with a `TypeError`, the Python wrapper of the plugin was generated with a
+different SWIG version from the OpenMM Python module (see [troubleshooting](troubleshooting.md)).
+
+## A first simulation
+
+The script below fills a periodic box with fluid, pushes the fluid with a uniform acceleration for
+1 ps and reads back its density and velocity.
+
+```python
+import numpy as np
+import openmm as mm
+import openmm.unit as unit
+from openmmlbm import LBMForce
+
+# A periodic box of 4 x 4 x 4 nm with one particle (OpenMM needs at least one particle).
+system = mm.System()
+system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 4, 0), mm.Vec3(0, 0, 4))
+system.addParticle(100.0)
+
+# The fluid: 8 x 8 x 8 lattice nodes span the box, so the lattice spacing is 0.5 nm.
+force = LBMForce()
+force.setGridSize(8, 8, 8)
+force.setFluidDensity(602.214*unit.dalton/unit.nanometer**3)          # water
+force.setKinematicViscosity(1.0035*unit.nanometer**2/unit.picosecond)  # water at 20 C
+force.setBodyAcceleration(mm.Vec3(0.05, 0, 0)*unit.nanometer/unit.picosecond**2)
+force.setFluidMomentumRemovalFrequency(0)  # keep the momentum given by the acceleration
+system.addForce(force)
+
+# The step size of the integrator is the time step of the lattice.
+integrator = mm.VerletIntegrator(0.01*unit.picosecond)
+context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+context.setPositions([mm.Vec3(1, 1, 1)])
+
+dx, dt, tau = force.getLatticeParametersInContext(context)
+print('dx =', dx, ' dt =', dt, ' tau = %.4f' % tau)
+
+integrator.step(100)                       # 100 lattice steps: 1 ps
+
+density, velocity = force.getFluidFields(context)
+rho = np.array(density.value_in_unit(unit.dalton/unit.nanometer**3))     # shape (512,)
+u = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))     # shape (512, 3)
+print('mean density  %.3f Da/nm^3' % rho.mean())
+print('mean velocity', u.mean(axis=0), 'nm/ps')
+print('Mach number   %.5f' % force.getFluidMachNumber(context))
+```
+
+Output:
+
+```
+dx = 0.5 nm  dt = 0.01 ps  tau = 0.6204
+mean density  602.214 Da/nm^3
+mean velocity [0.05025 0.      0.     ] nm/ps
+Mach number   0.00173
+```
+
+### What each part does
+
+**The box defines the lattice.** The fluid fills the periodic box of the System. `setGridSize(nx, ny,
+nz)` sets the number of lattice nodes along each box vector. The box must be rectangular and the
+lattice cells must be cubic: the lattice spacing dx = Lx/nx must equal Ly/ny and Lz/nz. Here
+dx = 4 nm/8 = 0.5 nm.
+
+**The fluid has a density and a kinematic viscosity.** The defaults are those of water:
+602.214 Da/nm^3 (1 g/cm^3) and 1.0035 nm^2/ps (1.0035e-6 m^2/s, water at 20 C).
+
+**The integrator sets the lattice time step.** `LBMForce` requires a `VerletIntegrator`; any other
+integrator is rejected when the Context is created. The step size of the integrator is the lattice
+time step dt, and it cannot change after the Context has been created. Together, dx, dt and the
+viscosity fix the relaxation time tau = 3 nu dt/dx^2 + 1/2 of the model, returned by
+`getLatticeParametersInContext()`. The [lattice](lattice.md) page explains how to choose them.
+
+**The fluid starts at rest, at equilibrium.** A new Context starts the fluid at uniform density and at
+the velocity set by `setInitialFluidVelocity()`, zero by default.
+
+**The fluid advances once per integration step.** `integrator.step(100)` advances the fluid by 100
+lattice steps. Reading the fluid, computing forces or energies with `context.getState()`, or
+minimizing the energy does not advance it.
+
+**The body acceleration pushes the fluid.** A uniform acceleration g acts on every fluid node as the
+force density rho g. The default removal of the fluid momentum (every step) would cancel its effect,
+so this example disables it with `setFluidMomentumRemovalFrequency(0)`.
+
+**Reading the fluid.** `getFluidFields(context)` returns the density and the velocity at every
+lattice node, as two lists with units. The velocity is that of the forced fluid, u = j/rho + g dt/2,
+where j is the momentum density on the lattice. After 1 ps it is g (t + dt/2) = 0.05 x 1.005 =
+0.05025 nm/ps. The [lattice](lattice.md#node-indexing-and-numpy-arrays) page shows how to arrange the
+lists as three-dimensional NumPy arrays.
+
+**The Mach number measures the fluid speed against the lattice sound speed.** The model is accurate
+only for small Mach numbers. The plugin checks the Mach number every 100 steps and stops the
+simulation if it exceeds 0.3 (see [stability](lattice.md#mach-number-and-stability)).
+
+## Units
+
+All methods use OpenMM units: nm, ps, Da (g/mol), K and kJ/mol. A setter accepts either a plain number
+in these units or a `Quantity` in any compatible unit, which is converted:
+
+```python
+import openmm as mm
+import openmm.unit as unit
+from openmmlbm import LBMForce
+
+force = LBMForce()
+force.setKinematicViscosity(1.0035e-6*unit.meter**2/unit.second)       # stored as 1.0035 nm^2/ps
+force.setBodyAcceleration(mm.Vec3(1e15, 0, 0)*unit.meter/unit.second**2)  # stored as 1 nm/ps^2
+print(force.getKinematicViscosity(), force.getBodyAcceleration())
+```
+
+Getters return `Quantity` objects, as the methods of OpenMM forces do.
+
+**Densities are per mole.** In OpenMM a mass is a molar mass: the dalton is 1 g/mol. A density in
+g/cm^3 must therefore be multiplied by the Avogadro constant, otherwise it is off by a factor of
+6.022e23:
+
+```python
+import openmm.unit as unit
+from openmmlbm import LBMForce
+
+force = LBMForce()
+force.setFluidDensity(1.0*unit.gram/unit.centimeter**3*unit.AVOGADRO_CONSTANT_NA)
+print(force.getFluidDensity())    # 602.214... Da/nm^3
+```
+
+## Platforms
+
+The fluid update and the solid nodes are implemented on the Reference platform in this version. On
+the CUDA, OpenCL and HIP platforms the fluid is stored and can be read, written and checked, but it does
+not advance yet, and solid nodes are rejected (see the [status table](README.md#what-works-in-this-version)).
+On those platforms the fluid is stored in the "mixed" type of the platform:
+
+- single precision with `Precision` = `single`;
+- double precision with `mixed` and `double`.
+
+`mixed` is recommended for production.
+
+## Next steps
+
+- [The lattice](lattice.md): geometry, units, choice of the parameters, stability.
+- [Examples](examples.md): a channel between two walls, monitoring, restarts, serialization,
+  `openmm.app.Simulation`.
+- [API reference](api_reference.md): every method of `LBMForce`.

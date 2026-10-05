@@ -77,6 +77,9 @@ The state of the fluid is not part of OpenMM checkpoints: save and restore it wi
 
 ## Documentation
 
+- [docs/user_guide/](docs/user_guide/README.md): user guide. How to use the plugin from Python with
+  OpenMM: every method of `LBMForce` explained, how to choose the lattice parameters, and complete
+  examples (channel flow between walls, monitoring, restarts, serialization, `openmm.app.Simulation`).
 - [docs/theory.md](docs/theory.md): model, units and conventions.
 - [docs/architecture.md](docs/architecture.md): structure of the code.
 - [docs/validation.md](docs/validation.md): tests, tolerances and measured values.

@@ -35,6 +35,9 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
 - Fluid tests (`tests/TestLBMFluid.h`): steady uniform flow, conservation of mass and momentum, body
   force at lattice densities 0.98, 1 and 1.02, timing of the momentum removal, viscosity from the decay
   of a shear wave, queries that must not advance the fluid. See `docs/validation.md`.
+- User guide (`docs/user_guide/`): getting started, the lattice and the choice of the parameters, a
+  reference of every method of `LBMForce`, complete Python examples and troubleshooting.
+  `devtools/check_user_guide.py` runs every example on the Reference platform and checks its output.
 
 ### Not yet implemented
 - Fluid update and solid nodes on the CUDA, OpenCL and HIP platforms.
