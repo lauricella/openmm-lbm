@@ -84,11 +84,11 @@ The state of the fluid is not part of OpenMM checkpoints: save and restore it wi
 
 ## Authors
 
-- Luis Coronas, Institut de Biologie Physico-Chimique (IBPC), CNRS, Paris, France
+- Luis Coronas, Laboratoire de Biochimie Théorique, Institut de Biologie Physico-Chimique (IBPC), CNRS, Paris, France
 - Marco Lauricella, Istituto per le Applicazioni del Calcolo "Mauro Picone" (IAC), Consiglio Nazionale delle Ricerche (CNR), Rome, Italy
-- Andrea Montessori, Department of Civil Engineering, Roma Tre University, Rome, Italy
+- Andrea Montessori, Department of Civil, Computer Science and Aeronautical Technologies Engineering, Roma Tre University, Rome, Italy
 - Simone Melchionna, Istituto per le Applicazioni del Calcolo "Mauro Picone" (IAC), Consiglio Nazionale delle Ricerche (CNR), Rome, Italy
-- Fabio Sterpone, Institut de Biologie Physico-Chimique (IBPC), CNRS, Paris, France
+- Fabio Sterpone, Laboratoire de Biochimie Théorique, Institut de Biologie Physico-Chimique (IBPC), CNRS, Paris, France
 
 ## License
 
