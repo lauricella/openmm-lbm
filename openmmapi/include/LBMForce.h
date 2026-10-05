@@ -240,9 +240,12 @@ public:
      */
     void getLatticeParametersInContext(const OpenMM::Context& context, double& dx, double& dt, double& tau) const;
     /**
-     * Update the friction, temperature and body acceleration in a Context to match those stored in
-     * this Force object.  The grid, the fluid density and viscosity and the set of coupled particles
-     * cannot be changed this way.
+     * Update the parameters of a Context to match those stored in this Force object: the friction,
+     * the temperature, the body acceleration, the frequency of the removal of the fluid momentum, and the
+     * frequency and limit of the Mach number check.  The grid, the fluid density and viscosity, the solid
+     * nodes and the set of coupled particles cannot be changed this way, and an exception is thrown if
+     * they differ.  The initial fluid velocity and the random number seed are used only when a Context
+     * is created.  The fluid itself is not modified.
      */
     void updateParametersInContext(OpenMM::Context& context);
     /**

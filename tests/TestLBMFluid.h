@@ -300,6 +300,64 @@ void testRestartFromCheckpoint(Platform& platform) {
 }
 
 /**
+ * updateParametersInContext() changes the body acceleration, the removal of the fluid momentum and the Mach
+ * number check of an existing Context, and rejects a change of the viscosity.
+ */
+void testUpdateParameters(Platform& platform) {
+    LBMForce* force;
+    System* system = createFluidSystem(force, 4, 4, 4, 0.8);
+    force->setBodyAcceleration(Vec3(0.5, 0, 0));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    vector<double> state;
+    double mass;
+    Vec3 p;
+    integrator.step(5);
+    force->getFluidState(context, state);
+    totalMoments(state, mass, p);
+    ASSERT(p[0] > 1e-6);
+
+    // No acceleration and removal at every step: the fluid stops.
+    force->setBodyAcceleration(Vec3());
+    force->setFluidMomentumRemovalFrequency(1);
+    force->updateParametersInContext(context);
+    integrator.step(1);
+    force->getFluidState(context, state);
+    totalMoments(state, mass, p);
+    ASSERT_EQUAL_VEC(Vec3(), p, 1e-13);
+
+    // A Mach number limit below the current Mach number, checked at every step.
+    force->setBodyAcceleration(Vec3(0.5, 0, 0));
+    force->setFluidMomentumRemovalFrequency(0);
+    force->updateParametersInContext(context);
+    integrator.step(5);
+    force->setMachCheckFrequency(1);
+    force->setMachNumberLimit(0.5*force->getFluidMachNumber(context));
+    force->updateParametersInContext(context);
+    bool thrown = false;
+    try {
+        integrator.step(1);
+    }
+    catch (const OpenMMException& e) {
+        thrown = (string(e.what()).find("Mach number") != string::npos);
+    }
+    ASSERT(thrown);
+
+    // The viscosity is fixed when the Context is created.
+    force->setKinematicViscosity(2.0*force->getKinematicViscosity());
+    thrown = false;
+    try {
+        force->updateParametersInContext(context);
+    }
+    catch (const OpenMMException& e) {
+        thrown = (string(e.what()).find("cannot be changed") != string::npos);
+    }
+    ASSERT(thrown);
+    delete system;
+}
+
+/**
  * The Mach number of the fluid is checked every N steps: above the limit the step throws an exception.
  */
 void testMachNumberCheck(Platform& platform) {
@@ -501,6 +559,7 @@ void runFluidTests(Platform& platform) {
     testShearWaveViscosity(platform, 1.5);
     testQueriesDoNotAdvanceFluid(platform);
     testRestartFromCheckpoint(platform);
+    testUpdateParameters(platform);
     testMachNumberCheck(platform);
     testLatticeParameters(platform);
     testRelaxationTimeWarning(platform);
