@@ -25,6 +25,11 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   with Guo forcing (prefactor 1/2) and push streaming, with the conventions of the reference library.
   The fluid advances once per integration step, triggered by `updateContextState()`; other force
   evaluations do not advance it.
+- Stability checks (`docs/theory.md`, section 6): Mach number of the fluid checked every N steps
+  (`setMachCheckFrequency()`, default 100) against a limit (`setMachNumberLimit()`, default 0.3), with an
+  exception above it; `getFluidMachNumber()`; warning at Context creation for tau outside [0.505, 2];
+  `getLatticeParametersInContext()`; CMake option `LBM_DEBUG` for debug diagnostics. Serialization
+  version 2 stores the new parameters and still reads version 1.
 - Fluid tests (`tests/TestLBMFluid.h`): steady uniform flow, conservation of mass and momentum, body
   force at lattice densities 0.98, 1 and 1.02, timing of the momentum removal, viscosity from the decay
   of a shear wave, queries that must not advance the fluid. See `docs/validation.md`.
@@ -32,4 +37,3 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
 ### Not yet implemented
 - Fluid update on the CUDA, OpenCL and HIP platforms.
 - Particle-fluid coupling: `LBMForce` applies no force in this version.
-- Stability checks (Mach number, tau range).

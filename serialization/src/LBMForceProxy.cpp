@@ -20,7 +20,7 @@ LBMForceProxy::LBMForceProxy() : SerializationProxy("LBMForce") {
 }
 
 void LBMForceProxy::serialize(const void* object, SerializationNode& node) const {
-    node.setIntProperty("version", 1);
+    node.setIntProperty("version", 2);
     const LBMForce& force = *reinterpret_cast<const LBMForce*>(object);
     node.setIntProperty("forceGroup", force.getForceGroup());
     node.setStringProperty("name", force.getName());
@@ -35,6 +35,8 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     node.setDoubleProperty("temperature", force.getTemperature());
     node.setIntProperty("randomSeed", force.getRandomNumberSeed());
     node.setIntProperty("momentumRemovalFrequency", force.getFluidMomentumRemovalFrequency());
+    node.setIntProperty("machCheckFrequency", force.getMachCheckFrequency());
+    node.setDoubleProperty("machNumberLimit", force.getMachNumberLimit());
     Vec3 g = force.getBodyAcceleration();
     node.createChildNode("BodyAcceleration").setDoubleProperty("x", g[0]).setDoubleProperty("y", g[1]).setDoubleProperty("z", g[2]);
     Vec3 u = force.getInitialFluidVelocity();
@@ -45,7 +47,8 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
 }
 
 void* LBMForceProxy::deserialize(const SerializationNode& node) const {
-    if (node.getIntProperty("version") != 1)
+    int version = node.getIntProperty("version");
+    if (version < 1 || version > 2)
         throw OpenMMException("Unsupported version number");
     LBMForce* force = new LBMForce();
     try {
@@ -58,6 +61,10 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
         force->setTemperature(node.getDoubleProperty("temperature"));
         force->setRandomNumberSeed(node.getIntProperty("randomSeed"));
         force->setFluidMomentumRemovalFrequency(node.getIntProperty("momentumRemovalFrequency"));
+        if (version >= 2) {
+            force->setMachCheckFrequency(node.getIntProperty("machCheckFrequency"));
+            force->setMachNumberLimit(node.getDoubleProperty("machNumberLimit"));
+        }
         const SerializationNode& g = node.getChildNode("BodyAcceleration");
         force->setBodyAcceleration(Vec3(g.getDoubleProperty("x"), g.getDoubleProperty("y"), g.getDoubleProperty("z")));
         const SerializationNode& u = node.getChildNode("InitialFluidVelocity");

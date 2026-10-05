@@ -14,6 +14,7 @@
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/reference/SimTKOpenMMRealType.h"
 #include <cmath>
+#include <iostream>
 #include <set>
 #include <sstream>
 
@@ -73,6 +74,12 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
         throw OpenMMException("LBMForce: the temperature must not be negative");
     if (force.getFluidMomentumRemovalFrequency() < 0)
         throw OpenMMException("LBMForce: the fluid momentum removal frequency must not be negative");
+    if (force.getMachCheckFrequency() < 0)
+        throw OpenMMException("LBMForce: the Mach number check frequency must not be negative");
+    if (force.getMachNumberLimit() <= 0)
+        throw OpenMMException("LBMForce: the Mach number limit must be positive");
+    lattice.machCheckFrequency = force.getMachCheckFrequency();
+    lattice.machNumberLimit = force.getMachNumberLimit();
     lattice.friction = force.getFriction();
     lattice.kT = BOLTZ*force.getTemperature();
     lattice.randomNumberSeed = force.getRandomNumberSeed();
@@ -97,6 +104,19 @@ void LBMForceImpl::initialize(ContextImpl& context) {
     if (dynamic_cast<const VerletIntegrator*>(&context.getIntegrator()) == NULL)
         throw OpenMMException("LBMForce requires a VerletIntegrator: drag and random forces are part of the force");
     lattice = computeLatticeParameters(owner, context.getSystem(), context.getIntegrator().getStepSize());
+
+    // The model is accurate for moderate relaxation times (docs/theory.md, section 6).
+
+    if (lattice.tau < 0.505 || lattice.tau > 2.0)
+        cerr << "Warning: LBMForce: the relaxation time tau = " << lattice.tau << " is outside the range [0.505, 2] "
+             << "in which the lattice Boltzmann model is accurate. tau = 3 nu dt/dx^2 + 1/2: change the viscosity, "
+             << "the time step or the lattice spacing." << endl;
+#ifdef LBM_DEBUG
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    cerr << "LBMForce lattice: dx = " << lattice.dx << " nm, dt = " << lattice.dt << " ps, m_c = " << cellMass
+         << " Da, tau = " << lattice.tau << ", kT/(m_c c_s^2) = "
+         << 3.0*lattice.kT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx) << endl;
+#endif
     kernel = context.getPlatform().createKernel(CalcLBMForceKernel::Name(), context);
     kernel.getAs<CalcLBMForceKernel>().initialize(context.getSystem(), owner, lattice);
 }
@@ -142,4 +162,14 @@ void LBMForceImpl::getFluidState(ContextImpl& context, vector<double>& state) {
 
 void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& state) {
     kernel.getAs<CalcLBMForceKernel>().setFluidState(context, state);
+}
+
+double LBMForceImpl::getFluidMachNumber(ContextImpl& context) {
+    return kernel.getAs<CalcLBMForceKernel>().getFluidMachNumber(context);
+}
+
+void LBMForceImpl::getLatticeParameters(double& dx, double& dt, double& tau) const {
+    dx = lattice.dx;
+    dt = lattice.dt;
+    tau = lattice.tau;
 }

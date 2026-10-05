@@ -13,6 +13,8 @@
 #include "openmm/OpenMMException.h"
 #include "openmm/common/ContextSelector.h"
 #include "openmm/internal/ContextImpl.h"
+#include <algorithm>
+#include <cmath>
 #include <map>
 
 using namespace LBMPlugin;
@@ -99,6 +101,23 @@ void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<doubl
         density[node] = rho[node]*lattice.density;
         velocity[node] = Vec3(j[node], j[numNodes+node], j[2*numNodes+node])*(velocityScale/rho[node]);
     }
+}
+
+double CommonCalcLBMForceKernel::getFluidMachNumber(ContextImpl& context) {
+    // The maximum is taken on the host for now; the periodic check during the simulation will use a
+    // two-stage reduction on the device when the fluid update is ported to this platform.
+    ContextSelector selector(cc);
+    int numNodes = lattice.getNumNodes();
+    computeMomentsKernel->execute(numNodes);
+    vector<double> rho, j;
+    downloadAsDouble(this->density, rho);
+    downloadAsDouble(momentum, j);
+    double maxSpeed2 = 0;
+    for (int node = 0; node < numNodes; node++) {
+        double jx = j[node], jy = j[numNodes+node], jz = j[2*numNodes+node];
+        maxSpeed2 = max(maxSpeed2, (jx*jx + jy*jy + jz*jz)/(rho[node]*rho[node]));
+    }
+    return sqrt(3.0*maxSpeed2);
 }
 
 void CommonCalcLBMForceKernel::getFluidState(ContextImpl& context, vector<double>& state) {

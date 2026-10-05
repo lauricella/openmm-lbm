@@ -29,13 +29,14 @@ namespace LBMPlugin {
 class ReferenceCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     ReferenceCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform) : CalcLBMForceKernel(name, platform),
-            stepPending(false), stepIndex(0) {
+            stepPending(false), stepIndex(0), machWarningPrinted(false) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
     double execute(OpenMM::ContextImpl& context, bool includeForces, bool includeEnergy);
     void copyParametersToContext(OpenMM::ContextImpl& context, const LBMLatticeParameters& lattice);
     void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity);
+    double getFluidMachNumber(OpenMM::ContextImpl& context);
     void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
 private:
@@ -43,6 +44,8 @@ private:
     void computeMoments();
     void removeFluidMomentum();
     void collideAndStream();
+    void checkMachNumber();
+    double computeMachNumber() const;
     LBMLatticeParameters lattice;
     /** Populations, stored as f[q*numNodes + node]. */
     std::vector<double> populations;
@@ -53,6 +56,8 @@ private:
     bool stepPending;
     /** Number of lattice steps taken so far. */
     long long stepIndex;
+    /** True once the debug warning about the Mach number has been printed. */
+    bool machWarningPrinted;
 };
 
 } // namespace LBMPlugin

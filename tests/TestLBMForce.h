@@ -88,6 +88,12 @@ void testParameters() {
     ASSERT_EQUAL_VEC(Vec3(0.1, 0.2, 0.3), force.getBodyAcceleration(), 0.0);
     ASSERT_EQUAL_VEC(Vec3(-0.1, 0.0, 0.05), force.getInitialFluidVelocity(), 0.0);
     ASSERT_EQUAL(10, force.getFluidMomentumRemovalFrequency());
+    ASSERT_EQUAL(100, force.getMachCheckFrequency());
+    ASSERT_EQUAL(0.3, force.getMachNumberLimit());
+    force.setMachCheckFrequency(50);
+    force.setMachNumberLimit(0.25);
+    ASSERT_EQUAL(50, force.getMachCheckFrequency());
+    ASSERT_EQUAL(0.25, force.getMachNumberLimit());
     ASSERT_EQUAL(0, force.addParticle(3));
     ASSERT_EQUAL(1, force.addParticle(7));
     ASSERT_EQUAL(2, force.getNumParticles());

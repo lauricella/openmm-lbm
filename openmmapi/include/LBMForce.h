@@ -133,6 +133,26 @@ public:
      */
     void setFluidMomentumRemovalFrequency(int frequency);
     /**
+     * Get the frequency (in time steps) at which the largest Mach number of the fluid is checked.  0
+     * means it is never checked.
+     */
+    int getMachCheckFrequency() const;
+    /**
+     * Set the frequency (in time steps) at which the largest Mach number of the fluid, Ma = max |u|/c_s
+     * over the lattice nodes, is checked.  If it exceeds the limit set with setMachNumberLimit(), the
+     * simulation stops with an exception.  0 means it is never checked.  The default is 100.
+     */
+    void setMachCheckFrequency(int frequency);
+    /**
+     * Get the largest Mach number of the fluid allowed by the check (see setMachCheckFrequency()).
+     */
+    double getMachNumberLimit() const;
+    /**
+     * Set the largest Mach number of the fluid allowed by the check (see setMachCheckFrequency()).
+     * The default is 0.3, the usual limit of the quasi-incompressible regime of the model.
+     */
+    void setMachNumberLimit(double limit);
+    /**
      * Get the number of particles coupled to the fluid.
      */
     int getNumParticles() const {
@@ -186,6 +206,22 @@ public:
      */
     void setFluidState(OpenMM::Context& context, const std::vector<double>& state);
     /**
+     * Get the largest Mach number of the fluid in a Context, Ma = max |u|/c_s over the lattice nodes,
+     * with u = j/rho and c_s = 1/sqrt(3) in lattice units.
+     *
+     * @param context    the Context in which to compute the Mach number
+     */
+    double getFluidMachNumber(OpenMM::Context& context) const;
+    /**
+     * Get the parameters of the lattice used in a Context.
+     *
+     * @param context    the Context for which to get the parameters
+     * @param[out] dx    the lattice spacing, measured in nm
+     * @param[out] dt    the lattice time step (the step size of the integrator), measured in ps
+     * @param[out] tau   the relaxation time, in lattice units
+     */
+    void getLatticeParametersInContext(const OpenMM::Context& context, double& dx, double& dt, double& tau) const;
+    /**
      * Update the friction, temperature and body acceleration in a Context to match those stored in
      * this Force object.  The grid, the fluid density and viscosity and the set of coupled particles
      * cannot be changed this way.
@@ -201,8 +237,8 @@ public:
 protected:
     OpenMM::ForceImpl* createImpl() const;
 private:
-    int nx, ny, nz, randomNumberSeed, momentumRemovalFrequency;
-    double density, viscosity, friction, temperature;
+    int nx, ny, nz, randomNumberSeed, momentumRemovalFrequency, machCheckFrequency;
+    double density, viscosity, friction, temperature, machNumberLimit;
     OpenMM::Vec3 bodyAcceleration, initialVelocity;
     std::vector<int> particles;
 };

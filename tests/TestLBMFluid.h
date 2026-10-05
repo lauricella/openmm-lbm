@@ -259,6 +259,77 @@ void testQueriesDoNotAdvanceFluid(Platform& platform) {
         ASSERT_EQUAL(reference[i], queried[i]);
 }
 
+/**
+ * The Mach number of the fluid is checked every N steps: above the limit the step throws an exception.
+ */
+void testMachNumberCheck(Platform& platform) {
+    double mach = 0.35, speed = mach/sqrt(3.0);      // lattice units
+    for (int variant = 0; variant < 3; variant++) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, 4, 4, 4, 0.8);
+        force->setInitialFluidVelocity(Vec3(speed, 0, 0)*(fluidDx/fluidDt));
+        force->setMachCheckFrequency(variant == 1 ? 0 : 10);
+        if (variant == 2)
+            force->setMachNumberLimit(0.5);
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+        ASSERT_EQUAL_TOL(mach, force->getFluidMachNumber(context), 1e-12);
+        integrator.step(9);
+        bool thrown = false;
+        try {
+            integrator.step(1);
+        }
+        catch (const OpenMMException& e) {
+            thrown = (string(e.what()).find("Mach number") != string::npos);
+        }
+        ASSERT(thrown == (variant == 0));
+        delete system;
+    }
+}
+
+/**
+ * getLatticeParametersInContext() returns the lattice spacing, the time step and the relaxation time.
+ */
+void testLatticeParameters(Platform& platform) {
+    LBMForce* force;
+    System* system = createFluidSystem(force, 4, 6, 8, 0.9);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    double dx, dt, tau;
+    force->getLatticeParametersInContext(context, dx, dt, tau);
+    ASSERT_EQUAL_TOL(fluidDx, dx, 1e-14);
+    ASSERT_EQUAL_TOL(fluidDt, dt, 1e-14);
+    ASSERT_EQUAL_TOL(0.9, tau, 1e-12);
+    delete system;
+}
+
+/**
+ * A warning is printed on stderr when a Context is created with tau outside [0.505, 2].
+ */
+void testRelaxationTimeWarning(Platform& platform) {
+    double taus[] = {0.503, 1.0, 2.2};
+    for (double tau : taus) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, 4, 4, 4, tau);
+        VerletIntegrator integrator(fluidDt);
+        stringstream captured;
+        streambuf* original = cerr.rdbuf(captured.rdbuf());
+        try {
+            Context context(*system, integrator, platform);
+        }
+        catch (...) {
+            cerr.rdbuf(original);
+            throw;
+        }
+        cerr.rdbuf(original);
+        bool warned = (captured.str().find("relaxation time") != string::npos);
+        ASSERT(warned == (tau < 0.505 || tau > 2.0));
+        delete system;
+    }
+}
+
 void runFluidTests(Platform& platform) {
     testUniformFlowIsSteady(platform);
     testFluidConservation(platform);
@@ -270,4 +341,7 @@ void runFluidTests(Platform& platform) {
     testShearWaveViscosity(platform, 1.0);
     testShearWaveViscosity(platform, 1.5);
     testQueriesDoNotAdvanceFluid(platform);
+    testMachNumberCheck(platform);
+    testLatticeParameters(platform);
+    testRelaxationTimeWarning(platform);
 }

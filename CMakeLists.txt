@@ -24,6 +24,13 @@ ENDIF()
 # Specify the C++ version we are building for.
 SET(CMAKE_CXX_STANDARD 17)
 
+# Debug diagnostics of the fluid (docs/theory.md, section 6): warning when the Mach number exceeds 0.1 and
+# lattice parameters printed at Context creation.
+OPTION(LBM_DEBUG "Print debug diagnostics of the lattice Boltzmann fluid" OFF)
+IF(LBM_DEBUG)
+    ADD_DEFINITIONS(-DLBM_DEBUG)
+ENDIF(LBM_DEBUG)
+
 # Set flags for linking on mac
 IF(APPLE)
     SET(CMAKE_INSTALL_NAME_DIR "@rpath")

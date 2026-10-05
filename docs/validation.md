@@ -17,6 +17,9 @@ removal is off unless stated.
 | `testBodyForce` | 4x3x5 nodes, tau = 0.9, uniform lattice density rho0 = 0.98, 1 or 1.02 at rest, body acceleration g, 20 steps | momentum n rho0 g per node (lattice units), density rho0, velocity (n + 1/2) g dt | 1e-13 (momentum), 1e-12 nm/ps (velocity) |
 | `testFluidMomentumRemoval` | 4x4x4 nodes, tau = 1, initial uniform velocity, body force F per node, removal frequency 3 | total momentum ((n-1)%3 + 1) F per node after n = 1...7 steps: removal on step indices 0, 3, 6, before the collision | 1e-13 |
 | `testShearWaveViscosity` | 2x64x2 nodes, u_x = 1e-3 sin(2 pi y/64) in lattice units, tau = 0.6, 1, 1.5; amplitude at steps 200 and 1200 | decay rate nu k^2 with nu = (tau - 1/2)/3 | 2e-3 (relative) |
+| `testMachNumberCheck` | 4x4x4 nodes, uniform flow at Ma = 0.35, check every 10 steps | `getFluidMachNumber()` = 0.35; exception at step 10 with limit 0.3, none with the check off or with limit 0.5 | 1e-12 |
+| `testLatticeParameters` | 4x6x8 nodes, tau = 0.9 | `getLatticeParametersInContext()` returns dx, dt and tau | 1e-12 |
+| `testRelaxationTimeWarning` | tau = 0.503, 1, 2.2 | warning on stderr at Context creation only outside [0.505, 2] | exact |
 | `testQueriesDoNotAdvanceFluid` | 4x4x4 nodes, body force, 10 steps with and without `getState(Forces)`, `getState(Forces, Energy)` and `setVelocitiesToTemperature()` after each step | identical populations | exact |
 
 **Body force at lattice densities different from 1.** The test checks the convention of the weakly
@@ -41,4 +44,3 @@ in one step.
 - Equivalence with the reference CUDA library in double precision, for the fluid and then for the
   coupling (first step of the drag, reaction on the fluid, momentum conservation, co-moving particle,
   mobility of a dragged particle as a function of tau and box size).
-- Stability checks: Mach number limit, tau range.

@@ -58,6 +58,24 @@ def test_fluid_fields_and_state():
     assert abs(forces).max().value_in_unit(unit.kilojoule_per_mole/unit.nanometer) == 0.0
 
 
+def test_mach_number_and_lattice_parameters():
+    system, force, positions = create_system()
+    # box 4 nm on an 8^3 grid: dx = 0.5 nm; with dt = 0.01 ps a lattice speed s is s*50 nm/ps
+    force.setInitialFluidVelocity(mm.Vec3(0.1*50, 0, 0))
+    force.setMachCheckFrequency(0)
+    assert force.getMachCheckFrequency() == 0
+    force.setMachNumberLimit(0.2)
+    assert force.getMachNumberLimit() == 0.2
+    integrator = mm.VerletIntegrator(0.01)
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+    context.setPositions(positions)
+    assert force.getFluidMachNumber(context) == pytest.approx(0.1*3**0.5)
+    dx, dt, tau = force.getLatticeParametersInContext(context)
+    assert dx == 0.5*unit.nanometer
+    assert dt == 0.01*unit.picosecond
+    assert tau == pytest.approx(3*1.0035*0.01/0.25 + 0.5)
+
+
 def test_serialization():
     system, force, positions = create_system()
     force.setFriction(7.0)

@@ -32,6 +32,7 @@ public:
     double execute(OpenMM::ContextImpl& context, bool includeForces, bool includeEnergy);
     void copyParametersToContext(OpenMM::ContextImpl& context, const LBMLatticeParameters& lattice);
     void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity);
+    double getFluidMachNumber(OpenMM::ContextImpl& context);
     void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
 private:

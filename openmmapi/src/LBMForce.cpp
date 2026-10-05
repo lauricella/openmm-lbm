@@ -16,8 +16,8 @@ using namespace LBMPlugin;
 using namespace OpenMM;
 using namespace std;
 
-LBMForce::LBMForce() : nx(0), ny(0), nz(0), randomNumberSeed(0), momentumRemovalFrequency(1),
-        density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0),
+LBMForce::LBMForce() : nx(0), ny(0), nz(0), randomNumberSeed(0), momentumRemovalFrequency(1), machCheckFrequency(100),
+        density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0), machNumberLimit(0.3),
         bodyAcceleration(0, 0, 0), initialVelocity(0, 0, 0) {
 }
 
@@ -97,6 +97,22 @@ void LBMForce::setFluidMomentumRemovalFrequency(int frequency) {
     momentumRemovalFrequency = frequency;
 }
 
+int LBMForce::getMachCheckFrequency() const {
+    return machCheckFrequency;
+}
+
+void LBMForce::setMachCheckFrequency(int frequency) {
+    machCheckFrequency = frequency;
+}
+
+double LBMForce::getMachNumberLimit() const {
+    return machNumberLimit;
+}
+
+void LBMForce::setMachNumberLimit(double limit) {
+    machNumberLimit = limit;
+}
+
 int LBMForce::addParticle(int particle) {
     particles.push_back(particle);
     return particles.size()-1;
@@ -122,6 +138,14 @@ void LBMForce::getFluidState(Context& context, vector<double>& state) const {
 
 void LBMForce::setFluidState(Context& context, const vector<double>& state) {
     dynamic_cast<LBMForceImpl&>(getImplInContext(context)).setFluidState(getContextImpl(context), state);
+}
+
+double LBMForce::getFluidMachNumber(Context& context) const {
+    return dynamic_cast<LBMForceImpl&>(getImplInContext(context)).getFluidMachNumber(getContextImpl(context));
+}
+
+void LBMForce::getLatticeParametersInContext(const Context& context, double& dx, double& dt, double& tau) const {
+    dynamic_cast<const LBMForceImpl&>(getImplInContext(context)).getLatticeParameters(dx, dt, tau);
 }
 
 ForceImpl* LBMForce::createImpl() const {

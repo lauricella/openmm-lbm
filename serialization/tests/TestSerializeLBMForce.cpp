@@ -33,6 +33,8 @@ void testSerialization() {
     force.setTemperature(310.0);
     force.setRandomNumberSeed(123);
     force.setFluidMomentumRemovalFrequency(10);
+    force.setMachCheckFrequency(25);
+    force.setMachNumberLimit(0.2);
     force.setBodyAcceleration(Vec3(0.1, 0.2, 0.3));
     force.setInitialFluidVelocity(Vec3(-0.1, 0.0, 0.05));
     force.addParticle(3);
@@ -62,6 +64,8 @@ void testSerialization() {
     ASSERT_EQUAL(force.getTemperature(), force2.getTemperature());
     ASSERT_EQUAL(force.getRandomNumberSeed(), force2.getRandomNumberSeed());
     ASSERT_EQUAL(force.getFluidMomentumRemovalFrequency(), force2.getFluidMomentumRemovalFrequency());
+    ASSERT_EQUAL(force.getMachCheckFrequency(), force2.getMachCheckFrequency());
+    ASSERT_EQUAL(force.getMachNumberLimit(), force2.getMachNumberLimit());
     ASSERT_EQUAL_VEC(force.getBodyAcceleration(), force2.getBodyAcceleration(), 0.0);
     ASSERT_EQUAL_VEC(force.getInitialFluidVelocity(), force2.getInitialFluidVelocity(), 0.0);
     ASSERT_EQUAL(force.getNumParticles(), force2.getNumParticles());

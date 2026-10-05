@@ -40,6 +40,9 @@ public:
     /** Friction (1/ps) and thermal energy kT (kJ/mol) of the coupling. */
     double friction, kT;
     int randomNumberSeed, momentumRemovalFrequency;
+    /** Frequency (steps) of the Mach number check, 0 to disable, and the largest Mach number allowed. */
+    int machCheckFrequency;
+    double machNumberLimit;
     /** System indices of the coupled particles. */
     std::vector<int> particles;
     int getNumNodes() const {
@@ -97,6 +100,10 @@ public:
      * Get the density (Da/nm^3) and velocity (nm/ps) of the fluid at every node.
      */
     virtual void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity) = 0;
+    /**
+     * Get the largest Mach number of the fluid, max |j/rho|/c_s over the nodes, in lattice units.
+     */
+    virtual double getFluidMachNumber(OpenMM::ContextImpl& context) = 0;
     /**
      * Get the populations of all nodes, in lattice units.
      */

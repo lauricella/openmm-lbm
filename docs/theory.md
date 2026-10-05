@@ -193,7 +193,7 @@ The Reference platform always uses double precision.
 Weak uniform forces and the conservation of momentum are limited by single precision (relative
 resolution about 1e-7 on populations of order 0.05), so `mixed` is recommended for production.
 
-## 6. Stability checks (to be implemented)
+## 6. Stability checks (implemented)
 
 The model is accurate only in the quasi-incompressible regime and for relaxation times in a moderate
 range. The plugin checks both.
@@ -210,7 +210,9 @@ range. The plugin checks both.
 - If Ma exceeds the limit set with `setMachNumberLimit()` (default 0.3), the plugin throws an
   `OpenMMException` that reports the step and the value.
 - `getFluidMachNumber(context)` returns the current value, for monitoring.
-- The reduction has two stages and no atomic operations, like the removal of the fluid momentum.
+- The check runs after the lattice steps whose number is a multiple of N. On the CUDA, OpenCL and HIP
+  platforms it will run when the fluid update is ported there, with a two-stage reduction and no atomic
+  operations, like the removal of the fluid momentum; `getFluidMachNumber()` already works there.
 
 **Why 0.3.** It is the usual limit of the incompressible approximation: density fluctuations scale
 as Ma^2, about 9% at Ma = 0.3. In addition, the second-order equilibrium of D3Q19 lacks the u^3

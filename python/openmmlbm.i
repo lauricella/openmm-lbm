@@ -91,6 +91,9 @@ import openmm.unit as unit
 %pythonappend LBMPlugin::LBMForce::getInitialFluidVelocity() const %{
     val = unit.Quantity(val, unit.nanometer/unit.picosecond)
 %}
+%pythonappend LBMPlugin::LBMForce::getLatticeParametersInContext(const OpenMM::Context& context, double& dx, double& dt, double& tau) const %{
+    val = (unit.Quantity(val[0], unit.nanometer), unit.Quantity(val[1], unit.picosecond), val[2])
+%}
 %pythonappend LBMPlugin::LBMForce::getFluidFields(OpenMM::Context& context) %{
     val = (unit.Quantity(val[0], unit.dalton/unit.nanometer**3), unit.Quantity(val[1], unit.nanometer/unit.picosecond))
 %}
@@ -138,6 +141,10 @@ public:
     void setInitialFluidVelocity(const OpenMM::Vec3& velocity);
     int getFluidMomentumRemovalFrequency() const;
     void setFluidMomentumRemovalFrequency(int frequency);
+    int getMachCheckFrequency() const;
+    void setMachCheckFrequency(int frequency);
+    double getMachNumberLimit() const;
+    void setMachNumberLimit(double limit);
 
     int getNumParticles() const;
     int addParticle(int particle);
@@ -149,6 +156,15 @@ public:
     void getFluidState(OpenMM::Context& context, std::vector<double>& state) const;
     %clear std::vector<double>& state;
     void setFluidState(OpenMM::Context& context, const std::vector<double>& state);
+    double getFluidMachNumber(OpenMM::Context& context) const;
+
+    %apply double& OUTPUT {double& dx};
+    %apply double& OUTPUT {double& dt};
+    %apply double& OUTPUT {double& tau};
+    void getLatticeParametersInContext(const OpenMM::Context& context, double& dx, double& dt, double& tau) const;
+    %clear double& dx;
+    %clear double& dt;
+    %clear double& tau;
 
     void updateParametersInContext(OpenMM::Context& context);
     bool usesPeriodicBoundaryConditions() const;

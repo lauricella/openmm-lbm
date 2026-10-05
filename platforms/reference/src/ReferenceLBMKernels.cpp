@@ -8,6 +8,9 @@
 #include "ReferenceLBMKernels.h"
 #include "internal/D3Q19.h"
 #include "openmm/OpenMMException.h"
+#include <cmath>
+#include <iostream>
+#include <sstream>
 
 using namespace LBMPlugin;
 using namespace OpenMM;
@@ -51,6 +54,26 @@ void ReferenceCalcLBMForceKernel::advanceFluid() {
         removeFluidMomentum();
     collideAndStream();
     stepIndex++;
+    if (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)
+        checkMachNumber();
+}
+
+void ReferenceCalcLBMForceKernel::checkMachNumber() {
+    double mach = computeMachNumber();
+    if (mach > lattice.machNumberLimit) {
+        stringstream msg;
+        msg << "LBMForce: the Mach number of the fluid is " << mach << " after " << stepIndex << " lattice steps, "
+            << "above the limit " << lattice.machNumberLimit << " (docs/theory.md, section 6). Reduce the forces on the "
+            << "fluid, the time step or the friction.";
+        throw OpenMMException(msg.str());
+    }
+#ifdef LBM_DEBUG
+    if (mach > 0.1 && !machWarningPrinted) {
+        cerr << "Warning: LBMForce: the Mach number of the fluid is " << mach << " after " << stepIndex
+             << " lattice steps; the accuracy of the model degrades above 0.1." << endl;
+        machWarningPrinted = true;
+    }
+#endif
 }
 
 void ReferenceCalcLBMForceKernel::computeMoments() {
@@ -149,6 +172,28 @@ void ReferenceCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<do
         density[node] = r*lattice.density;
         velocity[node] = (Vec3(jx, jy, jz)*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
     }
+}
+
+double ReferenceCalcLBMForceKernel::getFluidMachNumber(ContextImpl& context) {
+    return computeMachNumber();
+}
+
+double ReferenceCalcLBMForceKernel::computeMachNumber() const {
+    // Ma = max |j/rho|/c_s, with c_s^2 = 1/3.
+    int numNodes = lattice.getNumNodes();
+    double maxSpeed2 = 0;
+    for (int node = 0; node < numNodes; node++) {
+        double r = 0, jx = 0, jy = 0, jz = 0;
+        for (int q = 0; q < D3Q19::numVelocities; q++) {
+            double f = populations[q*numNodes+node];
+            r += f;
+            jx += D3Q19::cx[q]*f;
+            jy += D3Q19::cy[q]*f;
+            jz += D3Q19::cz[q]*f;
+        }
+        maxSpeed2 = max(maxSpeed2, (jx*jx + jy*jy + jz*jz)/(r*r));
+    }
+    return sqrt(3.0*maxSpeed2);
 }
 
 void ReferenceCalcLBMForceKernel::getFluidState(ContextImpl& context, vector<double>& state) {
