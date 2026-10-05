@@ -94,6 +94,12 @@ void testParameters() {
     force.setMachNumberLimit(0.25);
     ASSERT_EQUAL(50, force.getMachCheckFrequency());
     ASSERT_EQUAL(0.25, force.getMachNumberLimit());
+    vector<int> solid;
+    force.getSolidNodes(solid);
+    ASSERT_EQUAL(0, solid.size());
+    force.setSolidNodes(vector<int>({5, 2, 9}));
+    force.getSolidNodes(solid);
+    ASSERT_EQUAL_CONTAINERS(vector<int>({5, 2, 9}), solid);
     ASSERT_EQUAL(0, force.addParticle(3));
     ASSERT_EQUAL(1, force.addParticle(7));
     ASSERT_EQUAL(2, force.getNumParticles());

@@ -10,7 +10,7 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `openmmapi/include/LBMForce.h`, `openmmapi/src/LBMForce.cpp` | public API: parameters, coupled particles, access to the fluid |
 | `openmmapi/include/LBMKernels.h` | `CalcLBMForceKernel`, the interface every platform implements, and `LBMLatticeParameters` |
 | `openmmapi/include/internal/LBMForceImpl.h`, `openmmapi/src/LBMForceImpl.cpp` | checks the setup and converts all parameters to lattice units once, for all platforms |
-| `openmmapi/include/internal/D3Q19.h` | velocity set, weights, ordering of the populations, equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing (host code) |
+| `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing (host code) |
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform, and the tests |
@@ -41,7 +41,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    calls `LBMForceImpl::updateContextState()`, which calls the kernel's `beginStep()`. Then
    `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
    kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
-   step (moments, momentum removal, collision and streaming; see `docs/theory.md` section 1); other
+   step (moments, momentum removal, collision and streaming, bounce-back at solid nodes; see
+   `docs/theory.md` section 1); other
    force evaluations do not. The Reference platform advances the fluid; the common implementation
    (CUDA, OpenCL, HIP) does not yet. No coupling force is added in version 0.1.0.
 3. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,

@@ -24,7 +24,9 @@ namespace LBMPlugin {
  *  1. moments: density, momentum, non-equilibrium second moment and body force at every node;
  *  2. removal of the fluid momentum, every momentumRemovalFrequency steps;
  *  3. collision and streaming: the populations are rebuilt from the moments of their own node and pushed
- *     to the neighbours.  The collision reads only moments, so a single population array is enough.
+ *     to the neighbours.  The collision reads only moments, so a single population array is enough;
+ *  4. bounce-back at the solid nodes, if any: a population that streamed into a solid node is sent back
+ *     to the fluid node it came from.  Solid nodes have no moments and no collision.
  */
 class ReferenceCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
@@ -44,6 +46,7 @@ private:
     void computeMoments();
     void removeFluidMomentum();
     void collideAndStream();
+    void bounceBack();
     void checkMachNumber();
     double computeMachNumber() const;
     LBMLatticeParameters lattice;
@@ -52,6 +55,8 @@ private:
     /** Moments of the current step: density, momentum j = rho*u (3 per node), non-equilibrium second moment
         (xx, yy, zz, xy, xz, yz per node) and force density (3 per node), all in lattice units. */
     std::vector<double> rho, momentum, piNeq, forceDensity;
+    /** 1 for fluid nodes, 0 for solid nodes; empty if there are no solid nodes. */
+    std::vector<char> isFluid;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;
     /** Number of lattice steps taken so far. */

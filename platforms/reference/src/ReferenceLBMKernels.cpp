@@ -32,6 +32,18 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
     momentum.resize(3*numNodes);
     piNeq.resize(6*numNodes);
     forceDensity.resize(3*numNodes);
+
+    // Solid nodes hold no fluid: their populations start at zero.
+
+    isFluid.clear();
+    if (!lattice.solidNodes.empty()) {
+        isFluid.resize(numNodes, 1);
+        for (int node : lattice.solidNodes) {
+            isFluid[node] = 0;
+            for (int q = 0; q < D3Q19::numVelocities; q++)
+                populations[q*numNodes+node] = 0.0;
+        }
+    }
 }
 
 void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
@@ -53,6 +65,8 @@ void ReferenceCalcLBMForceKernel::advanceFluid() {
     if (lattice.momentumRemovalFrequency > 0 && stepIndex%lattice.momentumRemovalFrequency == 0)
         removeFluidMomentum();
     collideAndStream();
+    if (!isFluid.empty())
+        bounceBack();
     stepIndex++;
     if (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)
         checkMachNumber();
@@ -80,6 +94,15 @@ void ReferenceCalcLBMForceKernel::computeMoments() {
     int numNodes = lattice.getNumNodes();
     double f[D3Q19::numVelocities];
     for (int node = 0; node < numNodes; node++) {
+        if (!isFluid.empty() && !isFluid[node]) {
+            // No fluid: zero density and momentum, so the node does not enter the momentum removal.
+            rho[node] = 0;
+            for (int k = 0; k < 3; k++)
+                momentum[3*node+k] = forceDensity[3*node+k] = 0;
+            for (int k = 0; k < 6; k++)
+                piNeq[6*node+k] = 0;
+            continue;
+        }
         double r = 0, jx = 0, jy = 0, jz = 0;
         for (int q = 0; q < D3Q19::numVelocities; q++) {
             f[q] = populations[q*numNodes+node];
@@ -133,6 +156,8 @@ void ReferenceCalcLBMForceKernel::collideAndStream() {
         for (int j = 0; j < ny; j++)
             for (int i = 0; i < nx; i++) {
                 int node = i + nx*(j + ny*k);
+                if (!isFluid.empty() && !isFluid[node])
+                    continue;
                 double r = rho[node];
                 const double* F = &forceDensity[3*node];
                 double ux = (momentum[3*node] + 0.5*F[0])/r;
@@ -150,6 +175,22 @@ void ReferenceCalcLBMForceKernel::collideAndStream() {
             }
 }
 
+void ReferenceCalcLBMForceKernel::bounceBack() {
+    // Halfway bounce-back: the population that streamed from the fluid node s + c_q into the solid node s,
+    // moving along -c_q, returns to s + c_q moving along c_q.  The wall lies halfway between the two nodes.
+    int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
+    int numNodes = lattice.getNumNodes();
+    for (int node : lattice.solidNodes) {
+        int i = node%nx, j = (node/nx)%ny, k = node/(nx*ny);
+        for (int q = 1; q < D3Q19::numVelocities; q++) {
+            int di = (i + D3Q19::cx[q] + nx)%nx;
+            int dj = (j + D3Q19::cy[q] + ny)%ny;
+            int dk = (k + D3Q19::cz[q] + nz)%nz;
+            populations[q*numNodes + di + nx*(dj + ny*dk)] = populations[D3Q19::opposite[q]*numNodes + node];
+        }
+    }
+}
+
 void ReferenceCalcLBMForceKernel::copyParametersToContext(ContextImpl& context, const LBMLatticeParameters& lattice) {
     this->lattice = lattice;
 }
@@ -161,6 +202,11 @@ void ReferenceCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<do
     density.resize(numNodes);
     velocity.resize(numNodes);
     for (int node = 0; node < numNodes; node++) {
+        if (!isFluid.empty() && !isFluid[node]) {
+            density[node] = 0;
+            velocity[node] = Vec3();
+            continue;
+        }
         double r = 0, jx = 0, jy = 0, jz = 0;
         for (int q = 0; q < D3Q19::numVelocities; q++) {
             double f = populations[q*numNodes+node];
@@ -183,6 +229,8 @@ double ReferenceCalcLBMForceKernel::computeMachNumber() const {
     int numNodes = lattice.getNumNodes();
     double maxSpeed2 = 0;
     for (int node = 0; node < numNodes; node++) {
+        if (!isFluid.empty() && !isFluid[node])
+            continue;
         double r = 0, jx = 0, jy = 0, jz = 0;
         for (int q = 0; q < D3Q19::numVelocities; q++) {
             double f = populations[q*numNodes+node];

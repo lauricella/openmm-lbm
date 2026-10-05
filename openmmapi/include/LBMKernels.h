@@ -45,6 +45,8 @@ public:
     double machNumberLimit;
     /** System indices of the coupled particles. */
     std::vector<int> particles;
+    /** Solid nodes, sorted and without repetitions; empty if the whole lattice is fluid. */
+    std::vector<int> solidNodes;
     int getNumNodes() const {
         return nx*ny*nz;
     }

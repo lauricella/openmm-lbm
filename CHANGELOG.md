@@ -30,10 +30,13 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   exception above it; `getFluidMachNumber()`; warning at Context creation for tau outside [0.505, 2];
   `getLatticeParametersInContext()`; CMake option `LBM_DEBUG` for debug diagnostics. Serialization
   version 2 stores the new parameters and still reads version 1.
+- Solid nodes set at run time (`setSolidNodes()`) with halfway bounce-back, on the Reference platform;
+  stored in the serialization. The Poiseuille profile matches the exact solution of the scheme.
 - Fluid tests (`tests/TestLBMFluid.h`): steady uniform flow, conservation of mass and momentum, body
   force at lattice densities 0.98, 1 and 1.02, timing of the momentum removal, viscosity from the decay
   of a shear wave, queries that must not advance the fluid. See `docs/validation.md`.
 
 ### Not yet implemented
-- Fluid update on the CUDA, OpenCL and HIP platforms.
+- Fluid update and solid nodes on the CUDA, OpenCL and HIP platforms.
+- Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).
 - Particle-fluid coupling: `LBMForce` applies no force in this version.

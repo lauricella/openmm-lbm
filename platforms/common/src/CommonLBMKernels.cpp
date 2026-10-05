@@ -41,6 +41,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
+    if (!lattice.solidNodes.empty())
+        throw OpenMMException("LBMForce: solid nodes are supported only on the Reference platform in this version");
     this->lattice = lattice;
 
     // The fluid is stored in the mixed type: double unless the platform runs in single precision.

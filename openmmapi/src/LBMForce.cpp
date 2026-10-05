@@ -113,6 +113,14 @@ void LBMForce::setMachNumberLimit(double limit) {
     machNumberLimit = limit;
 }
 
+void LBMForce::getSolidNodes(vector<int>& nodes) const {
+    nodes = solidNodes;
+}
+
+void LBMForce::setSolidNodes(const vector<int>& nodes) {
+    solidNodes = nodes;
+}
+
 int LBMForce::addParticle(int particle) {
     particles.push_back(particle);
     return particles.size()-1;

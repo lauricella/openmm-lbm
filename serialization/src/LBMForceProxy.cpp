@@ -44,6 +44,11 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     SerializationNode& particles = node.createChildNode("Particles");
     for (int i = 0; i < force.getNumParticles(); i++)
         particles.createChildNode("Particle").setIntProperty("index", force.getParticle(i));
+    vector<int> solidNodes;
+    force.getSolidNodes(solidNodes);
+    SerializationNode& solid = node.createChildNode("SolidNodes");
+    for (int index : solidNodes)
+        solid.createChildNode("Node").setIntProperty("index", index);
 }
 
 void* LBMForceProxy::deserialize(const SerializationNode& node) const {
@@ -72,6 +77,12 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
         const SerializationNode& particles = node.getChildNode("Particles");
         for (const SerializationNode& particle : particles.getChildren())
             force->addParticle(particle.getIntProperty("index"));
+        if (version >= 2) {
+            vector<int> solidNodes;
+            for (const SerializationNode& solid : node.getChildNode("SolidNodes").getChildren())
+                solidNodes.push_back(solid.getIntProperty("index"));
+            force->setSolidNodes(solidNodes);
+        }
     }
     catch (...) {
         delete force;

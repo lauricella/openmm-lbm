@@ -71,6 +71,40 @@ import openmm.unit as unit
 }
 
 /*
+ * Lists of node indices: input from any Python sequence of integers (a list or a NumPy array), output as a
+ * Python list.
+ */
+%typemap(in) const std::vector<int>& nodes (std::vector<int> temp) {
+    PyObject* sequence = PySequence_Fast($input, "expected a sequence of integers");
+    if (sequence == NULL)
+        SWIG_fail;
+    Py_ssize_t size = PySequence_Fast_GET_SIZE(sequence);
+    temp.resize(size);
+    for (Py_ssize_t i = 0; i < size; i++) {
+        long value = PyLong_AsLong(PySequence_Fast_GET_ITEM(sequence, i));
+        if (value == -1 && PyErr_Occurred()) {
+            Py_DECREF(sequence);
+            SWIG_fail;
+        }
+        temp[i] = (int) value;
+    }
+    Py_DECREF(sequence);
+    $1 = &temp;
+}
+%typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<int>& nodes {
+    $1 = PySequence_Check($input) ? 1 : 0;
+}
+%typemap(in, numinputs=0) std::vector<int>& OUTPUT (std::vector<int> temp) {
+    $1 = &temp;
+}
+%typemap(argout) std::vector<int>& OUTPUT {
+    PyObject* list = PyList_New($1->size());
+    for (int i = 0; i < (int) $1->size(); i++)
+        PyList_SET_ITEM(list, i, PyLong_FromLong((*$1)[i]));
+    %append_output(list);
+}
+
+/*
  * Add units to function outputs.
  */
 %pythonappend LBMPlugin::LBMForce::getFluidDensity() const %{
@@ -141,6 +175,10 @@ public:
     void setInitialFluidVelocity(const OpenMM::Vec3& velocity);
     int getFluidMomentumRemovalFrequency() const;
     void setFluidMomentumRemovalFrequency(int frequency);
+    %apply std::vector<int>& OUTPUT {std::vector<int>& nodes};
+    void getSolidNodes(std::vector<int>& nodes) const;
+    %clear std::vector<int>& nodes;
+    void setSolidNodes(const std::vector<int>& nodes);
     int getMachCheckFrequency() const;
     void setMachCheckFrequency(int frequency);
     double getMachNumberLimit() const;

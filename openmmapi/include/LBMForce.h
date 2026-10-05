@@ -153,6 +153,21 @@ public:
      */
     void setMachNumberLimit(double limit);
     /**
+     * Get the solid nodes of the lattice.
+     *
+     * @param[out] nodes    the indices i + nx*(j + ny*k) of the solid nodes
+     */
+    void getSolidNodes(std::vector<int>& nodes) const;
+    /**
+     * Set the nodes of the lattice that are solid walls.  The fluid does not occupy them: a population that
+     * streams into a solid node is sent back to the fluid node it came from (bounce-back), which places the
+     * wall halfway between the two nodes.  Node (i, j, k) has index i + nx*(j + ny*k).  An empty list (the
+     * default) means that the whole lattice is fluid.
+     *
+     * @param nodes    the indices of the solid nodes
+     */
+    void setSolidNodes(const std::vector<int>& nodes);
+    /**
      * Get the number of particles coupled to the fluid.
      */
     int getNumParticles() const {
@@ -240,7 +255,7 @@ private:
     int nx, ny, nz, randomNumberSeed, momentumRemovalFrequency, machCheckFrequency;
     double density, viscosity, friction, temperature, machNumberLimit;
     OpenMM::Vec3 bodyAcceleration, initialVelocity;
-    std::vector<int> particles;
+    std::vector<int> particles, solidNodes;
 };
 
 } // namespace LBMPlugin

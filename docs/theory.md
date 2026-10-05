@@ -51,6 +51,36 @@ The update is thread-safe and uses a single copy of the populations:
 
 Each population of the destination is written by exactly one thread.
 
+### Solid nodes (implemented on the Reference platform)
+
+`setSolidNodes()` marks lattice nodes as solid walls at run time; an empty list (the default) is a fully
+periodic fluid.
+- Solid nodes hold no fluid: their populations start at zero, they have no moments and no collision, and
+  they do not enter the removal of the fluid momentum.
+- After streaming, a population that reached a solid node s from the fluid node s + c_q is sent back to
+  that node with the opposite velocity: f_q(s + c_q) = f_opp(q)(s). This halfway bounce-back places the
+  wall halfway between the fluid and the solid node and conserves the mass of the fluid. It is the scheme
+  of the reference implementation.
+
+**Exact Poiseuille flow.** With the regularized collision, the odd non-hydrodynamic moments relax with
+frequency 1 (tau_odd = 1), so the scheme behaves at the walls as a two-relaxation-time scheme with
+magic parameter Lambda = (tau - 1/2)(tau_odd - 1/2) = (tau - 1/2)/2 [8]. For a channel between the
+walls of the solid plane j = 0 (the lattice is periodic, so the plane bounds the channel on both sides)
+driven by a body acceleration g, the steady profile of the scheme is exactly, in lattice units,
+
+  u(y) = g/(2 nu) (y - 1/2)(ny - 1/2 - y) + g (16 Lambda - 3)/(24 nu).
+
+The curvature is the exact one for every tau; the second term is a slip that shifts the effective wall by
+(3 - 16 Lambda)/(12 H), with H = ny - 1, and vanishes at Lambda = 3/16, that is tau = 7/8. The
+validation tests check this profile to 1e-9 (`docs/validation.md`).
+
+**Planned: open faces with imposed density or velocity.** Nodes will be of three kinds: fluid, solid,
+and wet (fluid nodes with at least one solid neighbour). A wet node rebuilds every population that comes
+from a solid neighbour as f^eq(rho, u_bc) + (1 - omega) f^neq,reg(Pi^neq), with the prescribed quantity
+(velocity or density) and the unknown one (density or velocity) and Pi^neq taken from the wet node
+itself; the wall lies halfway along the link. The equilibrium is the weakly compressible one, with rho
+multiplying the whole Hermite expansion.
+
 ## 2. Particle-fluid coupling (to be implemented)
 
 **Euler-Maruyama scheme.** Each coupled particle k of mass m_k feels
@@ -239,3 +269,5 @@ spacing, the lattice time step and the relaxation time, in the style of
 5. P. Ahlrichs and B. Dünweg, J. Chem. Phys. 111, 8225 (1999): frictional particle-fluid coupling.
 6. B. Dünweg and A. J. C. Ladd, Adv. Polym. Sci. 221, 89 (2009): review of lattice Boltzmann for soft matter.
 7. J. Latt, Choice of units in lattice Boltzmann simulations, LBMethod.org (2008).
+8. I. Ginzburg, F. Verhaeghe and D. d'Humières, Commun. Comput. Phys. 3, 427 (2008): two-relaxation-time
+   scheme, magic parameter Lambda and exact bounce-back solutions.

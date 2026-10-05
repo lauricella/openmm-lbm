@@ -13,6 +13,7 @@
 #include "openmm/VerletIntegrator.h"
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/reference/SimTKOpenMMRealType.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <set>
@@ -80,6 +81,19 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
         throw OpenMMException("LBMForce: the Mach number limit must be positive");
     lattice.machCheckFrequency = force.getMachCheckFrequency();
     lattice.machNumberLimit = force.getMachNumberLimit();
+
+    // Solid nodes (walls).
+
+    force.getSolidNodes(lattice.solidNodes);
+    sort(lattice.solidNodes.begin(), lattice.solidNodes.end());
+    for (int i = 0; i < (int) lattice.solidNodes.size(); i++) {
+        if (lattice.solidNodes[i] < 0 || lattice.solidNodes[i] >= lattice.getNumNodes())
+            throw OpenMMException("LBMForce: a solid node index is out of range");
+        if (i > 0 && lattice.solidNodes[i] == lattice.solidNodes[i-1])
+            throw OpenMMException("LBMForce: a solid node is listed more than once");
+    }
+    if ((int) lattice.solidNodes.size() == lattice.getNumNodes())
+        throw OpenMMException("LBMForce: all lattice nodes are solid");
     lattice.friction = force.getFriction();
     lattice.kT = BOLTZ*force.getTemperature();
     lattice.randomNumberSeed = force.getRandomNumberSeed();
@@ -148,6 +162,8 @@ void LBMForceImpl::updateParametersInContext(ContextImpl& context) {
         throw OpenMMException("updateParametersInContext: the fluid density and viscosity cannot be changed");
     if (updated.particles != lattice.particles)
         throw OpenMMException("updateParametersInContext: the set of coupled particles cannot be changed");
+    if (updated.solidNodes != lattice.solidNodes)
+        throw OpenMMException("updateParametersInContext: the solid nodes cannot be changed");
     lattice = updated;
     kernel.getAs<CalcLBMForceKernel>().copyParametersToContext(context, lattice);
 }

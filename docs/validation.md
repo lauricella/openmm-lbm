@@ -20,6 +20,9 @@ removal is off unless stated.
 | `testMachNumberCheck` | 4x4x4 nodes, uniform flow at Ma = 0.35, check every 10 steps | `getFluidMachNumber()` = 0.35; exception at step 10 with limit 0.3, none with the check off or with limit 0.5 | 1e-12 |
 | `testLatticeParameters` | 4x6x8 nodes, tau = 0.9 | `getLatticeParametersInContext()` returns dx, dt and tau | 1e-12 |
 | `testRelaxationTimeWarning` | tau = 0.503, 1, 2.2 | warning on stderr at Context creation only outside [0.505, 2] | exact |
+| `testSolidNodeChecks` | solid node index out of range, repeated, or all nodes solid | exception at Context creation | exact |
+| `testPoiseuille` | 2x12x2 nodes, solid plane j = 0, body force along x, tau = 0.7, 0.875, 1.2, 4 H^2/nu steps | steady profile equal to the exact solution of the scheme (`docs/theory.md`, solid nodes), zero density and velocity at the solid nodes | 1e-9 (relative to the maximum velocity) |
+| `testWallConservation` | 6x5x4 nodes with a solid block of 8 nodes, initial uniform flow, without and with momentum removal | mass of the fluid conserved; after a removal step the momentum of the fluid is zero | 1e-13 |
 | `testQueriesDoNotAdvanceFluid` | 4x4x4 nodes, body force, 10 steps with and without `getState(Forces)`, `getState(Forces, Energy)` and `setVelocitiesToTemperature()` after each step | identical populations | exact |
 
 **Body force at lattice densities different from 1.** The test checks the convention of the weakly
@@ -37,6 +40,15 @@ step adds exactly rho g to the momentum. Shifting the velocity by F/2 instead wo
 The difference decreases as k^2 (by a factor of 4 when the wavelength doubles), as expected for a
 second-order scheme. It vanishes at tau = 1, where the collision relaxes the populations to equilibrium
 in one step.
+
+**Walls.** With halfway bounce-back the steady Poiseuille profile matches the exact solution of the
+scheme to 1e-12 for every tau tested (0.7 to 1.5, channel widths 11 and 19). Its wall position differs
+from the halfway position by (3 - 16 Lambda)/(12 H), Lambda = (tau - 1/2)/2; measured in a channel of
+width H = 23:
+
+| tau | 0.55 | 0.6 | 0.7 | 0.8 | 0.875 | 0.9 | 1.0 | 1.2 | 1.5 | 2.0 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| wall shift (lattice units) | +0.00942 | +0.00797 | +0.00507 | +0.00217 | 0.00000 | -0.00072 | -0.00362 | -0.00942 | -0.01810 | -0.03256 |
 
 ## Equivalence with the reference implementation: fluid only
 

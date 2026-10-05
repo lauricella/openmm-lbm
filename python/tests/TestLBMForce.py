@@ -76,6 +76,20 @@ def test_mach_number_and_lattice_parameters():
     assert tau == pytest.approx(3*1.0035*0.01/0.25 + 0.5)
 
 
+def test_solid_nodes():
+    import numpy as np
+    system, force, positions = create_system()
+    plane = np.arange(8*8)                      # nodes of the plane k = 0 of the 8^3 grid
+    force.setSolidNodes(plane)
+    assert force.getSolidNodes() == list(range(64))
+    integrator = mm.VerletIntegrator(0.01)
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+    context.setPositions(positions)
+    density, velocity = force.getFluidFields(context)
+    assert density[0].value_in_unit(unit.dalton/unit.nanometer**3) == 0.0
+    assert density[64].value_in_unit(unit.dalton/unit.nanometer**3) == pytest.approx(602.214)
+
+
 def test_serialization():
     system, force, positions = create_system()
     force.setFriction(7.0)

@@ -330,6 +330,125 @@ void testRelaxationTimeWarning(Platform& platform) {
     }
 }
 
+/** Indices of the nodes of the plane j = 0. */
+vector<int> wallPlane(int nx, int ny, int nz) {
+    vector<int> nodes;
+    for (int k = 0; k < nz; k++)
+        for (int i = 0; i < nx; i++)
+            nodes.push_back(i + nx*ny*k);
+    return nodes;
+}
+
+/**
+ * Invalid lists of solid nodes are rejected when the Context is created.
+ */
+void testSolidNodeChecks(Platform& platform) {
+    vector<vector<int> > invalid = {{-1}, {64}, {3, 5, 3}};
+    vector<int> all(64);
+    for (int i = 0; i < 64; i++)
+        all[i] = i;
+    invalid.push_back(all);
+    for (const vector<int>& nodes : invalid) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, 4, 4, 4, 0.8);
+        force->setSolidNodes(nodes);
+        VerletIntegrator integrator(fluidDt);
+        bool thrown = false;
+        try {
+            Context context(*system, integrator, platform);
+        }
+        catch (const OpenMMException& e) {
+            thrown = true;
+        }
+        ASSERT(thrown);
+        delete system;
+    }
+}
+
+/**
+ * Poiseuille flow between the walls of the solid plane j = 0 (the lattice is periodic, so the plane bounds
+ * the channel on both sides), driven by a body force along x.  With halfway bounce-back the steady profile
+ * of the scheme is, in lattice units, exactly
+ *   u(y) = g/(2 nu) (y - 1/2)(ny - 1/2 - y) + g (16 Lambda - 3)/(24 nu),   Lambda = (tau - 1/2)/2,
+ * the solution of the two-relaxation-time scheme with Lambda = (tau - 1/2)(tau_odd - 1/2), since the
+ * regularized collision relaxes the odd non-hydrodynamic moments with tau_odd = 1.  The slip term vanishes
+ * at tau = 7/8.
+ */
+void testPoiseuille(Platform& platform, double tau) {
+    int nx = 2, ny = 12, nz = 2;
+    LBMForce* force;
+    System* system = createFluidSystem(force, nx, ny, nz, tau);
+    double g = 1e-5;                             // lattice units
+    force->setBodyAcceleration(Vec3(g*fluidDx/(fluidDt*fluidDt), 0, 0));
+    force->setSolidNodes(wallPlane(nx, ny, nz));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    double nu = (tau-0.5)/3.0, lambda = (tau-0.5)/2.0, h = ny-1;
+    integrator.step((int) (4*h*h/nu));
+    vector<double> density;
+    vector<Vec3> velocity;
+    force->getFluidFields(context, density, velocity);
+    double umax = g/(2*nu)*(0.5*h)*(0.5*h) + g*(16*lambda-3)/(24*nu);
+    for (int k = 0; k < nz; k++)
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < nx; i++) {
+                int node = i + nx*(j + ny*k);
+                Vec3 u = velocity[node]*(fluidDt/fluidDx);
+                if (j == 0) {
+                    ASSERT_EQUAL(0.0, density[node]);
+                    ASSERT_EQUAL_VEC(Vec3(), u, 0.0);
+                    continue;
+                }
+                double exact = g/(2*nu)*(j-0.5)*(ny-0.5-j) + g*(16*lambda-3)/(24*nu);
+                ASSERT_EQUAL_VEC(Vec3(exact/umax, 0, 0), u*(1.0/umax), 1e-9);
+            }
+    delete system;
+}
+
+/**
+ * With solid nodes the mass of the fluid is conserved, and the removal of the momentum sums only fluid
+ * nodes.
+ */
+void testWallConservation(Platform& platform) {
+    int nx = 6, ny = 5, nz = 4, numNodes = nx*ny*nz;
+    vector<int> block;
+    for (int k = 1; k < 3; k++)
+        for (int j = 1; j < 3; j++)
+            for (int i = 2; i < 4; i++)
+                block.push_back(i + nx*(j + ny*k));
+    for (int removal = 0; removal < 2; removal++) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, nx, ny, nz, 0.7);
+        force->setSolidNodes(block);
+        force->setInitialFluidVelocity(Vec3(0.02, -0.01, 0.0)*(fluidDx/fluidDt));
+        force->setFluidMomentumRemovalFrequency(removal);
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+        vector<double> density;
+        vector<Vec3> velocity;
+        auto fluidMass = [&]() {
+            force->getFluidFields(context, density, velocity);
+            double mass = 0;
+            for (double d : density)
+                mass += d/fluidDensity;
+            return mass;
+        };
+        double mass0 = fluidMass();
+        ASSERT_EQUAL_TOL((double) (numNodes - block.size()), mass0, 1e-13);
+        integrator.step(removal == 0 ? 100 : 1);
+        ASSERT_EQUAL_TOL(mass0, fluidMass(), 1e-13);
+        if (removal == 1) {
+            Vec3 p;
+            for (int node = 0; node < numNodes; node++)
+                p += velocity[node]*(density[node]/fluidDensity*fluidDt/fluidDx);
+            ASSERT_EQUAL_VEC(Vec3(), p, 1e-13);
+        }
+        delete system;
+    }
+}
+
 void runFluidTests(Platform& platform) {
     testUniformFlowIsSteady(platform);
     testFluidConservation(platform);
@@ -344,4 +463,9 @@ void runFluidTests(Platform& platform) {
     testMachNumberCheck(platform);
     testLatticeParameters(platform);
     testRelaxationTimeWarning(platform);
+    testSolidNodeChecks(platform);
+    testPoiseuille(platform, 0.7);
+    testPoiseuille(platform, 0.875);
+    testPoiseuille(platform, 1.2);
+    testWallConservation(platform);
 }
