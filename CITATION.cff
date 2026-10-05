@@ -6,11 +6,16 @@ license: MIT
 authors:
   - given-names: Luis
     family-names: Coronas
+    affiliation: 'Institut de Biologie Physico-Chimique (IBPC), CNRS, Paris, France'
   - given-names: Marco
     family-names: Lauricella
+    affiliation: 'Istituto per le Applicazioni del Calcolo "Mauro Picone" (IAC), Consiglio Nazionale delle Ricerche (CNR), Rome, Italy'
   - given-names: Andrea
     family-names: Montessori
+    affiliation: 'Department of Civil Engineering, Roma Tre University, Rome, Italy'
   - given-names: Simone
     family-names: Melchionna
+    affiliation: 'Istituto per le Applicazioni del Calcolo "Mauro Picone" (IAC), Consiglio Nazionale delle Ricerche (CNR), Rome, Italy'
   - given-names: Fabio
     family-names: Sterpone
+    affiliation: 'Institut de Biologie Physico-Chimique (IBPC), CNRS, Paris, France'
