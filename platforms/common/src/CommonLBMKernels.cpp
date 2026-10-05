@@ -77,7 +77,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
 
 void CommonCalcLBMForceKernel::beginStep(ContextImpl& context) {
     // The fluid does not advance on this platform yet: the lattice update is ported from the Reference
-    // platform in the next phase.
+    // platform in the next phase.  As there, the removal of the fluid momentum and the Mach number check
+    // will be timed by context.getStepCount().
 }
 
 double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {

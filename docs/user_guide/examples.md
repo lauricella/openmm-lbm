@@ -198,13 +198,13 @@ def create_context():
     return force, integrator, context
 
 
-# First run: 100 steps, then save the OpenMM checkpoint and the fluid.
+# First run: 105 steps, then save the OpenMM checkpoint and the fluid.
 force, integrator, context = create_context()
-integrator.step(100)
+integrator.step(105)
 with open('run.chk', 'wb') as f:
     f.write(context.createCheckpoint())
 np.save('run_fluid.npy', np.array(force.getFluidState(context)))
-integrator.step(100)                     # the first run continues, for comparison
+integrator.step(95)                      # the first run continues, for comparison
 final = np.array(force.getFluidState(context))
 
 # Second run: a new Context restarts from the saved files.
@@ -212,7 +212,7 @@ force, integrator, context = create_context()
 with open('run.chk', 'rb') as f:
     context.loadCheckpoint(f.read())
 force.setFluidState(context, np.load('run_fluid.npy'))
-integrator.step(100)
+integrator.step(95)
 print('steps:', context.getStepCount())
 print('largest difference from the uninterrupted run:', np.abs(np.array(force.getFluidState(context)) - final).max())
 ```
@@ -228,11 +228,9 @@ Notes:
 
 - **Same grid.** The fluid state can be restored only in a Context with the same grid size; it holds
   19 numbers per node.
-- **Counters restart at zero.** The counters of the momentum removal and of the Mach number check
-  start from zero in every new Context. To reproduce an uninterrupted run exactly, save at a step that
-  is a multiple of both frequencies, as here: the removal every 10 steps and the check every 100.
-  Otherwise the restarted run removes the momentum at shifted steps; it remains a valid simulation, but
-  not an identical one.
+- **Any step.** The removal of the momentum and the Mach number check follow the step count of the
+  Context, which the checkpoint restores. The restart can therefore happen at any step: here at step
+  105, while the removal runs every 10 steps.
 - **`Context.reinitialize()`** also resets the fluid to its initial state. Use the same two calls
   around it: `getFluidState()` before and `setFluidState()` after.
 - **Positions and velocities.** `context.loadCheckpoint()` restores the particles, the time and the

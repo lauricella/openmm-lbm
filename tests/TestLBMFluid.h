@@ -8,7 +8,7 @@
 /**
  * Tests of the lattice Boltzmann fluid on its own (no coupled particles): steady uniform flow,
  * conservation, body force, removal of the fluid momentum, viscosity from the decay of a shear wave,
- * and the rule that the fluid advances only in integration steps.  Include after TestLBMForce.h and
+ * the rule that the fluid advances only in integration steps, and restarts from checkpoints.  Include after TestLBMForce.h and
  * call runFluidTests().
  */
 
@@ -149,8 +149,8 @@ void testBodyForce(Platform& platform, double rho0) {
 }
 
 /**
- * The momentum of the fluid is removed in the steps whose index (counted from 0) is a multiple of the
- * removal frequency, before the collision: with a body force F per node and frequency 3 the total
+ * The momentum of the fluid is removed in the steps whose index (the step count of the Context, from 0) is
+ * a multiple of the removal frequency, before the collision: with a body force F per node and frequency 3 the total
  * momentum after n steps is ((n-1)%3 + 1) F per node.
  */
 void testFluidMomentumRemoval(Platform& platform) {
@@ -257,6 +257,46 @@ void testQueriesDoNotAdvanceFluid(Platform& platform) {
     }
     for (int i = 0; i < (int) reference.size(); i++)
         ASSERT_EQUAL(reference[i], queried[i]);
+}
+
+/**
+ * The removal of the fluid momentum follows the step count of the Context, which checkpoints save and
+ * restore: a run restarted from a checkpoint, with the fluid restored by setFluidState(), is identical to an
+ * uninterrupted run, also when the checkpoint is not at a multiple of the removal frequency.
+ */
+void testRestartFromCheckpoint(Platform& platform) {
+    int numSteps = 35, split = 13;
+    vector<double> uninterrupted, saved, restarted;
+    stringstream checkpoint;
+    for (int run = 0; run < 3; run++) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, 4, 4, 4, 0.8);
+        force->setBodyAcceleration(Vec3(0.5, -0.2, 0.1));
+        force->setInitialFluidVelocity(Vec3(0.01, 0.0, 0.0)*(fluidDx/fluidDt));
+        force->setFluidMomentumRemovalFrequency(5);
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+        if (run == 0) {
+            integrator.step(numSteps);
+            force->getFluidState(context, uninterrupted);
+        }
+        else if (run == 1) {
+            integrator.step(split);
+            context.createCheckpoint(checkpoint);
+            force->getFluidState(context, saved);
+        }
+        else {
+            context.loadCheckpoint(checkpoint);
+            force->setFluidState(context, saved);
+            integrator.step(numSteps-split);
+            ASSERT_EQUAL(numSteps, context.getStepCount());
+            force->getFluidState(context, restarted);
+        }
+        delete system;
+    }
+    for (int i = 0; i < (int) uninterrupted.size(); i++)
+        ASSERT_EQUAL(uninterrupted[i], restarted[i]);
 }
 
 /**
@@ -460,6 +500,7 @@ void runFluidTests(Platform& platform) {
     testShearWaveViscosity(platform, 1.0);
     testShearWaveViscosity(platform, 1.5);
     testQueriesDoNotAdvanceFluid(platform);
+    testRestartFromCheckpoint(platform);
     testMachNumberCheck(platform);
     testLatticeParameters(platform);
     testRelaxationTimeWarning(platform);

@@ -107,9 +107,12 @@ atomic operations:
 
 The result is bitwise reproducible.
 
-**Momentum removal.** When it is enabled, on the steps whose index (counted from 0, the first lattice
-step) is a multiple of the removal frequency, the momentum of the fluid is removed right after the
-moments are computed and before the coupling. The default frequency is 1, every step. The plugin sums rho and j over the lattice, computes u_cm = sum(j)/sum(rho) and applies
+**Momentum removal.** When it is enabled, on the steps whose index is a multiple of the removal
+frequency, the momentum of the fluid is removed right after the
+moments are computed and before the coupling. The index of a step is the step count of the Context
+when the step starts: 0 for the first step of a new Context, and restored by checkpoints, so a run
+restarted from a checkpoint removes the momentum at the same steps as an uninterrupted one. The
+default frequency is 1, every step. The plugin sums rho and j over the lattice, computes u_cm = sum(j)/sum(rho) and applies
 j <- j - rho u_cm at every node; Pi^neq is left unchanged. The populations are then rebuilt from
 the corrected moments by the collision. The sums use two-stage reductions without atomic
 operations.
@@ -240,7 +243,8 @@ range. The plugin checks both.
 - If Ma exceeds the limit set with `setMachNumberLimit()` (default 0.3), the plugin throws an
   `OpenMMException` that reports the step and the value.
 - `getFluidMachNumber(context)` returns the current value, for monitoring.
-- The check runs after the lattice steps whose number is a multiple of N. On the CUDA, OpenCL and HIP
+- The check runs after the lattice steps whose number is a multiple of N, with the steps numbered by
+  the step count of the Context, as for the momentum removal. On the CUDA, OpenCL and HIP
   platforms it will run when the fluid update is ported there, with a two-stage reduction and no atomic
   operations, like the removal of the fluid momentum; `getFluidMachNumber()` already works there.
 

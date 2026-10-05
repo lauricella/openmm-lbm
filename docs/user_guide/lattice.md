@@ -164,8 +164,11 @@ the step raises an exception that reports the step and the value. Both numbers c
 
 By default the plugin removes the momentum of the fluid at every step. It subtracts the
 centre-of-mass velocity of the fluid, u_cm = sum(j)/sum(rho), from every fluid node, before the
-collision of every lattice step whose number is a multiple of the frequency. Steps are counted from 0
-when the Context is created, so the first removal happens before the first step.
+collision of every lattice step whose number is a multiple of the frequency. Steps are numbered by
+the step count of the Context (`context.getStepCount()`): a new Context starts at 0, so the first
+removal happens before the first step, and a checkpoint restores the count, so a restarted run removes
+the momentum at the same steps as an uninterrupted one. The Mach number check counts steps in the same
+way.
 
 - `setFluidMomentumRemovalFrequency(n)` removes it every n steps.
 - `setFluidMomentumRemovalFrequency(0)` never removes it. Use 0 for flows driven by a body force,

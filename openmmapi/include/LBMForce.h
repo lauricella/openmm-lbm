@@ -129,7 +129,9 @@ public:
     int getFluidMomentumRemovalFrequency() const;
     /**
      * Set the frequency (in time steps) at which the momentum of the fluid is removed.  0 means the
-     * momentum is never removed.
+     * momentum is never removed.  The momentum is removed in the steps whose index, the step count of the
+     * Context at the start of the step, is a multiple of the frequency; checkpoints restore the step
+     * count, so a restarted run removes it at the same steps.  The default is 1.
      */
     void setFluidMomentumRemovalFrequency(int frequency);
     /**
@@ -140,7 +142,8 @@ public:
     /**
      * Set the frequency (in time steps) at which the largest Mach number of the fluid, Ma = max |u|/c_s
      * over the lattice nodes, is checked.  If it exceeds the limit set with setMachNumberLimit(), the
-     * simulation stops with an exception.  0 means it is never checked.  The default is 100.
+     * simulation stops with an exception.  0 means it is never checked.  The default is 100.  Steps are
+     * numbered by the step count of the Context, as for the removal of the fluid momentum.
      */
     void setMachCheckFrequency(int frequency);
     /**

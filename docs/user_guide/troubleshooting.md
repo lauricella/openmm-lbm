@@ -43,10 +43,6 @@ density in g/cm^3 must be multiplied by `unit.AVOGADRO_CONSTANT_NA`; see [units]
 not keep the fluid. Save it with `getFluidState()` and restore it with `setFluidState()`; see
 [saving and restoring the fluid](examples.md#saving-and-restoring-the-fluid).
 
-**A restarted run differs slightly from the uninterrupted one.** The counters of the momentum removal
-and of the Mach check start from zero in a new Context. Save at a step that is a multiple of both
-frequencies.
-
 **The fluid does not change on the CUDA, OpenCL or HIP platform.** The fluid update runs only on the
 Reference platform in this version; see the [status table](README.md#what-works-in-this-version).
 

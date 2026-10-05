@@ -8,6 +8,7 @@
 #include "ReferenceLBMKernels.h"
 #include "internal/D3Q19.h"
 #include "openmm/OpenMMException.h"
+#include "openmm/internal/ContextImpl.h"
 #include <cmath>
 #include <iostream>
 #include <sstream>
@@ -47,6 +48,10 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
 }
 
 void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
+    // The removal of the fluid momentum and the Mach number check are timed by the step count of the
+    // Context, which checkpoints save and restore: a run restarted from a checkpoint repeats them at the
+    // same steps as an uninterrupted run.
+    stepIndex = context.getStepCount();
     stepPending = true;
 }
 

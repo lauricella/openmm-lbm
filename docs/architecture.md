@@ -38,7 +38,9 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    - It computes `LBMLatticeParameters` and passes them to the kernel of the platform.
    - The kernel allocates the fluid and sets it to equilibrium.
 2. **Integration step.** `VerletIntegrator::step()` calls `ContextImpl::updateContextState()`, which
-   calls `LBMForceImpl::updateContextState()`, which calls the kernel's `beginStep()`. Then
+   calls `LBMForceImpl::updateContextState()`, which calls the kernel's `beginStep()`; the kernel
+   records the step count of the Context, which times the momentum removal and the Mach number check.
+   Then
    `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
    kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
    step (moments, momentum removal, collision and streaming, bounce-back at solid nodes; see

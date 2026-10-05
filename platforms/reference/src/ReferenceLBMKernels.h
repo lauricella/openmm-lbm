@@ -22,7 +22,8 @@ namespace LBMPlugin {
  *
  * One lattice step (advanceFluid) has the same structure as on the other platforms:
  *  1. moments: density, momentum, non-equilibrium second moment and body force at every node;
- *  2. removal of the fluid momentum, every momentumRemovalFrequency steps;
+ *  2. removal of the fluid momentum, in the steps whose index (the step count of the Context) is a multiple
+ *     of momentumRemovalFrequency;
  *  3. collision and streaming: the populations are rebuilt from the moments of their own node and pushed
  *     to the neighbours.  The collision reads only moments, so a single population array is enough;
  *  4. bounce-back at the solid nodes, if any: a population that streamed into a solid node is sent back
@@ -59,7 +60,7 @@ private:
     std::vector<char> isFluid;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;
-    /** Number of lattice steps taken so far. */
+    /** Step count of the Context: set by beginStep() at the start of a lattice step, incremented at its end. */
     long long stepIndex;
     /** True once the debug warning about the Mach number has been printed. */
     bool machWarningPrinted;

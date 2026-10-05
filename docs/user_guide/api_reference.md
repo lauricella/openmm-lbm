@@ -100,8 +100,8 @@ no effect on an existing Context.
 
 Every `frequency` lattice steps, the centre-of-mass velocity of the fluid is subtracted from every
 fluid node, so that the total momentum of the fluid becomes zero. The default 1 removes it at every
-step; 0 never removes it. The value must not be negative. Steps are counted from the creation of the
-Context; see [removal of the fluid momentum](lattice.md#removal-of-the-fluid-momentum).
+step; 0 never removes it. The value must not be negative. Steps are numbered by the step count of the
+Context, which checkpoints restore; see [removal of the fluid momentum](lattice.md#removal-of-the-fluid-momentum).
 
 Use 0 for flows driven by `setBodyAcceleration()`.
 
@@ -112,7 +112,7 @@ Use 0 for flows driven by `setBodyAcceleration()`.
 Every `frequency` lattice steps the plugin computes the largest Mach number of the fluid,
 Ma = max |u|/c_s over the fluid nodes. If it exceeds the limit, the step raises an exception that
 reports the value and the step. The default is 100; 0 disables the check. The value must not be
-negative.
+negative. Steps are numbered by the step count of the Context, as for the momentum removal.
 
 ### `setMachNumberLimit(limit)`, `getMachNumberLimit()`
 

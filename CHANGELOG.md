@@ -38,6 +38,10 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
 - User guide (`docs/user_guide/`): getting started, the lattice and the choice of the parameters, a
   reference of every method of `LBMForce`, complete Python examples and troubleshooting.
   `devtools/check_user_guide.py` runs every example on the Reference platform and checks its output.
+- The removal of the fluid momentum and the Mach number check are timed by the step count of the
+  Context, which checkpoints restore: a run restarted from a checkpoint, with the fluid restored by
+  `setFluidState()`, is identical to an uninterrupted run at any restart step
+  (`testRestartFromCheckpoint`).
 
 ### Not yet implemented
 - Fluid update and solid nodes on the CUDA, OpenCL and HIP platforms.
