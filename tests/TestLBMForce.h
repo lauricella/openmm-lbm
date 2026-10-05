@@ -109,7 +109,8 @@ void testParameters() {
 }
 
 /**
- * Until the coupling is implemented the force on the particles is zero and the energy is zero.
+ * Before the first step no coupling force has been computed, so the force on the particles is zero; the
+ * coupling is dissipative, so the energy is always zero.
  */
 void testZeroForce(Platform& platform) {
     LBMForce* force;

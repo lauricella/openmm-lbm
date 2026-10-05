@@ -9,6 +9,9 @@
 #include "internal/D3Q19.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/internal/ContextImpl.h"
+#include "openmm/internal/OSRngSeed.h"
+#include "openmm/reference/ReferencePlatform.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <sstream>
@@ -16,6 +19,21 @@
 using namespace LBMPlugin;
 using namespace OpenMM;
 using namespace std;
+
+static vector<Vec3>& extractPositions(ContextImpl& context) {
+    ReferencePlatform::PlatformData* data = reinterpret_cast<ReferencePlatform::PlatformData*>(context.getPlatformData());
+    return *data->positions;
+}
+
+static vector<Vec3>& extractVelocities(ContextImpl& context) {
+    ReferencePlatform::PlatformData* data = reinterpret_cast<ReferencePlatform::PlatformData*>(context.getPlatformData());
+    return *data->velocities;
+}
+
+static vector<Vec3>& extractForces(ContextImpl& context) {
+    ReferencePlatform::PlatformData* data = reinterpret_cast<ReferencePlatform::PlatformData*>(context.getPlatformData());
+    return *data->forces;
+}
 
 void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForce& force, const LBMLatticeParameters& lattice) {
     this->lattice = lattice;
@@ -45,6 +63,22 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
                 populations[q*numNodes+node] = 0.0;
         }
     }
+
+    // Coupled particles: masses in units of the mass of a cell, m_c = rho0 dx^3.  No coupling force exists
+    // before the first step.
+
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    int numParticles = lattice.particles.size();
+    particleMass.resize(numParticles);
+    for (int i = 0; i < numParticles; i++)
+        particleMass[i] = system.getParticleMass(lattice.particles[i])/cellMass;
+    particleForces.assign(numParticles, Vec3());
+    reaction.resize(3*numNodes);
+    int seed = lattice.randomNumberSeed;
+    if (seed == 0)
+        seed = osrngseed();
+    OpenMM_SFMT::init_gen_rand((uint32_t) seed, sfmt);
+    hasStoredGaussian = false;
 }
 
 void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
@@ -53,22 +87,42 @@ void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
     // same steps as an uninterrupted run.
     stepIndex = context.getStepCount();
     stepPending = true;
+
+    // A coupled particle whose nearest node is solid has entered a wall: every component of its velocity is
+    // reversed, as for a no-slip wall.  This is done here, at the start of the step, where OpenMM's
+    // AndersenThermostat also changes velocities, so that the coupling and the integrator see the new values.
+    if (!isFluid.empty()) {
+        vector<Vec3>& positions = extractPositions(context);
+        vector<Vec3>& velocities = extractVelocities(context);
+        for (int particle : lattice.particles)
+            if (!isFluid[nearestNode(positions[particle])])
+                velocities[particle] = -velocities[particle];
+    }
 }
 
 double ReferenceCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
-    // The fluid advances once per integration step, on the first force evaluation after beginStep().
-    // The particle-fluid coupling is not implemented yet: no force is applied to the particles.
+    // The fluid advances, and the coupling forces are computed, once per integration step: on the first force
+    // evaluation after beginStep().  Every force evaluation applies the coupling forces of the last step, so
+    // that evaluations outside the integration steps (getState(), for example) neither advance the fluid nor
+    // draw new random forces.  The coupling is dissipative: its energy is zero.
     if (stepPending) {
         stepPending = false;
-        advanceFluid();
+        advanceFluid(context);
+    }
+    if (includeForces) {
+        vector<Vec3>& forces = extractForces(context);
+        for (int i = 0; i < (int) lattice.particles.size(); i++)
+            forces[lattice.particles[i]] += particleForces[i];
     }
     return 0.0;
 }
 
-void ReferenceCalcLBMForceKernel::advanceFluid() {
+void ReferenceCalcLBMForceKernel::advanceFluid(ContextImpl& context) {
     computeMoments();
     if (lattice.momentumRemovalFrequency > 0 && stepIndex%lattice.momentumRemovalFrequency == 0)
         removeFluidMomentum();
+    if (!lattice.particles.empty())
+        coupleParticles(context);
     collideAndStream();
     if (!isFluid.empty())
         bounceBack();
@@ -147,6 +201,70 @@ void ReferenceCalcLBMForceKernel::removeFluidMomentum() {
         momentum[3*node+1] -= rho[node]*uy;
         momentum[3*node+2] -= rho[node]*uz;
     }
+}
+
+void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context) {
+    // Explicit Euler-Maruyama coupling at the nearest node, in lattice units (time step 1):
+    //   F = -gamma m (v - j/rho) + sqrt(2 gamma m kT) xi,
+    // with xi three independent N(0,1) numbers.  v is the velocity of OpenMM's leapfrog, v(t - dt/2), and j is
+    // the momentum of the fluid before the force of this step, j(t - dt/2).  The particle receives F and the
+    // node -F: the reactions of the particles of a node are summed in particle order, then added to the force
+    // density of the node.  A solid node has rho = 0 and is at rest; the reaction it receives leaves the fluid.
+    int numNodes = lattice.getNumNodes();
+    vector<Vec3>& positions = extractPositions(context);
+    vector<Vec3>& velocities = extractVelocities(context);
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    double gamma = lattice.friction*lattice.dt;
+    double kT = lattice.kT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
+    double velocityScale = lattice.getVelocityScale();
+    double forceScale = cellMass*lattice.dx/(lattice.dt*lattice.dt);
+    fill(reaction.begin(), reaction.end(), 0.0);
+    for (int i = 0; i < (int) lattice.particles.size(); i++) {
+        int particle = lattice.particles[i];
+        int node = nearestNode(positions[particle]);
+        Vec3 u;
+        if (rho[node] > 0)
+            u = Vec3(momentum[3*node], momentum[3*node+1], momentum[3*node+2])*(1.0/rho[node]);
+        Vec3 v = velocities[particle]*(1.0/velocityScale);
+        double m = particleMass[i];
+        Vec3 f = (v-u)*(-gamma*m);
+        if (kT > 0 && gamma > 0) {
+            double sigma = sqrt(2.0*gamma*m*kT);
+            double xi0 = getGaussianRandom(), xi1 = getGaussianRandom(), xi2 = getGaussianRandom();
+            f += Vec3(xi0, xi1, xi2)*sigma;
+        }
+        particleForces[i] = f*forceScale;
+        for (int k = 0; k < 3; k++)
+            reaction[3*node+k] -= f[k];
+    }
+    for (int k = 0; k < 3*numNodes; k++)
+        forceDensity[k] += reaction[k];
+}
+
+int ReferenceCalcLBMForceKernel::nearestNode(const Vec3& position) const {
+    // After wrapping the position into the box, node i owns the interval [(i - 1/2) dx, (i + 1/2) dx).
+    int size[3] = {lattice.nx, lattice.ny, lattice.nz};
+    int index[3];
+    for (int k = 0; k < 3; k++) {
+        double s = position[k]/lattice.dx;
+        s -= floor(s/size[k])*size[k];
+        index[k] = ((int) floor(s + 0.5))%size[k];
+    }
+    return index[0] + lattice.nx*(index[1] + lattice.ny*index[2]);
+}
+
+double ReferenceCalcLBMForceKernel::getGaussianRandom() {
+    // Box-Muller transform of two uniform numbers, the first in (0, 1] so that its logarithm is finite.
+    if (hasStoredGaussian) {
+        hasStoredGaussian = false;
+        return storedGaussian;
+    }
+    const double twoPi = 6.283185307179586476925287;
+    double r = sqrt(-2.0*log(1.0 - OpenMM_SFMT::genrand_real2(sfmt)));
+    double angle = twoPi*OpenMM_SFMT::genrand_real2(sfmt);
+    storedGaussian = r*sin(angle);
+    hasStoredGaussian = true;
+    return r*cos(angle);
 }
 
 void ReferenceCalcLBMForceKernel::collideAndStream() {

@@ -125,6 +125,15 @@ void LBMForceImpl::initialize(ContextImpl& context) {
         cerr << "Warning: LBMForce: the relaxation time tau = " << lattice.tau << " is outside the range [0.505, 2] "
              << "in which the lattice Boltzmann model is accurate. tau = 3 nu dt/dx^2 + 1/2: change the viscosity, "
              << "the time step or the lattice spacing." << endl;
+
+    // The explicit drag multiplies the velocity of a particle relative to the fluid by 1 - gamma*dt in one step
+    // (docs/theory.md, section 2).
+
+    double gammaDt = lattice.friction*lattice.dt;
+    if (!lattice.particles.empty() && gammaDt > 1.0)
+        cerr << "Warning: LBMForce: friction*dt = " << gammaDt << " > 1: with the explicit drag the velocity of a "
+             << "particle relative to the fluid changes sign at every step" << (gammaDt >= 2.0 ? ", and grows without "
+             "bound since friction*dt >= 2" : "") << ". Reduce the friction or the time step." << endl;
 #ifdef LBM_DEBUG
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     cerr << "LBMForce lattice: dx = " << lattice.dx << " nm, dt = " << lattice.dt << " ps, m_c = " << cellMass
@@ -136,7 +145,10 @@ void LBMForceImpl::initialize(ContextImpl& context) {
 }
 
 void LBMForceImpl::updateContextState(ContextImpl& context, bool& forcesInvalid) {
+    // The coupling forces of a step depend on the velocities, on the fluid and on new random numbers, so the
+    // forces of earlier evaluations are never valid for the new step.
     kernel.getAs<CalcLBMForceKernel>().beginStep(context);
+    forcesInvalid = true;
 }
 
 double LBMForceImpl::calcForcesAndEnergy(ContextImpl& context, bool includeForces, bool includeEnergy, int groups) {

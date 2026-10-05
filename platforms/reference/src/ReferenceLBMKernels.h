@@ -12,27 +12,30 @@
 
 #include "LBMKernels.h"
 #include "openmm/Platform.h"
+#include "sfmt/SFMT.h"
 #include <vector>
 
 namespace LBMPlugin {
 
 /**
- * The Reference implementation of the lattice Boltzmann fluid: plain loops in double precision.
- * It is the correctness reference for the other platforms.
+ * The Reference implementation of the lattice Boltzmann fluid and of its coupling to the particles: plain
+ * loops in double precision.  It is the correctness reference for the other platforms.
  *
  * One lattice step (advanceFluid) has the same structure as on the other platforms:
  *  1. moments: density, momentum, non-equilibrium second moment and body force at every node;
  *  2. removal of the fluid momentum, in the steps whose index (the step count of the Context) is a multiple
  *     of momentumRemovalFrequency;
- *  3. collision and streaming: the populations are rebuilt from the moments of their own node and pushed
+ *  3. coupling: each coupled particle feels the explicit Euler-Maruyama drag and random force at its nearest
+ *     node, and the node receives the opposite force (docs/theory.md, section 2);
+ *  4. collision and streaming: the populations are rebuilt from the moments of their own node and pushed
  *     to the neighbours.  The collision reads only moments, so a single population array is enough;
- *  4. bounce-back at the solid nodes, if any: a population that streamed into a solid node is sent back
+ *  5. bounce-back at the solid nodes, if any: a population that streamed into a solid node is sent back
  *     to the fluid node it came from.  Solid nodes have no moments and no collision.
  */
 class ReferenceCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     ReferenceCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform) : CalcLBMForceKernel(name, platform),
-            stepPending(false), stepIndex(0), machWarningPrinted(false) {
+            stepPending(false), stepIndex(0), machWarningPrinted(false), hasStoredGaussian(false), storedGaussian(0) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
@@ -43,9 +46,12 @@ public:
     void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
 private:
-    void advanceFluid();
+    void advanceFluid(OpenMM::ContextImpl& context);
     void computeMoments();
     void removeFluidMomentum();
+    void coupleParticles(OpenMM::ContextImpl& context);
+    int nearestNode(const OpenMM::Vec3& position) const;
+    double getGaussianRandom();
     void collideAndStream();
     void bounceBack();
     void checkMachNumber();
@@ -64,6 +70,18 @@ private:
     long long stepIndex;
     /** True once the debug warning about the Mach number has been printed. */
     bool machWarningPrinted;
+    /** Masses of the coupled particles in lattice units, m/m_c. */
+    std::vector<double> particleMass;
+    /** Forces on the coupled particles (kJ/mol/nm) computed in the last lattice step.  Every force evaluation
+        applies them, so that evaluations outside the integration steps draw no new random numbers. */
+    std::vector<OpenMM::Vec3> particleForces;
+    /** Reaction of the coupled particles on each node (3 per node), in lattice units. */
+    std::vector<double> reaction;
+    /** Generator of the random force, owned by the kernel so that its sequence does not depend on other forces. */
+    OpenMM_SFMT::SFMT sfmt;
+    /** The Box-Muller transform yields two Gaussian numbers: the second is kept for the next call. */
+    bool hasStoredGaussian;
+    double storedGaussian;
 };
 
 } // namespace LBMPlugin
