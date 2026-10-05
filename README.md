@@ -2,9 +2,9 @@
 OpenMM plugin coupling molecular dynamics to a lattice Boltzmann fluid (D3Q19, regularized collision, Guo forcing) for coarse-grained simulations with hydrodynamics. Particles exchange friction and thermal noise with the fluid. Native OpenMM plugin with Reference, CUDA, OpenCL and HIP platforms.
 
 **Status: early development (0.1.0).** The plugin structure, the API, the fluid storage and the
-tests are in place on all platforms. The fluid update and solid walls are implemented on the
-Reference platform. The port of the fluid to the GPU platforms and the particle-fluid coupling are
-not implemented yet, so `LBMForce` currently applies no force to the particles (see the
+tests are in place on all platforms. The fluid update, solid walls and the particle-fluid coupling
+are implemented on the Reference platform. They are not yet ported to the GPU platforms: on CUDA,
+OpenCL and HIP the fluid does not advance and no force acts on the particles (see the
 [user guide](docs/user_guide/README.md#what-works-in-this-version)).
 
 ## Requirements

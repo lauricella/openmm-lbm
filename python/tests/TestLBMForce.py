@@ -90,6 +90,21 @@ def test_solid_nodes():
     assert density[64].value_in_unit(unit.dalton/unit.nanometer**3) == pytest.approx(602.214)
 
 
+def test_coupling_first_step():
+    # In one step the drag multiplies the velocity of a particle in a fluid at rest by 1 - friction*dt.
+    system, force, positions = create_system(num_particles=1)
+    force.setFriction(5.0/unit.picosecond)
+    force.setTemperature(0.0)
+    integrator = mm.VerletIntegrator(0.01)
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+    context.setPositions(positions)
+    context.setVelocities([mm.Vec3(0.3, -0.2, 0.1)])
+    integrator.step(1)
+    v = context.getState(getVelocities=True).getVelocities()[0].value_in_unit(unit.nanometer/unit.picosecond)
+    for found, initial in zip(v, (0.3, -0.2, 0.1)):
+        assert found == pytest.approx(initial*(1 - 5.0*0.01), rel=1e-12)
+
+
 def test_serialization():
     system, force, positions = create_system()
     force.setFriction(7.0)

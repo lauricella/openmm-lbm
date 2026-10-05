@@ -17,6 +17,8 @@ The model itself is described in [theory.md](../theory.md).
 3. [API reference](api_reference.md): every method of `LBMForce`, with units, defaults and errors.
 4. [Examples](examples.md): complete scripts.
    - A channel flow between two walls.
+   - A particle kicked in the fluid.
+   - The temperature of coupled particles.
    - Monitoring a run and the Mach number check.
    - Saving and restoring the fluid.
    - Serialization.
@@ -31,11 +33,10 @@ The model itself is described in [theory.md](../theory.md).
 | Reading and writing the fluid: `getFluidFields()`, `getFluidState()`, `setFluidState()`, `getFluidMachNumber()` | yes | yes |
 | Fluid update: collision, streaming, body force, removal of the fluid momentum, Mach number check | yes | not yet: the fluid keeps its initial state |
 | Solid nodes (`setSolidNodes()`) | yes | not yet: Context creation fails |
-| Particle-fluid coupling (friction and noise) | not yet | not yet |
+| Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | not yet: no force on the particles |
 
-Until the coupling is implemented, `LBMForce` applies no force to the particles and adds no energy.
-The methods for the coupling already exist: `addParticle()`, `setFriction()`, `setTemperature()` and
-`setRandomNumberSeed()`. Their values are checked and stored with the force.
+On the CUDA, OpenCL and HIP platforms `LBMForce` does not yet apply any force to the particles. The
+coupling is dissipative: on every platform it adds no energy.
 
 ## Conventions
 

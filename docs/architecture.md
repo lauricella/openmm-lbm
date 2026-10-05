@@ -43,10 +43,12 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    Then
    `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
    kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
-   step (moments, momentum removal, collision and streaming, bounce-back at solid nodes; see
-   `docs/theory.md` section 1); other
-   force evaluations do not. The Reference platform advances the fluid; the common implementation
-   (CUDA, OpenCL, HIP) does not yet. No coupling force is added in version 0.1.0.
+   step (moments, momentum removal, coupling of the particles, collision and streaming, bounce-back at
+   solid nodes; see `docs/theory.md` sections 1 and 2) and computes the coupling forces; every
+   `execute()` adds those forces to the particles, so other force evaluations neither advance the fluid
+   nor draw new random numbers. On the Reference platform `beginStep()` also reverses the velocity of a
+   coupled particle that has entered a solid node. The Reference platform advances the fluid and couples
+   the particles; the common implementation (CUDA, OpenCL, HIP) does neither yet.
 3. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
    through `LBMForceImpl`, to the kernel. The common implementation computes density and momentum on
    the device (`computeFluidMoments` in `lbmFluid.cc`), then converts them to OpenMM units on the host.

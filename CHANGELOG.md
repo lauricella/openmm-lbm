@@ -43,7 +43,14 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   `setFluidState()`, is identical to an uninterrupted run at any restart step
   (`testRestartFromCheckpoint`).
 
+- Particle-fluid coupling on the Reference platform: explicit Euler-Maruyama drag and random force at
+  the nearest node, the opposite force on the fluid (summed per node in particle order), only for the
+  particles added to the force; coupled particles reaching a solid node have their velocity reversed;
+  forces computed once per step and reused by other force evaluations; a random generator owned by the
+  force; warning for friction*dt > 1. Tests in `tests/TestLBMCoupling.h`. Documentation:
+  `docs/theory.md` section 2, the user guide (two new examples, including a reporter of the full-step
+  temperature, since the temperature reported by OpenMM is not valid for coupled particles).
+
 ### Not yet implemented
-- Fluid update and solid nodes on the CUDA, OpenCL and HIP platforms.
+- Fluid update, solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).
-- Particle-fluid coupling: `LBMForce` applies no force in this version.

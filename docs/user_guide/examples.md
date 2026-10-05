@@ -5,10 +5,13 @@ file and run as it is. The outputs shown were obtained with OpenMM 8.6.1.
 
 1. [Channel flow between two walls](#channel-flow-between-two-walls): solid nodes, body force,
    comparison with the analytical profile, changing a parameter during the run.
-2. [Monitoring a run and the Mach number check](#monitoring-a-run-and-the-mach-number-check).
-3. [Saving and restoring the fluid](#saving-and-restoring-the-fluid).
-4. [Serialization](#serialization).
-5. [Using openmm.app.Simulation](#using-openmmappsimulation): a reporter for the fluid, checkpoints.
+2. [A particle kicked in the fluid](#a-particle-kicked-in-the-fluid): drag, momentum passed to the fluid.
+3. [Temperature of coupled particles](#temperature-of-coupled-particles): a reporter of the full-step
+   temperature.
+4. [Monitoring a run and the Mach number check](#monitoring-a-run-and-the-mach-number-check).
+5. [Saving and restoring the fluid](#saving-and-restoring-the-fluid).
+6. [Serialization](#serialization).
+7. [Using openmm.app.Simulation](#using-openmmappsimulation): a reporter for the fluid, checkpoints.
 
 The page on [the lattice](lattice.md#node-indexing-and-numpy-arrays) shows how to turn the fluid
 fields into NumPy arrays indexed by node.
@@ -112,6 +115,177 @@ Notes:
   at the rate of the slowest viscous mode of the channel.
 - **Other geometries.** Any set of nodes can be solid: a cylinder, a pore, a rough wall. Build the
   mask with NumPy, as here, and pass the indices to `setSolidNodes()`.
+
+## A particle kicked in the fluid
+
+A particle of 100 Da starts with velocity v0 = 1 nm/ps in a fluid at rest. The temperature is zero, so
+there is no random force. The drag slows the particle down and passes its momentum to the fluid, and the
+total momentum of particle and fluid is conserved.
+
+```python
+import numpy as np
+import openmm as mm
+import openmm.unit as unit
+from openmmlbm import LBMForce
+
+L, n, dt = 8.0, 16, 0.01           # box (nm), nodes per side, time step (ps): dx = 0.5 nm
+mass, friction, v0 = 100.0, 10.0, 1.0
+
+system = mm.System()
+system.setDefaultPeriodicBoxVectors(mm.Vec3(L, 0, 0), mm.Vec3(0, L, 0), mm.Vec3(0, 0, L))
+system.addParticle(mass)
+force = LBMForce()
+force.setGridSize(n, n, n)
+force.setKinematicViscosity(5.0175)            # tau = 1.10
+force.setFriction(friction)
+force.setTemperature(0.0)                      # no random force: a deterministic kick
+force.setFluidMomentumRemovalFrequency(0)      # keep the momentum given to the fluid
+force.addParticle(0)
+system.addForce(force)
+
+integrator = mm.VerletIntegrator(dt)
+context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+context.setPositions([mm.Vec3(4.0, 4.0, 4.0)])
+context.setVelocities([mm.Vec3(v0, 0, 0)])
+
+cellMass = force.getFluidDensity().value_in_unit(unit.dalton/unit.nanometer**3)*(L/n)**3
+def fluid_momentum():
+    """Total momentum of the fluid (Da nm/ps) from its populations."""
+    f = np.array(force.getFluidState(context)).reshape(19, -1)
+    cx = np.array([0, 1, -1, 0, 0, 0, 0, 1, -1, 1, -1, 0, 0, 0, 0, 1, -1, -1, 1])
+    return (cx[:, None]*f).sum()*cellMass*(L/n)/dt
+
+print(' t (ps)   v/v0     (1-gamma dt)^n   p_fluid/p0   p_total/p0')
+for block in range(6):
+    t = context.getTime().value_in_unit(unit.picosecond)
+    v = context.getState(getVelocities=True).getVelocities()[0][0].value_in_unit(unit.nanometer/unit.picosecond)
+    pf = fluid_momentum()
+    print('%5.2f   %.4f   %.4f          %.4f       %.9f' % (t, v/v0, (1 - friction*dt)**round(t/dt), pf/(mass*v0), (mass*v + pf)/(mass*v0)))
+    integrator.step(10)
+```
+
+Output:
+
+```
+ t (ps)   v/v0     (1-gamma dt)^n   p_fluid/p0   p_total/p0
+ 0.00   1.0000   1.0000          -0.0000       1.000000000
+ 0.10   0.3560   0.3487          0.6440       1.000000000
+ 0.20   0.1297   0.1216          0.8703       1.000000000
+ 0.30   0.0483   0.0424          0.9517       1.000000000
+ 0.40   0.0185   0.0148          0.9815       1.000000000
+ 0.50   0.0074   0.0052          0.9926       1.000000000
+```
+
+Notes:
+
+- **Explicit drag.** With the fluid at rest, one step multiplies the velocity by 1 - gamma dt = 0.9.
+  The particle slows down more slowly than (1 - gamma dt)^n, because the fluid at its node starts to move
+  with it. This hydrodynamic response is what the lattice Boltzmann fluid adds to a Langevin thermostat.
+- **Momentum.** The momentum lost by the particle is in the fluid: p_total/p0 = 1 to the rounding of the
+  sum over the populations. The removal of the fluid momentum must be off, otherwise the plugin would
+  subtract it.
+- **Long times.** Particle and fluid end up moving together at P/(m + M_fluid), 3e-4 v0 here.
+
+## Temperature of coupled particles
+
+The random force at temperature T and the friction keep the coupled particles at about T: `LBMForce`
+is their thermostat. OpenMM's leapfrog stores the velocities at half steps, and the temperature that
+OpenMM reports is not valid for coupled particles
+([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-the-reference-platform)). The
+reporter below computes the temperature from full-step velocities: the mean of the velocities of two
+consecutive steps.
+
+```python
+import numpy as np
+import openmm as mm
+import openmm.app as app
+import openmm.unit as unit
+from openmmlbm import LBMForce
+
+
+class FullStepTemperatureReporter:
+    """Writes the temperature of the coupled particles computed from full-step velocities.
+
+    With the leapfrog of VerletIntegrator the stored velocities are at half steps.  The reporter takes the
+    velocities of two consecutive steps, n - 1 and n, and uses their mean, the velocity at the full step.
+    """
+
+    def __init__(self, file, reportInterval, particles):
+        self._out = open(file, 'w') if isinstance(file, str) else file
+        self._reportInterval = reportInterval
+        self._particles = np.array(particles)
+        self._previous = None
+        print('# step, full-step temperature (K), half-step temperature (K)', file=self._out)
+
+    def describeNextReport(self, simulation):
+        steps = self._reportInterval - simulation.currentStep%self._reportInterval
+        if steps > 1:
+            steps -= 1                    # first stop one step before the report
+        return {'steps': steps, 'periodic': None, 'include': ['velocities']}
+
+    def report(self, simulation, state):
+        v = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)[self._particles]
+        if simulation.currentStep%self._reportInterval != 0:
+            self._previous = v
+            return
+        system = simulation.system
+        m = np.array([system.getParticleMass(int(i)).value_in_unit(unit.dalton) for i in self._particles])
+        kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole/unit.kelvin)
+        dof = 3*len(m)
+        half = (m[:, None]*v**2).sum()/(dof*kB)
+        if self._previous is None:
+            print('%d nan %.1f' % (simulation.currentStep, half), file=self._out, flush=True)
+            return
+        full = (m[:, None]*((v + self._previous)/2)**2).sum()/(dof*kB)
+        print('%d %.1f %.1f' % (simulation.currentStep, full, half), file=self._out, flush=True)
+
+
+# 200 free beads of 100 Da coupled to the fluid at 300 K, gamma dt = 0.1.
+numBeads, L = 200, 8.0
+topology = app.Topology()
+chain = topology.addChain()
+system = mm.System()
+system.setDefaultPeriodicBoxVectors(mm.Vec3(L, 0, 0), mm.Vec3(0, L, 0), mm.Vec3(0, 0, L))
+force = LBMForce()
+force.setGridSize(16, 16, 16)
+force.setKinematicViscosity(5.0175)
+force.setFriction(10.0)
+force.setTemperature(300.0)
+force.setRandomNumberSeed(7)
+for i in range(numBeads):
+    topology.addAtom('B', None, topology.addResidue('BEA', chain))
+    system.addParticle(100.0)
+    force.addParticle(i)
+system.addForce(force)
+
+simulation = app.Simulation(topology, system, mm.VerletIntegrator(0.01*unit.picosecond),
+                            mm.Platform.getPlatformByName('Reference'))
+simulation.context.setPositions(np.random.default_rng(1).uniform(0, L, (numBeads, 3)))
+simulation.context.setVelocitiesToTemperature(300.0, 3)
+simulation.reporters.append(FullStepTemperatureReporter('temperature.txt', 50, range(numBeads)))
+simulation.step(5000)
+
+data = np.loadtxt('temperature.txt')[20:]          # skip the first 1000 steps
+print('full step %.0f K, half step %.0f K' % (data[:, 1].mean(), data[:, 2].mean()))
+```
+
+Output:
+
+```
+full step 293 K, half step 308 K
+```
+
+Notes:
+
+- **Full step.** Slightly below T: the fluid has no thermal fluctuations of its own and takes part of the
+  momentum of the particles. Over 20000 steps the same system gives 295.8 +- 0.4 K, 1.4% below T
+  ([validation.md](../validation.md)).
+- **Half step.** For a free particle it is T/(1 - gamma dt/2) = 315.8 K, lowered by the same factor:
+  311.7 +- 0.4 K over 20000 steps.
+- **OpenMM's own temperature.** With `StateDataReporter(..., temperature=True)` this system reads
+  359 K. Do not use it for coupled particles.
+- **Using the reporter.** It works with any Simulation: pass the indices of the coupled particles. It
+  stops one step before each report to record the velocities.
 
 ## Monitoring a run and the Mach number check
 
@@ -283,8 +457,9 @@ fluid of a Context is not part of the XML; save it as in the [previous example](
 
 `LBMForce` works with `openmm.app.Simulation` like any other force. This script builds a chain of
 coarse-grained beads and couples them to the fluid. It records the fluid with a custom reporter next
-to a standard `StateDataReporter`, and saves the run. In this version the coupling is not implemented,
-so the beads move as if the fluid were absent; the setup does not change when it is.
+to a standard `StateDataReporter`, and saves the run. The beads and the fluid exchange momentum, so the
+mean velocity of the fluid also changes in y and z. Fixed seeds, for the random force and for the initial
+velocities, make the run reproducible.
 
 ```python
 import numpy as np
@@ -336,16 +511,18 @@ force = LBMForce()
 force.setGridSize(10, 10, 10)                       # dx = 0.5 nm
 force.setFriction(5.0)
 force.setTemperature(300.0)
+force.setRandomNumberSeed(1)                       # a fixed seed makes the run reproducible
 force.setBodyAcceleration(mm.Vec3(0.1, 0, 0))
 force.setFluidMomentumRemovalFrequency(0)
 for i in range(numBeads):
-    force.addParticle(i)                            # coupling not implemented yet: no force on the beads
+    force.addParticle(i)
 system.addForce(force)
 
 simulation = app.Simulation(topology, system, mm.VerletIntegrator(0.01*unit.picosecond),
                             mm.Platform.getPlatformByName('Reference'))
 simulation.context.setPositions([mm.Vec3(1.0 + 0.38*i, 2.5, 2.5) for i in range(numBeads)])
-simulation.context.setVelocitiesToTemperature(300.0)
+kT = (unit.MOLAR_GAS_CONSTANT_R*300.0*unit.kelvin).value_in_unit(unit.kilojoule_per_mole)
+simulation.context.setVelocities(np.random.default_rng(1).normal(0, np.sqrt(kT/100.0), (numBeads, 3)))
 
 simulation.reporters.append(FluidReporter('fluid.txt', 100, force))
 simulation.reporters.append(app.StateDataReporter('state.txt', 100, step=True, time=True, potentialEnergy=True))
@@ -362,11 +539,11 @@ Output:
 
 ```
 # time (ps), mean fluid velocity ux uy uz (nm/ps), Mach number
-1 0.1005 0 0 0.0034641
-2 0.2005 0 0 0.0069282
-3 0.3005 0 0 0.0103923
-4 0.4005 0 0 0.0138564
-5 0.5005 0 0 0.0173205
+1 0.0983797 0.00133459 0.0012744 0.00451306
+2 0.195794 0.000860838 0.000198581 0.00759161
+3 0.296034 0.000747286 0.00100197 0.0116595
+4 0.394395 0.000109059 0.00082861 0.0172864
+5 0.492879 0.00146615 0.000630083 0.0186065
 ```
 
 To continue the run later, create the Simulation in the same way and restore both files:
@@ -379,13 +556,16 @@ simulation.step(500)
 
 Notes:
 
-- **Integrator.** Only `VerletIntegrator` is accepted: when the coupling is implemented, friction and
-  noise will be part of `LBMForce`, which will act as the thermostat of the coupled particles.
+- **Integrator.** Only `VerletIntegrator` is accepted: friction and random force are part of
+  `LBMForce`, which is the thermostat of the coupled particles.
+- **Initial velocities.** They come from NumPy here because `setVelocitiesToTemperature()` gives
+  different velocities in different OpenMM versions; either is fine in practice.
+- **Temperature.** The temperature column of `StateDataReporter` is not valid for coupled particles;
+  use the reporter of the [temperature example](#temperature-of-coupled-particles).
 - **Reporters.** A reporter can read the fluid with any of the methods of `LBMForce` that take the
   Context; none of them advances the fluid.
-- **Which particles to couple.** Only the particles passed to `addParticle()` will interact with the
-  fluid.
+- **Which particles to couple.** Only the particles passed to `addParticle()` interact with the fluid.
 - **GPU platforms.** To run on CUDA, replace the platform with `mm.Platform.getPlatformByName('CUDA')`
   and pass `{'Precision': 'mixed'}`. In this version the fluid does not advance on the GPU platforms
-  yet, and solid nodes are not accepted there (see the
+  yet, no force acts on the particles, and solid nodes are not accepted there (see the
   [status table](README.md#what-works-in-this-version)).

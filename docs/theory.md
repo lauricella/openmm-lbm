@@ -81,31 +81,78 @@ from a solid neighbour as f^eq(rho, u_bc) + (1 - omega) f^neq,reg(Pi^neq), with 
 itself; the wall lies halfway along the link. The equilibrium is the weakly compressible one, with rho
 multiplying the whole Hermite expansion.
 
-## 2. Particle-fluid coupling (to be implemented)
+## 2. Particle-fluid coupling (implemented on the Reference platform)
 
 **Euler-Maruyama scheme.** Each coupled particle k of mass m_k feels
 
   F_k = -gamma m_k (v_k - u(x_k)) + R_k,   <R_k R_k> = 2 gamma m_k kT/dt (per component).
 
-- u(x_k) is the fluid velocity j/rho at the nearest lattice node.
-- The fluid at that node receives -F_k.
+- u(x_k) = j/rho at the nearest lattice node (section 3, Nearest node).
+- The fluid at that node receives -F_k. The reactions of the particles at the same node are summed in
+  particle order and added to the body force rho g of the node.
+- In lattice units (time step 1): F = -gamma m (v - u) + sqrt(2 gamma m kT) xi, with xi three
+  independent N(0, 1) numbers.
 - Drag and noise are part of the force, so the System is integrated with `VerletIntegrator`.
+- This is the explicit scheme of the reference CUDA library. openmm-lbm reproduces it first, and studies
+  changes (time-centred drag, relaxation of the ghost moments) only afterwards.
+
+**Order in the lattice step.** Moments, removal of the fluid momentum, coupling, collision and
+streaming, bounce-back. The coupling therefore sees the fluid momentum after the removal.
 
 **Time levels.** OpenMM's Verlet integrator is a leapfrog: during the force evaluation of step t
 the velocities are v(t - dt/2). The fluid momentum before the step is j(t - dt/2), because
 j(t + dt/2) = j(t - dt/2) + F(t). The drag therefore compares particle and fluid velocities at the
 same half step, explicitly.
 
-**Kinetic temperature.** Measured from half-step velocities it is kT/(1 - gamma dt/2) for a free
-particle. Measured from full-step velocities v(t) = (v(t - dt/2) + v(t + dt/2))/2 it is kT.
+**Forces once per step.** The coupling forces are computed once per integration step, in the force
+evaluation that advances the fluid, and are kept until the next step. Every other force evaluation
+(`getState(getForces=True)`, `setVelocitiesToTemperature()`) applies the same forces: it does not
+draw new random numbers, so it does not change the trajectory. Before the first step the coupling
+forces are zero. The coupling is dissipative and has no energy.
 
-**Per-cell reaction.** The reaction forces of the particles in the same cell are summed without
-atomic operations:
+**Random force.** On the Reference platform the random numbers come from a generator owned by the
+force (SFMT, Box-Muller transform).
+- It is seeded with `setRandomNumberSeed()`, or with a unique seed when the seed is 0.
+- Its sequence does not depend on the other forces of the System, and the same seed reproduces a
+  simulation.
+- Its state is not part of OpenMM checkpoints.
+
+On the GPU platforms the random numbers will come from OpenMM's generator, as in the reference library.
+
+**Walls.** A coupled particle whose nearest node is solid has entered a wall.
+- At the start of the step (`updateContextState()`, where OpenMM's `AndersenThermostat` also changes
+  velocities) every component of its velocity is reversed, as for a no-slip wall.
+- In that step it feels the drag of the wall at rest (u = 0) and the random force.
+- The reaction on the solid node leaves the fluid, since solid nodes do not collide.
+- A particle that is still at a solid node in the next step is reversed again.
+- Uncoupled particles do not see the walls.
+
+**Stability of the explicit drag.** In one step the drag multiplies the velocity of a particle
+relative to the fluid by 1 - gamma dt. It changes sign at every step for gamma dt > 1, and it grows
+without bound for gamma dt >= 2. A warning is printed when a Context is created with gamma dt > 1.
+
+**Kinetic temperature.** OpenMM's leapfrog stores the velocities at half steps.
+- For a free particle with fluid at rest, the temperature measured from half-step velocities is
+  T/(1 - gamma dt/2). Measured from full-step velocities v(t) = (v(t - dt/2) + v(t + dt/2))/2, it is T.
+- The fluid has no thermal fluctuations of its own and takes part of the momentum of the particles, so
+  the particles are slightly colder than T. Measured on the Reference platform with 200 free beads of
+  100 Da, dx = 0.5 nm, dt = 0.01 ps, tau = 1.10, gamma dt = 0.1 and T = 300 K: 295.8 +- 0.4 K from
+  full-step velocities and 311.7 +- 0.4 K from half-step velocities, where T/(1 - gamma dt/2) = 315.8 K.
+- **The temperature reported by OpenMM is not valid for coupled particles.** This is the kinetic energy
+  of the State, used by `StateDataReporter`. For `VerletIntegrator`, OpenMM shifts the velocities by half
+  a step with the forces of the current evaluation, which for the coupling are those of the last step,
+  random force included. For a free particle this gives T [(1 - 3a/2)^2/(1 - a/2) + 9a/2], with
+  a = gamma dt: 363 K at 300 K and a = 0.1. 359 K was measured in the run above. Compute the
+  temperature from full-step velocities instead (user guide, examples).
+
+**Per-cell reaction on the GPU platforms (to be implemented).** The reaction forces of the particles in
+the same cell will be summed without atomic operations:
 
 1. the (cell, particle) pairs are sorted with OpenMM's `ComputeSort`, using unique keys;
 2. one thread per cell adds the forces of its particles, in particle order.
 
-The result is bitwise reproducible.
+The result will be bitwise reproducible, and equal to the sum in particle order of the Reference
+platform.
 
 **Momentum removal.** When it is enabled, on the steps whose index is a multiple of the removal
 frequency, the momentum of the fluid is removed right after the

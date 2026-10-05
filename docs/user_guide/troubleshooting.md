@@ -27,6 +27,10 @@ the plugin converts the parameters to lattice units.
 | `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have 19 nx ny nz values. |
 | `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles and the solid nodes) | These parameters are fixed when the Context is created. Create a new Context. |
 
+The warning `friction*dt = ... > 1` is printed on stderr when the explicit drag overshoots: the velocity
+of a particle relative to the fluid changes sign at every step, and grows without bound for
+friction*dt >= 2. Reduce the friction or the time step.
+
 The warning `the relaxation time tau = ... is outside the range [0.505, 2]` is printed on stderr and
 does not stop the simulation. See [relaxation time](lattice.md#relaxation-time) for how to bring tau
 into the range.
@@ -46,8 +50,16 @@ not keep the fluid. Save it with `getFluidState()` and restore it with `setFluid
 **The fluid does not change on the CUDA, OpenCL or HIP platform.** The fluid update runs only on the
 Reference platform in this version; see the [status table](README.md#what-works-in-this-version).
 
-**The particles do not feel the fluid.** The particle-fluid coupling is not implemented yet:
-`LBMForce` applies no force to the particles.
+**The particles do not feel the fluid on a GPU platform.** The coupling runs only on the Reference
+platform in this version; on CUDA, OpenCL and HIP `LBMForce` applies no force to the particles yet.
+
+**The temperature in the log is too high.** The temperature that OpenMM reports (`StateDataReporter`,
+the kinetic energy of a State) is not valid for particles coupled to the fluid: with friction*dt = 0.1 it
+reads about 20% above the temperature of the random force. Compute it from full-step velocities, as in
+the [temperature example](examples.md#temperature-of-coupled-particles).
+
+**Particles that are not coupled cross the walls.** Only coupled particles are reflected at solid
+nodes.
 
 **`System.addForce(LBMForce())` raises a `TypeError`.** The Python wrapper of the plugin was generated
 with a different SWIG version from the OpenMM Python module, so OpenMM does not recognize the

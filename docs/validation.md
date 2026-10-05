@@ -50,6 +50,27 @@ width H = 23:
 |---|---|---|---|---|---|---|---|---|---|---|
 | wall shift (lattice units) | +0.00942 | +0.00797 | +0.00507 | +0.00217 | 0.00000 | -0.00072 | -0.00362 | -0.00942 | -0.01810 | -0.03256 |
 
+## Coupling of particles and fluid (`tests/TestLBMCoupling.h`, Reference platform)
+
+Particles of 100 Da in a fluid of 8x8x8 nodes (dx = 0.5 nm, dt = 0.01 ps, tau = 0.8), without removal of
+the fluid momentum.
+
+| Test | Checks | Tolerance |
+|---|---|---|
+| First step | a particle in a fluid at rest: v1 = v0 (1 - gamma dt); `getState()` then returns the force of the step, m (v1 - v0)/dt | 1e-14, 1e-12 relative |
+| Momentum conservation | particles and fluid with drag and random force, 50 steps, two particles at the same node, one crossing the periodic boundary, lattice densities 1, 0.98 and 1.02 | 1e-11 of the particle momentum (measured 7e-13: rounding of the sum over 19x512 populations) |
+| Moving with the fluid | particle and fluid at the same velocity along x, y, z and a diagonal, two cells crossed | 1e-13 |
+| Partial coupling | uncoupled particles keep their velocity and feel no force | rounding of OpenMM's Verlet |
+| Force evaluations and seeds | `getState()` before and after every step does not change the trajectory; two runs with seed 0 differ | bitwise |
+| Walls | a coupled particle reaching a solid node: v2 = -v0 (1 - gamma dt)^2; an uncoupled one passes | 1e-14 |
+| Restart | checkpoint plus `setFluidState()` at step 13, removal every 5 steps, T = 0 | bitwise |
+| Warning | friction*dt > 1 is reported at Context creation | |
+
+**Temperature** (Reference, 200 free beads of 100 Da, 16^3 nodes, tau = 1.10, gamma dt = 0.1, T = 300 K,
+20000 steps): 295.8 +- 0.4 K from full-step velocities, 311.7 +- 0.4 K from half-step velocities
+(T/(1 - gamma dt/2) = 315.8 K). The kinetic energy reported by OpenMM gives 359 K and is not valid for
+coupled particles (`docs/theory.md`, section 2).
+
 ## Equivalence with the reference implementation: fluid only
 
 The Reference platform was compared in double precision with the CUDA lattice Boltzmann library from
@@ -71,6 +92,7 @@ built in double precision.
 ## Planned
 
 - The same fluid tests on the CUDA, OpenCL and HIP platforms, in single, mixed and double precision.
-- Equivalence with the reference library for the coupling: first step of the drag, reaction on the
-  fluid, momentum conservation, co-moving particle, mobility of a dragged particle as a function of tau
-  and box size.
+- Equivalence with the reference library for the coupling, at T = 0 in double precision: the
+  deterministic tests of its validation campaign (first step and reaction, co-moving particle,
+  nearest-node artefacts, kick, pair mobility, composite sphere) and the mobility of a dragged particle
+  as a function of tau and box size.

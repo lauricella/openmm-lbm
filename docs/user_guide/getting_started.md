@@ -144,9 +144,10 @@ print(force.getFluidDensity())    # 602.214... Da/nm^3
 
 ## Platforms
 
-The fluid update and the solid nodes are implemented on the Reference platform in this version. On
-the CUDA, OpenCL and HIP platforms the fluid is stored and can be read, written and checked, but it does
-not advance yet, and solid nodes are rejected (see the [status table](README.md#what-works-in-this-version)).
+The fluid update, the solid nodes and the coupling of the particles are implemented on the Reference
+platform in this version. On the CUDA, OpenCL and HIP platforms the fluid is stored and can be read,
+written and checked, but it does not advance yet, solid nodes are rejected and no force acts on the
+particles (see the [status table](README.md#what-works-in-this-version)).
 On those platforms the fluid is stored in the "mixed" type of the platform:
 
 - single precision with `Precision` = `single`;

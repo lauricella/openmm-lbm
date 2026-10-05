@@ -151,14 +151,23 @@ force.setSolidNodes(index[(j == 0) | (j == ny - 1)])     # walls on the planes j
 
 ## Coupled particles
 
-The coupling between particles and fluid is not implemented yet: in this version `LBMForce` applies no
-force to the particles and returns zero energy. The methods below are already in place. Their values
-are checked when the Context is created and stored with the force.
+Each coupled particle feels a friction force -gamma m (v - u) relative to the fluid velocity u at the
+nearest lattice node, plus a random force at the given temperature, and the fluid at that node receives
+the opposite force (explicit Euler-Maruyama scheme,
+[theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-the-reference-platform)). This is
+implemented on the Reference platform; on the other platforms no force acts on the particles yet.
 
-When the coupling is implemented, each coupled particle will feel a friction force
--gamma m (v - u) relative to the fluid velocity u at the nearest lattice node, plus a random force at
-the given temperature, and the fluid will receive the opposite force (see
-[theory.md](../theory.md#2-particle-fluid-coupling-to-be-implemented)).
+- **Once per step.** The coupling forces are computed once per integration step. Every other force
+  evaluation, for example `getState(getForces=True)`, returns the forces of the last step, without new
+  random numbers. Before the first step they are zero. The energy of the coupling is zero.
+- **Walls.** A coupled particle whose nearest node is solid has every component of its velocity
+  reversed at the start of the step, as for a no-slip wall. Uncoupled particles do not see the walls.
+- **Stability.** In one step the drag multiplies the velocity of a particle relative to the fluid by
+  1 - friction*dt. A warning is printed when friction*dt > 1, and the motion is unstable for
+  friction*dt >= 2.
+- **Temperature.** The temperature that OpenMM reports for the System (`StateDataReporter`, the kinetic
+  energy of a State) is not valid for coupled particles. Use full-step velocities, as in the
+  [temperature example](examples.md#temperature-of-coupled-particles).
 
 ### `addParticle(particle)`
 
@@ -179,6 +188,7 @@ Number of coupled particles; System index of the coupled particle `index`; chang
 ### `setFriction(friction)`, `getFriction()`
 
 Friction coefficient gamma of the coupling, in 1/ps. The default is 1/ps. It must not be negative.
+Typical values for coarse-grained beads are 1 to 10/ps; keep friction*dt well below 1.
 
 ### `setTemperature(temperature)`, `getTemperature()`
 
@@ -187,9 +197,10 @@ negative.
 
 ### `setRandomNumberSeed(seed)`, `getRandomNumberSeed()`
 
-Seed of the random force. With 0, the default, a different seed is chosen for every Context. As for
-the other OpenMM forces, two simulations with different seeds have different random forces, while the
-same seed is not guaranteed to reproduce a simulation.
+Seed of the random force. With 0, the default, a different seed is chosen for every Context. Two
+simulations with different seeds have different random forces. On the Reference platform the random
+force has its own generator, so the same seed reproduces a simulation; as for other OpenMM forces, this
+is not guaranteed on the other platforms. The state of the generator is not part of OpenMM checkpoints.
 
 ## Reading and writing the fluid of a Context
 
