@@ -101,6 +101,10 @@ void LBMForceImpl::initialize(ContextImpl& context) {
     kernel.getAs<CalcLBMForceKernel>().initialize(context.getSystem(), owner, lattice);
 }
 
+void LBMForceImpl::updateContextState(ContextImpl& context, bool& forcesInvalid) {
+    kernel.getAs<CalcLBMForceKernel>().beginStep(context);
+}
+
 double LBMForceImpl::calcForcesAndEnergy(ContextImpl& context, bool includeForces, bool includeEnergy, int groups) {
     if ((groups&(1<<owner.getForceGroup())) == 0)
         return 0.0;

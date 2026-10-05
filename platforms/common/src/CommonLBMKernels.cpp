@@ -71,6 +71,11 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     computeMomentsKernel->addArg(momentum);
 }
 
+void CommonCalcLBMForceKernel::beginStep(ContextImpl& context) {
+    // The fluid does not advance on this platform yet: the lattice update is ported from the Reference
+    // platform in the next phase.
+}
+
 double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
     // The fluid update and the particle-fluid coupling are not implemented yet: no force is applied.
     return 0.0;

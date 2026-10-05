@@ -5,7 +5,7 @@ lattice units, and the conventions every platform must follow. Each section says
 already implemented (version 0.1.0) or still to be implemented; the target scheme is the one of the
 CUDA lattice Boltzmann library of the DragOpenMM project, which this plugin reproduces.
 
-## 1. Fluid model (to be implemented)
+## 1. Fluid model (implemented on the Reference platform)
 
 The fluid is a D3Q19 lattice Boltzmann model, weakly compressible:
 
@@ -23,16 +23,25 @@ during the step, the post-collision populations are
 where:
 
 - u* = (j + F/2)/rho is the velocity shifted by half a force;
-- f_i^neq,reg = w_i/(2 cs^4) (c_i c_i - cs^2 I) : Pi^neq is rebuilt from the non-equilibrium stress
-  Pi^neq = sum_i c_i c_i (f_i - f_i^eq(rho, j/rho));
+- f_i^neq,reg = w_i/(2 cs^4) H2(c_i) : Pi^neq is rebuilt from the non-equilibrium stress
+  Pi^neq = sum_i H2(c_i) (f_i - f_i^eq(rho, j/rho)), with the second-order Hermite polynomial
+  H2(c) = c c - cs^2 I. In Pi^neq the -cs^2 I part of H2 does not contribute, because the equilibrium
+  has the same density as the populations and sum_i (f_i - f_i^eq) = 0: Pi^neq is also the plain
+  second moment of f - f^eq, which is how the reference library computes it. In f^neq,reg the -cs^2 I
+  part gives the term -cs^2 tr(Pi^neq), without which f^neq,reg would carry mass;
 - S_i = w_i [(c_i - u*)/cs^2 + (c_i.u*) c_i/cs^4] . F is the Guo source.
 
 The prefactor of S_i is 1/2, not the (1 - omega/2) of the BGK form. The equilibrium is already
 shifted by F/2 and the regularized f^neq has no first-order part, so with 1/2 the momentum increases
 by exactly F per step, at every relaxation time [3, 4].
 
+- F = rho g for a body acceleration g (lattice units); the coupling forces are added to it.
+
 **Relaxation and streaming.** The relaxation frequency is omega = 1/tau, with
 tau = 3 nu dt/dx^2 + 1/2.
+
+**Velocity of the fluid.** `getFluidFields()` reports u = (j + F/2)/rho, the velocity of the forced
+model, with F from the body acceleration.
 
 The update is thread-safe and uses a single copy of the populations:
 
@@ -68,15 +77,19 @@ atomic operations:
 
 The result is bitwise reproducible.
 
-**Momentum removal.** When it is enabled, on the steps that are multiples of the removal
-frequency, the momentum of the fluid is removed right after the moments are computed and before the
-coupling. The plugin sums rho and j over the lattice, computes u_cm = sum(j)/sum(rho) and applies
+**Momentum removal.** When it is enabled, on the steps whose index (counted from 0, the first lattice
+step) is a multiple of the removal frequency, the momentum of the fluid is removed right after the
+moments are computed and before the coupling. The default frequency is 1, every step. The plugin sums rho and j over the lattice, computes u_cm = sum(j)/sum(rho) and applies
 j <- j - rho u_cm at every node; Pi^neq is left unchanged. The populations are then rebuilt from
 the corrected moments by the collision. The sums use two-stage reductions without atomic
 operations.
 
-**Fluid update.** The fluid is advanced once per time step. Further force evaluations within the
-same step (for example `getState(getForces=True)`) reuse the forces already computed.
+**Fluid update.** The fluid is advanced once per time step. `VerletIntegrator::step()` calls
+`ContextImpl::updateContextState()` before computing the forces of each step; `LBMForceImpl` uses that
+call to mark the next force evaluation as the one that advances the fluid. This is how OpenMM's own
+forces with internal state (`CMMotionRemover`, `AndersenThermostat`, `MonteCarloBarostat`) act once
+per step. Other force evaluations (`getState(getForces=True)`, `setVelocitiesToTemperature()`) do not
+advance the fluid and will reuse the coupling forces already computed.
 
 ## 3. Units and conversions (implemented)
 

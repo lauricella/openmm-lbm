@@ -1,0 +1,273 @@
+/* -------------------------------------------------------------------------- *
+ *                                 openmm-lbm                                 *
+ * -------------------------------------------------------------------------- *
+ * Copyright (c) 2026 the Authors (see README.md).                            *
+ * SPDX-License-Identifier: MIT                                               *
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Tests of the lattice Boltzmann fluid on its own (no coupled particles): steady uniform flow,
+ * conservation, body force, removal of the fluid momentum, viscosity from the decay of a shear wave,
+ * and the rule that the fluid advances only in integration steps.  Include after TestLBMForce.h and
+ * call runFluidTests().
+ */
+
+#include "openmm/internal/AssertionUtilities.h"
+#include <cmath>
+#include <sstream>
+#include <vector>
+
+/** Lattice spacing (nm), time step (ps) and density (Da/nm^3) of the fluid tests. */
+const double fluidDx = 0.5, fluidDt = 0.01, fluidDensity = 602.2;
+
+/**
+ * Create a System with a fluid of nx*ny*nz nodes and relaxation time tau, without removal of the fluid
+ * momentum.  The System has one particle, which is not coupled to the fluid.
+ */
+System* createFluidSystem(LBMForce*& force, int nx, int ny, int nz, double tau) {
+    System* system = new System();
+    system->setDefaultPeriodicBoxVectors(Vec3(nx*fluidDx, 0, 0), Vec3(0, ny*fluidDx, 0), Vec3(0, 0, nz*fluidDx));
+    system->addParticle(1.0);
+    force = new LBMForce();
+    force->setGridSize(nx, ny, nz);
+    force->setFluidDensity(fluidDensity);
+    force->setKinematicViscosity((tau-0.5)/3.0*fluidDx*fluidDx/fluidDt);
+    force->setFluidMomentumRemovalFrequency(0);     // the default (every step) is switched on only where tested
+    system->addForce(force);
+    return system;
+}
+
+/** Equilibrium state with the given lattice density and velocity at every node. */
+vector<double> uniformState(int numNodes, double rho, Vec3 u) {
+    vector<double> state(19*numNodes);
+    double w[19] = {1.0/3.0, 1.0/18.0, 1.0/18.0, 1.0/18.0, 1.0/18.0, 1.0/18.0, 1.0/18.0, 1.0/36.0, 1.0/36.0, 1.0/36.0,
+                    1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0};
+    int cx[19] = {0, 1, -1, 0,  0, 0,  0, 1, -1,  1, -1, 0,  0,  0,  0, 1, -1, -1,  1};
+    int cy[19] = {0, 0,  0, 1, -1, 0,  0, 1, -1, -1,  1, 1, -1,  1, -1, 0,  0,  0,  0};
+    int cz[19] = {0, 0,  0, 0,  0, 1, -1, 0,  0,  0,  0, 1, -1, -1,  1, 1, -1,  1, -1};
+    for (int q = 0; q < 19; q++) {
+        double cu = cx[q]*u[0] + cy[q]*u[1] + cz[q]*u[2];
+        double feq = w[q]*rho*(1.0 + 3.0*cu + 4.5*cu*cu - 1.5*u.dot(u));
+        for (int node = 0; node < numNodes; node++)
+            state[q*numNodes+node] = feq;
+    }
+    return state;
+}
+
+/** Total mass and momentum of a state, in lattice units. */
+void totalMoments(const vector<double>& state, double& mass, Vec3& momentum) {
+    int cx[19] = {0, 1, -1, 0,  0, 0,  0, 1, -1,  1, -1, 0,  0,  0,  0, 1, -1, -1,  1};
+    int cy[19] = {0, 0,  0, 1, -1, 0,  0, 1, -1, -1,  1, 1, -1,  1, -1, 0,  0,  0,  0};
+    int cz[19] = {0, 0,  0, 0,  0, 1, -1, 0,  0,  0,  0, 1, -1, -1,  1, 1, -1,  1, -1};
+    int numNodes = state.size()/19;
+    mass = 0;
+    momentum = Vec3();
+    for (int q = 0; q < 19; q++)
+        for (int node = 0; node < numNodes; node++) {
+            double f = state[q*numNodes+node];
+            mass += f;
+            momentum += Vec3(cx[q], cy[q], cz[q])*f;
+        }
+}
+
+/**
+ * A uniform flow is an exact steady state of the lattice update.
+ */
+void testUniformFlowIsSteady(Platform& platform) {
+    LBMForce* force;
+    System* system = createFluidSystem(force, 6, 5, 4, 0.8);
+    force->setInitialFluidVelocity(Vec3(0.03, -0.02, 0.01)*(fluidDx/fluidDt));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    vector<double> before, after;
+    force->getFluidState(context, before);
+    integrator.step(50);
+    force->getFluidState(context, after);
+    for (int i = 0; i < (int) before.size(); i++)
+        ASSERT_EQUAL_TOL(before[i], after[i], 1e-13);
+    delete system;
+}
+
+/**
+ * Mass and momentum of a perturbed fluid are conserved without body force and momentum removal.
+ */
+void testFluidConservation(Platform& platform) {
+    LBMForce* force;
+    System* system = createFluidSystem(force, 6, 5, 4, 0.7);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    vector<double> state;
+    force->getFluidState(context, state);
+    for (int i = 0; i < (int) state.size(); i++)
+        state[i] *= 1.0 + 0.01*sin(1.3*i + 0.7*(i%11));
+    force->setFluidState(context, state);
+    double mass0, mass1;
+    Vec3 p0, p1;
+    totalMoments(state, mass0, p0);
+    integrator.step(100);
+    force->getFluidState(context, state);
+    totalMoments(state, mass1, p1);
+    ASSERT_EQUAL_TOL(mass0, mass1, 1e-13);
+    ASSERT(p0.dot(p0) > 1e-10);
+    ASSERT_EQUAL_VEC(p0, p1, 1e-13*mass0);
+    delete system;
+}
+
+/**
+ * A body acceleration g adds the momentum rho*g per node and step (lattice units), also when the lattice
+ * density differs from 1, and the fluid velocity after n steps is (n + 1/2) g dt.
+ */
+void testBodyForce(Platform& platform, double rho0) {
+    LBMForce* force;
+    System* system = createFluidSystem(force, 4, 3, 5, 0.9);
+    Vec3 g(0.5, -0.3, 0.2);
+    force->setBodyAcceleration(g);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    int numNodes = 4*3*5;
+    force->setFluidState(context, uniformState(numNodes, rho0, Vec3()));
+    int numSteps = 20;
+    integrator.step(numSteps);
+    vector<double> state, density;
+    vector<Vec3> velocity;
+    force->getFluidState(context, state);
+    double mass;
+    Vec3 p;
+    totalMoments(state, mass, p);
+    Vec3 gLattice = g*(fluidDt*fluidDt/fluidDx);
+    ASSERT_EQUAL_TOL(rho0*numNodes, mass, 1e-13);
+    ASSERT_EQUAL_VEC(gLattice*(numSteps*rho0*numNodes), p, 1e-13);
+    force->getFluidFields(context, density, velocity);
+    for (int node = 0; node < numNodes; node++) {
+        ASSERT_EQUAL_TOL(rho0*fluidDensity, density[node], 1e-13);
+        ASSERT_EQUAL_VEC(g*((numSteps+0.5)*fluidDt), velocity[node], 1e-12);
+    }
+    delete system;
+}
+
+/**
+ * The momentum of the fluid is removed in the steps whose index (counted from 0) is a multiple of the
+ * removal frequency, before the collision: with a body force F per node and frequency 3 the total
+ * momentum after n steps is ((n-1)%3 + 1) F per node.
+ */
+void testFluidMomentumRemoval(Platform& platform) {
+    LBMForce* force;
+    System* system = createFluidSystem(force, 4, 4, 4, 1.0);
+    Vec3 g(0.5, 0.0, 0.0);
+    force->setBodyAcceleration(g);
+    force->setInitialFluidVelocity(Vec3(0.01, 0.02, -0.01)*(fluidDx/fluidDt));
+    force->setFluidMomentumRemovalFrequency(3);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    int numNodes = 64;
+    double gLattice = g[0]*fluidDt*fluidDt/fluidDx;
+    for (int n = 1; n <= 7; n++) {
+        integrator.step(1);
+        vector<double> state;
+        force->getFluidState(context, state);
+        double mass;
+        Vec3 p;
+        totalMoments(state, mass, p);
+        // The total momentum is a sum of 19*numNodes populations of order 0.05 with cancellations: rounding ~1e-14.
+        ASSERT_EQUAL_VEC(Vec3(((n-1)%3 + 1)*gLattice*numNodes, 0, 0), p, 1e-13);
+    }
+    delete system;
+}
+
+/**
+ * A transverse shear wave u_x = U sin(k y) decays as exp(-nu k^2 t), with the kinematic viscosity
+ * nu = (tau - 1/2)/3 of the lattice.
+ */
+void testShearWaveViscosity(Platform& platform, double tau) {
+    int nx = 2, ny = 64, nz = 2;
+    LBMForce* force;
+    System* system = createFluidSystem(force, nx, ny, nz, tau);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    int numNodes = nx*ny*nz;
+    double k = 2*M_PI/ny, amplitude = 1e-3;
+    vector<double> state(19*numNodes);
+    for (int j = 0; j < ny; j++) {
+        vector<double> column = uniformState(1, 1.0, Vec3(amplitude*sin(k*j), 0, 0));
+        for (int kk = 0; kk < nz; kk++)
+            for (int i = 0; i < nx; i++)
+                for (int q = 0; q < 19; q++)
+                    state[q*numNodes + i + nx*(j + ny*kk)] = column[q];
+    }
+    force->setFluidState(context, state);
+
+    // Amplitude of the sine mode of u_x, in lattice units.
+
+    auto measure = [&]() {
+        vector<double> density;
+        vector<Vec3> velocity;
+        force->getFluidFields(context, density, velocity);
+        double sum = 0;
+        for (int node = 0; node < numNodes; node++) {
+            int j = (node/nx)%ny;
+            sum += velocity[node][0]*sin(k*j);
+        }
+        return 2*sum/numNodes/(fluidDx/fluidDt);
+    };
+    int t1 = 200, t2 = 1200;
+    integrator.step(t1);
+    double a1 = measure();
+    integrator.step(t2-t1);
+    double a2 = measure();
+    double nuMeasured = -log(a2/a1)/((t2-t1)*k*k);
+    double nu = (tau-0.5)/3.0;
+    // ASSERT_EQUAL_TOL is absolute for values below 1: compare the relative difference explicitly.
+    if (fabs(nuMeasured/nu - 1.0) > 2e-3) {
+        stringstream msg;
+        msg << "shear wave at tau = " << tau << ": measured viscosity " << nuMeasured << ", expected " << nu;
+        throwException(__FILE__, __LINE__, msg.str());
+    }
+    delete system;
+}
+
+/**
+ * Requests for forces or energy outside an integration step, and setVelocitiesToTemperature(), do not
+ * advance the fluid.
+ */
+void testQueriesDoNotAdvanceFluid(Platform& platform) {
+    vector<double> reference, queried;
+    for (int run = 0; run < 2; run++) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, 4, 4, 4, 0.8);
+        force->setBodyAcceleration(Vec3(0.5, -0.2, 0.1));
+        force->setInitialFluidVelocity(Vec3(0.01, 0.0, 0.0)*(fluidDx/fluidDt));
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+        for (int n = 0; n < 10; n++) {
+            integrator.step(1);
+            if (run == 1) {
+                context.getState(State::Forces);
+                context.getState(State::Forces | State::Energy);
+                context.setVelocitiesToTemperature(300.0, 1234);
+            }
+        }
+        force->getFluidState(context, run == 0 ? reference : queried);
+        delete system;
+    }
+    for (int i = 0; i < (int) reference.size(); i++)
+        ASSERT_EQUAL(reference[i], queried[i]);
+}
+
+void runFluidTests(Platform& platform) {
+    testUniformFlowIsSteady(platform);
+    testFluidConservation(platform);
+    testBodyForce(platform, 1.0);
+    testBodyForce(platform, 0.98);
+    testBodyForce(platform, 1.02);
+    testFluidMomentumRemoval(platform);
+    testShearWaveViscosity(platform, 0.6);
+    testShearWaveViscosity(platform, 1.0);
+    testShearWaveViscosity(platform, 1.5);
+    testQueriesDoNotAdvanceFluid(platform);
+}

@@ -78,6 +78,7 @@ The state of the fluid is not part of OpenMM checkpoints: save and restore it wi
 
 - [docs/theory.md](docs/theory.md): model, units and conventions.
 - [docs/architecture.md](docs/architecture.md): structure of the code.
+- [docs/validation.md](docs/validation.md): tests, tolerances and measured values.
 - [CONTRIBUTING.md](CONTRIBUTING.md): rules for contributors.
 
 ## Authors

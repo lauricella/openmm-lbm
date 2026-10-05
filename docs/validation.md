@@ -1,0 +1,44 @@
+# Validation
+
+Tests of openmm-lbm, what each one checks, its tolerance and the values measured. The C++ tests run with
+`ctest` (one executable per platform, in `platforms/*/tests`); the Python tests run with `pytest` in
+`python/tests`.
+
+## Fluid on its own (`tests/TestLBMFluid.h`, Reference platform)
+
+The fluid tests use no coupled particles. The lattice spacing is 0.5 nm, the time step 0.01 ps and the
+density 602.2 Da/nm^3; the viscosity is chosen to give the relaxation time tau of each test. The momentum
+removal is off unless stated.
+
+| Test | Setup | Check | Tolerance |
+|---|---|---|---|
+| `testUniformFlowIsSteady` | 6x5x4 nodes, tau = 0.8, uniform velocity (0.03, -0.02, 0.01) in lattice units, 50 steps | populations unchanged | 1e-13 |
+| `testFluidConservation` | 6x5x4 nodes, tau = 0.7, populations perturbed by up to 1%, 100 steps | total mass and momentum unchanged | 1e-13 (relative to the mass) |
+| `testBodyForce` | 4x3x5 nodes, tau = 0.9, uniform lattice density rho0 = 0.98, 1 or 1.02 at rest, body acceleration g, 20 steps | momentum n rho0 g per node (lattice units), density rho0, velocity (n + 1/2) g dt | 1e-13 (momentum), 1e-12 nm/ps (velocity) |
+| `testFluidMomentumRemoval` | 4x4x4 nodes, tau = 1, initial uniform velocity, body force F per node, removal frequency 3 | total momentum ((n-1)%3 + 1) F per node after n = 1...7 steps: removal on step indices 0, 3, 6, before the collision | 1e-13 |
+| `testShearWaveViscosity` | 2x64x2 nodes, u_x = 1e-3 sin(2 pi y/64) in lattice units, tau = 0.6, 1, 1.5; amplitude at steps 200 and 1200 | decay rate nu k^2 with nu = (tau - 1/2)/3 | 2e-3 (relative) |
+| `testQueriesDoNotAdvanceFluid` | 4x4x4 nodes, body force, 10 steps with and without `getState(Forces)`, `getState(Forces, Energy)` and `setVelocitiesToTemperature()` after each step | identical populations | exact |
+
+**Body force at lattice densities different from 1.** The test checks the convention of the weakly
+compressible model: the half force shifts the momentum, u* = (j + F/2)/rho with F = rho g, so that each
+step adds exactly rho g to the momentum. Shifting the velocity by F/2 instead would add (1/(2 rho) + 1/2) F.
+
+**Viscosity.** Measured relative difference nu_measured/nu - 1:
+
+| tau | 64 nodes per wavelength | 32 nodes per wavelength |
+|---|---|---|
+| 0.6 | +5.1e-4 | +2.1e-3 |
+| 1.0 | -1.7e-7 | -2.8e-6 |
+| 1.5 | +8.0e-4 | +3.2e-3 |
+
+The difference decreases as k^2 (by a factor of 4 when the wavelength doubles), as expected for a
+second-order scheme. It vanishes at tau = 1, where the collision relaxes the populations to equilibrium
+in one step.
+
+## Planned
+
+- The same fluid tests on the CUDA, OpenCL and HIP platforms, in single, mixed and double precision.
+- Equivalence with the reference CUDA library in double precision, for the fluid and then for the
+  coupling (first step of the drag, reaction on the fluid, momentum conservation, co-moving particle,
+  mobility of a dragged particle as a function of tau and box size).
+- Stability checks: Mach number limit, tau range.

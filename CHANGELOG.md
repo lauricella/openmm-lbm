@@ -21,7 +21,15 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   OpenMM 8.3.1 itself crashes intermittently on that machine), and in CI against every minor version.
 - CMake check that SWIG has the version used for the OpenMM Python module.
 - HIP platform compiled and linked against ROCm 6.3 (no AMD GPU available for tests yet).
+- Fluid update on the Reference platform: moments, removal of the fluid momentum, regularized collision
+  with Guo forcing (prefactor 1/2) and push streaming, with the conventions of the reference library.
+  The fluid advances once per integration step, triggered by `updateContextState()`; other force
+  evaluations do not advance it.
+- Fluid tests (`tests/TestLBMFluid.h`): steady uniform flow, conservation of mass and momentum, body
+  force at lattice densities 0.98, 1 and 1.02, timing of the momentum removal, viscosity from the decay
+  of a shear wave, queries that must not advance the fluid. See `docs/validation.md`.
 
 ### Not yet implemented
-- Fluid update (regularized collision with Guo forcing, streaming) and particle-fluid coupling:
-  `LBMForce` applies no force in this version.
+- Fluid update on the CUDA, OpenCL and HIP platforms.
+- Particle-fluid coupling: `LBMForce` applies no force in this version.
+- Stability checks (Mach number, tau range).

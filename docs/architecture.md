@@ -10,13 +10,14 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `openmmapi/include/LBMForce.h`, `openmmapi/src/LBMForce.cpp` | public API: parameters, coupled particles, access to the fluid |
 | `openmmapi/include/LBMKernels.h` | `CalcLBMForceKernel`, the interface every platform implements, and `LBMLatticeParameters` |
 | `openmmapi/include/internal/LBMForceImpl.h`, `openmmapi/src/LBMForceImpl.cpp` | checks the setup and converts all parameters to lattice units once, for all platforms |
-| `openmmapi/include/internal/D3Q19.h` | velocity set, weights, ordering of the populations, equilibrium (host code) |
+| `openmmapi/include/internal/D3Q19.h` | velocity set, weights, ordering of the populations, equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing (host code) |
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform, and the tests |
 | `serialization/` | XML proxy of `LBMForce` (parameters only) |
 | `python/` | SWIG wrapper `openmmlbm` and its tests |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
+| `tests/TestLBMFluid.h` | tests of the fluid on its own (`docs/validation.md`); run on the Reference platform until the fluid update is ported to the others |
 
 ## Libraries
 
@@ -36,9 +37,13 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
      the viscosity (tau > 1/2) and the coupled particles.
    - It computes `LBMLatticeParameters` and passes them to the kernel of the platform.
    - The kernel allocates the fluid and sets it to equilibrium.
-2. **Force evaluation.** `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not
-   changed and calls the kernel. The kernel will advance the fluid and add the coupling forces; in
-   version 0.1.0 it adds nothing.
+2. **Integration step.** `VerletIntegrator::step()` calls `ContextImpl::updateContextState()`, which
+   calls `LBMForceImpl::updateContextState()`, which calls the kernel's `beginStep()`. Then
+   `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
+   kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
+   step (moments, momentum removal, collision and streaming; see `docs/theory.md` section 1); other
+   force evaluations do not. The Reference platform advances the fluid; the common implementation
+   (CUDA, OpenCL, HIP) does not yet. No coupling force is added in version 0.1.0.
 3. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
    through `LBMForceImpl`, to the kernel. The common implementation computes density and momentum on
    the device (`computeFluidMoments` in `lbmFluid.cc`), then converts them to OpenMM units on the host.

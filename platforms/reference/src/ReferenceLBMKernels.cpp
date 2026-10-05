@@ -25,11 +25,106 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
     for (int q = 0; q < D3Q19::numVelocities; q++)
         for (int node = 0; node < numNodes; node++)
             populations[q*numNodes+node] = feq[q];
+    rho.resize(numNodes);
+    momentum.resize(3*numNodes);
+    piNeq.resize(6*numNodes);
+    forceDensity.resize(3*numNodes);
+}
+
+void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
+    stepPending = true;
 }
 
 double ReferenceCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
-    // The fluid update and the particle-fluid coupling are not implemented yet: no force is applied.
+    // The fluid advances once per integration step, on the first force evaluation after beginStep().
+    // The particle-fluid coupling is not implemented yet: no force is applied to the particles.
+    if (stepPending) {
+        stepPending = false;
+        advanceFluid();
+    }
     return 0.0;
+}
+
+void ReferenceCalcLBMForceKernel::advanceFluid() {
+    computeMoments();
+    if (lattice.momentumRemovalFrequency > 0 && stepIndex%lattice.momentumRemovalFrequency == 0)
+        removeFluidMomentum();
+    collideAndStream();
+    stepIndex++;
+}
+
+void ReferenceCalcLBMForceKernel::computeMoments() {
+    int numNodes = lattice.getNumNodes();
+    double f[D3Q19::numVelocities];
+    for (int node = 0; node < numNodes; node++) {
+        double r = 0, jx = 0, jy = 0, jz = 0;
+        for (int q = 0; q < D3Q19::numVelocities; q++) {
+            f[q] = populations[q*numNodes+node];
+            r += f[q];
+            jx += D3Q19::cx[q]*f[q];
+            jy += D3Q19::cy[q]*f[q];
+            jz += D3Q19::cz[q]*f[q];
+        }
+        rho[node] = r;
+        momentum[3*node] = jx;
+        momentum[3*node+1] = jy;
+        momentum[3*node+2] = jz;
+        D3Q19::nonEquilibriumMoment(f, r, jx, jy, jz, &piNeq[6*node]);
+
+        // A body acceleration g acts on the fluid as the force density rho*g.
+
+        forceDensity[3*node] = r*lattice.bodyAcceleration[0];
+        forceDensity[3*node+1] = r*lattice.bodyAcceleration[1];
+        forceDensity[3*node+2] = r*lattice.bodyAcceleration[2];
+    }
+}
+
+void ReferenceCalcLBMForceKernel::removeFluidMomentum() {
+    // Subtract the velocity of the centre of mass of the fluid, u_cm = sum(j)/sum(rho), from every node:
+    // j <- j - rho*u_cm.  The non-equilibrium moments are left as they are.
+    int numNodes = lattice.getNumNodes();
+    double mass = 0, px = 0, py = 0, pz = 0;
+    for (int node = 0; node < numNodes; node++) {
+        mass += rho[node];
+        px += momentum[3*node];
+        py += momentum[3*node+1];
+        pz += momentum[3*node+2];
+    }
+    double ux = px/mass, uy = py/mass, uz = pz/mass;
+    for (int node = 0; node < numNodes; node++) {
+        momentum[3*node] -= rho[node]*ux;
+        momentum[3*node+1] -= rho[node]*uy;
+        momentum[3*node+2] -= rho[node]*uz;
+    }
+}
+
+void ReferenceCalcLBMForceKernel::collideAndStream() {
+    // Regularized collision with Guo forcing,
+    //   f_q(x + c_q) = feq_q(rho, u) + (1 - omega) fneq_q(Pi_neq) + S_q(u, F)/2,  u = (j + F/2)/rho,
+    // written in push form: each population is computed from the moments of its own node only.
+    int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
+    int numNodes = lattice.getNumNodes();
+    double omega = lattice.omega;
+    double feq[D3Q19::numVelocities], fneq[D3Q19::numVelocities], s[D3Q19::numVelocities];
+    for (int k = 0; k < nz; k++)
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < nx; i++) {
+                int node = i + nx*(j + ny*k);
+                double r = rho[node];
+                const double* F = &forceDensity[3*node];
+                double ux = (momentum[3*node] + 0.5*F[0])/r;
+                double uy = (momentum[3*node+1] + 0.5*F[1])/r;
+                double uz = (momentum[3*node+2] + 0.5*F[2])/r;
+                D3Q19::equilibrium(r, ux, uy, uz, feq);
+                D3Q19::regularizedNonEquilibrium(&piNeq[6*node], fneq);
+                D3Q19::guoForcing(ux, uy, uz, F[0], F[1], F[2], s);
+                for (int q = 0; q < D3Q19::numVelocities; q++) {
+                    int di = (i + D3Q19::cx[q] + nx)%nx;
+                    int dj = (j + D3Q19::cy[q] + ny)%ny;
+                    int dk = (k + D3Q19::cz[q] + nz)%nz;
+                    populations[q*numNodes + di + nx*(dj + ny*dk)] = feq[q] + (1.0-omega)*fneq[q] + 0.5*s[q];
+                }
+            }
 }
 
 void ReferenceCalcLBMForceKernel::copyParametersToContext(ContextImpl& context, const LBMLatticeParameters& lattice) {
@@ -37,21 +132,22 @@ void ReferenceCalcLBMForceKernel::copyParametersToContext(ContextImpl& context, 
 }
 
 void ReferenceCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<double>& density, vector<Vec3>& velocity) {
+    // The velocity of the forced fluid is u = (j + F/2)/rho, with F = rho*g from the body acceleration.
     int numNodes = lattice.getNumNodes();
     double velocityScale = lattice.getVelocityScale();
     density.resize(numNodes);
     velocity.resize(numNodes);
     for (int node = 0; node < numNodes; node++) {
-        double rho = 0, jx = 0, jy = 0, jz = 0;
+        double r = 0, jx = 0, jy = 0, jz = 0;
         for (int q = 0; q < D3Q19::numVelocities; q++) {
             double f = populations[q*numNodes+node];
-            rho += f;
+            r += f;
             jx += D3Q19::cx[q]*f;
             jy += D3Q19::cy[q]*f;
             jz += D3Q19::cz[q]*f;
         }
-        density[node] = rho*lattice.density;
-        velocity[node] = Vec3(jx, jy, jz)*(velocityScale/rho);
+        density[node] = r*lattice.density;
+        velocity[node] = (Vec3(jx, jy, jz)*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
     }
 }
 

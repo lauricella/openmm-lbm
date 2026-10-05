@@ -28,6 +28,7 @@ public:
             CalcLBMForceKernel(name, platform), cc(cc), system(system) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
+    void beginStep(OpenMM::ContextImpl& context);
     double execute(OpenMM::ContextImpl& context, bool includeForces, bool includeEnergy);
     void copyParametersToContext(OpenMM::ContextImpl& context, const LBMLatticeParameters& lattice);
     void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity);

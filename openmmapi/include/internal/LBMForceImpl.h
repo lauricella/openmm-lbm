@@ -34,9 +34,11 @@ public:
     const LBMForce& getOwner() const {
         return owner;
     }
-    void updateContextState(OpenMM::ContextImpl& context, bool& forcesInvalid) {
-        // This force does not update the state directly.
-    }
+    /**
+     * Called by the integrator at the start of every step: the fluid advances only on the force evaluation of
+     * an integration step, never on other requests for forces or energy.
+     */
+    void updateContextState(OpenMM::ContextImpl& context, bool& forcesInvalid);
     double calcForcesAndEnergy(OpenMM::ContextImpl& context, bool includeForces, bool includeEnergy, int groups);
     std::map<std::string, double> getDefaultParameters() {
         return std::map<std::string, double>(); // This force does not define any global parameters.

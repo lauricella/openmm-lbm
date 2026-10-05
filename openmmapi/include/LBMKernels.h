@@ -70,6 +70,14 @@ public:
      */
     virtual void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice) = 0;
     /**
+     * Called once at the start of every integration step, before the forces are computed.  The next call to
+     * execute() advances the fluid by one lattice step; other force evaluations (getState(), for example)
+     * do not.
+     *
+     * @param context        the context in which to execute this kernel
+     */
+    virtual void beginStep(OpenMM::ContextImpl& context) = 0;
+    /**
      * Execute the kernel to calculate the forces and/or energy.
      *
      * @param context        the context in which to execute this kernel

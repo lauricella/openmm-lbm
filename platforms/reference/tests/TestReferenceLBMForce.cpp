@@ -6,6 +6,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "TestLBMForce.h"
+#include "TestLBMFluid.h"
 
 extern "C" OPENMM_EXPORT void registerLBMReferenceKernelFactories();
 
@@ -13,6 +14,7 @@ int main(int argc, char* argv[]) {
     try {
         registerLBMReferenceKernelFactories();
         runPlatformTests(Platform::getPlatformByName("Reference"));
+        runFluidTests(Platform::getPlatformByName("Reference"));
     }
     catch (const exception& e) {
         cout << "exception: " << e.what() << endl;
