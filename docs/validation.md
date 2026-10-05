@@ -38,9 +38,27 @@ The difference decreases as k^2 (by a factor of 4 when the wavelength doubles), 
 second-order scheme. It vanishes at tau = 1, where the collision relaxes the populations to equilibrium
 in one step.
 
+## Equivalence with the reference implementation: fluid only
+
+The Reference platform was compared in double precision with the CUDA lattice Boltzmann library from
+which openmm-lbm is derived (the library of the DragOpenMM plugin, version tagged `ref-explicit-2026-10`),
+built in double precision.
+- **Setup.** 16x12x10 nodes, 500 steps, no particles acting on the fluid.
+- **Initial state, the same in both codes.** Density modulated by up to 1.5% around rho0, a shear wave
+  and smaller velocity modes, and a non-zero non-equilibrium stress, given as moments; the populations
+  are rebuilt from them as feq(rho, j/rho) + fneq,reg(Pi_neq).
+- **Cases.** tau = 1.102 with a body force, without and with removal of the fluid momentum at every
+  step; tau = 0.62 with rho0 = 0.98 and a body force.
+- **Result.** Density and momentum agree within the float32 rounding of the output of the reference
+  library: relative differences of at most 5e-8. The non-equilibrium stress agrees within 5e-16 in
+  absolute value, the double-precision rounding of f - feq for populations of order 0.05.
+- **Sensitivity.** A difference in the algorithm would appear at 1e-3 or above. For example, a Guo
+  prefactor of 1 - omega/2 instead of 1/2 changes the momentum input by 4.6% at tau = 1.102, and
+  shifting the velocity instead of the momentum by half a force changes it by 1% at rho0 = 0.98.
+
 ## Planned
 
 - The same fluid tests on the CUDA, OpenCL and HIP platforms, in single, mixed and double precision.
-- Equivalence with the reference CUDA library in double precision, for the fluid and then for the
-  coupling (first step of the drag, reaction on the fluid, momentum conservation, co-moving particle,
-  mobility of a dragged particle as a function of tau and box size).
+- Equivalence with the reference library for the coupling: first step of the drag, reaction on the
+  fluid, momentum conservation, co-moving particle, mobility of a dragged particle as a function of tau
+  and box size.
