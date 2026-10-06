@@ -202,4 +202,9 @@ The reference outputs of the old examples (`*.LBLatticeOn.dat`) came from the La
 plugin, in which OpenMM's `LangevinIntegrator` supplies friction and noise (first step v1/v0 =
 exp(-gamma dt)); they were regenerated with the Euler-Maruyama scheme for this comparison
 (v1/v0 = 1 - gamma dt).
+- **COCOMO2 model** (`cocomo/cocomo2.py`), written from the article: on SOD1 (`cocomo/data/sod1.pdb`,
+  box 15 nm, Reference platform) the energy of every term (bonds, angles, electrostatics, short range,
+  cation-pi, pi-pi, elastic network with 478 bonds) is identical to that of the COCOMO2 script of the
+  DragOpenMM runs, and the forces agree within 1e-16 of the largest force, at the reference structure
+  and with the beads displaced at random by 0.03 nm.
 

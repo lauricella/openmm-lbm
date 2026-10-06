@@ -3,7 +3,8 @@
 This tutorial is for someone who has installed OpenMM and the plugin ([installation](installation.md))
 and has never used OpenMM. It explains the pieces of an OpenMM simulation, what the plugin adds, and
 then goes through the scripts of the [`examples/`](../../examples/README.md) folder one by one, with
-what to look at and a few exercises.
+what to look at and a few exercises: a kicked bead, momentum and energy, temperature, the fluid alone,
+and a protein.
 
 Each lesson takes from a few minutes to half an hour. You need a terminal with the environment active
 (`conda activate lbm`) and a working folder:
@@ -201,11 +202,39 @@ Exercises:
    prints the relaxation time tau: below about 0.505 the plugin warns that the fluid may become
    unstable.
 
-## 7. Where to go next
+## 7. Lesson 5: a protein in the fluid (`cocomo/sod1.py`)
+
+The last example is a real application: the protein SOD1, with one bead per amino acid (the COCOMO2
+model), diffusing in water. Besides `LBMForce`, the System now contains the forces of the protein model:
+springs along the chain, angles, an elastic network that keeps the protein folded, and nonbonded
+interactions between the beads. Read `examples/cocomo/cocomo2.py` to see how a model is built from
+standard OpenMM forces (`HarmonicBondForce`, `HarmonicAngleForce`, `CustomNonbondedForce`).
+
+The script uses `openmm.app.Simulation`, the usual way to run long simulations: it minimizes the
+energy, then runs with *reporters*, objects that write the trajectory and other data every few steps.
+
+```bash
+python $EX/cocomo/sod1.py --preset smoke --platform Reference
+```
+
+On a GPU, run 1 ns and compute the diffusion coefficient of the protein from its centre of mass:
+
+```bash
+python $EX/cocomo/sod1.py --preset sod1 --steps 100000 --report 1000 --output sod1_1ns
+python $EX/cocomo/msd.py sod1_1ns_com.txt
+```
+
+Exercises:
+
+1. Open `sod1_1ns_temperature.txt`: is the protein at 298 K?
+2. Run the same with `--no-lb` (no fluid, Langevin integrator) and compare the diffusion coefficients.
+   A run of 1 ns gives only a rough value; the presets run for 50 to 200 ns.
+
+## 8. Where to go next
 
 - The [examples page](examples.md) of this guide has shorter scripts on specific topics: a channel
   between two walls, monitoring the Mach number, saving and restoring the fluid, serialization, and a
   simulation with `openmm.app.Simulation` and reporters, the usual way to run long simulations with
   OpenMM.
 - The [API reference](api_reference.md) describes every method of `LBMForce`.
-- Examples with coarse-grained proteins (the COCOMO2 model) are being prepared in `examples/`.
+- More examples with coarse-grained proteins are being prepared in `examples/`.

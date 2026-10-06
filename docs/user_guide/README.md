@@ -15,7 +15,7 @@ step, and continue with the [tutorial](tutorial.md).
 
 1. [Installation](installation.md): conda, OpenMM and the plugin, step by step from nothing, with the
    tests and a first run; computing clusters; installation problems.
-2. [Tutorial](tutorial.md): the pieces of an OpenMM simulation, what `LBMForce` adds, and four lessons
+2. [Tutorial](tutorial.md): the pieces of an OpenMM simulation, what `LBMForce` adds, and five lessons
    with the scripts of [`examples/`](../../examples/README.md).
 3. [Getting started](getting_started.md): checking the installation, a first simulation, units,
    platforms.

@@ -103,6 +103,10 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   flow (NVE), a fluid started from a shear wave with saving and loading of the state, and a plotting
   script. They are ports of the examples of the DragOpenMM plugin with the Euler-Maruyama coupling, and
   reproduce its trajectories (`examples/README.md`). A Python test runs each of them for a few steps.
+- `examples/cocomo/`: the COCOMO2 model of proteins written from its article (`cocomo2.py`; on SOD1 its
+  energies and forces equal those of the COCOMO2 script of the DragOpenMM project), the diffusion of
+  SOD1 with and without the fluid (`sod1.py`, with the parameter sets of the DragOpenMM runs) and the
+  diffusion coefficient of the centre of mass (`msd.py`).
 - User guide: step-by-step installation of conda, OpenMM and the plugin for beginners
   (`docs/user_guide/installation.md`), and a tutorial that teaches OpenMM and the plugin through the
   examples (`docs/user_guide/tutorial.md`).

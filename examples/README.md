@@ -12,12 +12,14 @@ the [tutorial](../docs/user_guide/tutorial.md), which goes through these example
 | [particle/thermal.py](particle/thermal.py) | a bead brought to temperature by the fluid; full-step and half-step temperature | 10^3 nodes, 20000 steps | 4 s | 10 s |
 | [particle/uniform_flow.py](particle/uniform_flow.py) | a bead dragged by a uniform flow; momentum and kinetic energy | 20^3 nodes, 1000 steps | 1 s | 3 s |
 | [fluid/initial_state.py](fluid/initial_state.py) | a fluid started from a shear wave; saving and loading the fluid state | 32 x 32 x 4 nodes, 1000 steps | 1 s | 2 s |
+| [cocomo/sod1.py](cocomo/sod1.py) | diffusion of the folded protein SOD1 (COCOMO2, 110 beads), with and without the fluid | 30^3 nodes, 2000 steps (`--preset smoke`) to 2e7 steps (200 ns) | 2 s (smoke), 30 min (200 ns) | 25 s (smoke) |
+| [cocomo/msd.py](cocomo/msd.py) | mean square displacement and diffusion coefficient of the centre of mass | - | - | seconds |
 
 The times include the start of Python and OpenMM. The thermal example reads the velocities at every
 step, which costs more than the step itself on a GPU.
 
-Examples with coarse-grained proteins (the COCOMO2 model, a peptide, ubiquitin with an elastic network,
-an intrinsically disordered protein and SOD1) are being prepared.
+More examples with coarse-grained proteins (a peptide and ubiquitin kicked in the fluid, an
+intrinsically disordered protein) are being prepared.
 
 ## Running an example
 
@@ -83,6 +85,47 @@ D3Q19 equilibrium; the script prints its amplitude next to the decay U exp(-nu k
 fluid. `--save state.npz` writes the fluid state and the time at the end, and `--load state.npz` starts
 a new run from them: two runs of 500 steps give exactly the run of 1000 steps. The function
 `equilibrium_deviation()` can be reused to start the fluid from any density and velocity field.
+
+### cocomo/sod1.py and cocomo/msd.py
+
+The protein SOD1, coarse grained with one bead per residue, diffuses in a box of fluid. The model is
+COCOMO2 ([cocomo/cocomo2.py](cocomo/cocomo2.py), see below), with an elastic network that keeps the
+protein folded. Every bead is coupled to the fluid, which is also the thermostat; with `--no-lb` the
+beads are integrated by OpenMM's Langevin integrator at the same friction, without hydrodynamics.
+
+```bash
+python $EX/cocomo/sod1.py --preset smoke            # 2000 steps: a quick check
+python $EX/cocomo/sod1.py --preset sod1 --seed 1    # 200 ns, about 30 minutes on an A100
+python $EX/cocomo/msd.py sod1_sod1_lb_on_com.txt    # diffusion coefficient of the protein
+```
+
+- `--preset sod1` reproduces the runs of the DragOpenMM project (box 15 nm, friction 10/ps, 298 K,
+  dt 10 fs, nu = 5.0175 nm^2/ps, removal of the fluid momentum at every step); `--preset fabio-g30` a
+  larger box (30 nm) with friction 30/ps for 50 ns.
+- The script writes the trajectory (DCD), the energies, the full-step temperature and the centre of
+  mass of the protein, not wrapped into the box, which `msd.py` reads.
+- `--domain` and `--enm-domain` choose the folded domain (residues counted from 1, both included) for
+  the exposure scaling and for the elastic network. The defaults, 1-108 and 2-109, are what the
+  original scripts did with their option `-d 1 109`, because of an offset of one residue in their
+  loops; they are kept to reproduce those runs.
+
+### cocomo/cocomo2.py
+
+The COCOMO2 model (Jussupow, Bartley, Lapidus, Feig, J. Chem. Theory Comput. 21, 2095 (2025)) written
+for these examples from the description in the article: bonds, angles, elastic network, a 10-5
+short-range potential with cation-pi and pi-pi terms, Debye-Hueckel electrostatics, scaling of the
+nonbonded terms by the solvent exposure. The text at the top of the file gives every term and
+parameter. `read_beads()`, `exposure()`, `elastic_network()` and `create_system()` can be used for other
+proteins. On SOD1 its energies and forces are equal, term by term, to those of the COCOMO2 script used
+in the DragOpenMM project (energies identical to the last digit, forces within 1e-16 relative, also
+away from the reference structure).
+
+### Data
+
+| File | Content | Source |
+|---|---|---|
+| `cocomo/data/sod1.pdb` | SOD1 coarse grained with one bead per residue (110 beads, positions in Angstrom) | prepared by the IBPC group (L. Coronas, F. Sterpone) for the thermal-diffusion runs of SOD1 with COCOMO2 |
+| `cocomo/data/sod1.surface` | solvent accessible surface of each residue of `sod1.pdb`, in nm^2 | same |
 
 ## Comparison with the DragOpenMM plugin
 

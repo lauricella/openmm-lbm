@@ -22,6 +22,8 @@ CASES = [
     ('particle/thermal.py', ['--beads', '4', '--steps', '20', '--seed', '3', '--removal', '1']),
     ('particle/uniform_flow.py', ['--nodes', '12', '--steps', '20', '--interval', '10']),
     ('fluid/initial_state.py', ['--nodes', '16', '--steps', '20', '--interval', '10', '--save', 'state.npz']),
+    ('cocomo/sod1.py', ['--preset', 'smoke', '--box', '10', '--steps', '20', '--report', '10']),
+    ('cocomo/sod1.py', ['--preset', 'smoke', '--steps', '20', '--report', '10', '--no-lb']),
 ]
 
 
@@ -54,3 +56,33 @@ def test_plot(tmp_path):
     result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path/'p.png').exists()
+
+
+def test_msd(tmp_path):
+    """msd.py recovers the diffusion coefficient of a random walk, within its statistical error."""
+    import numpy as np
+    rng = np.random.default_rng(0)
+    D, dt = 0.002, 100.0
+    x = np.cumsum(rng.normal(0, np.sqrt(2*D*dt), (20000, 3)), axis=0)
+    np.savetxt(tmp_path/'com.txt', np.column_stack([dt*np.arange(len(x)), x]))
+    command = [sys.executable, os.path.join(EXAMPLES, 'cocomo', 'msd.py'), 'com.txt']
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    line = [l for l in result.stdout.splitlines() if l.startswith('D = ')][0]
+    assert abs(float(line.split()[2]) - D*1e3) < 0.2*D*1e3
+
+
+def test_cocomo2_parameters():
+    """The COCOMO2 builder: masses, exclusions and elastic network of SOD1."""
+    sys.path.insert(0, os.path.join(EXAMPLES, 'cocomo'))
+    import numpy as np
+    import cocomo2
+    names, chains, positions = cocomo2.read_beads(os.path.join(EXAMPLES, 'cocomo', 'data', 'sod1.pdb'))
+    assert len(names) == 110 and set(chains) == {'P001'}
+    pairs = cocomo2.elastic_network(positions, [(2, 109)])
+    assert len(pairs) == 478
+    assert all(j - i >= 3 and r0 < 0.9 for i, j, r0 in pairs)
+    xi = cocomo2.exposure(names, np.loadtxt(os.path.join(EXAMPLES, 'cocomo', 'data', 'sod1.surface')), [(1, 108)])
+    assert xi[108] == xi[109] == 1 and 0 <= xi.min() and xi.max() <= 1
+    system = cocomo2.create_system(names, chains, 15.0, xi, pairs)
+    assert abs(sum(system.getParticleMass(i)._value for i in range(110)) - sum(cocomo2.RESIDUES[n][0] for n in names)) < 1e-9
