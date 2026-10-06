@@ -246,7 +246,7 @@ cd ~/src/openmm-lbm/python/tests
 python -m pytest
 ```
 
-The last line counts the tests, for example `26 passed, 13 skipped` on a computer without a GPU. "Skipped" tests are those of
+The last line counts the tests, for example `30 passed, 13 skipped` on a computer without a GPU. "Skipped" tests are those of
 platforms that are not available on your computer: that is normal. "Failed" is not: see the next
 section.
 

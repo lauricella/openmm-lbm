@@ -202,7 +202,7 @@ Exercises:
    prints the relaxation time tau: below about 0.505 the plugin warns that the fluid may become
    unstable.
 
-## 7. Lesson 5: a protein in the fluid (`cocomo/sod1.py`)
+## 7. Lesson 5: a protein in the fluid (`cocomo/diffusion.py`)
 
 The last example is a real application: the protein SOD1, with one bead per amino acid (the COCOMO2
 model), diffusing in water. Besides `LBMForce`, the System now contains the forces of the protein model:
@@ -214,13 +214,13 @@ The script uses `openmm.app.Simulation`, the usual way to run long simulations: 
 energy, then runs with *reporters*, objects that write the trajectory and other data every few steps.
 
 ```bash
-python $EX/cocomo/sod1.py --preset smoke --platform Reference
+python $EX/cocomo/diffusion.py --preset smoke --platform Reference
 ```
 
 On a GPU, run 1 ns and compute the diffusion coefficient of the protein from its centre of mass:
 
 ```bash
-python $EX/cocomo/sod1.py --preset sod1 --steps 100000 --report 1000 --output sod1_1ns
+python $EX/cocomo/diffusion.py --preset sod1 --steps 100000 --report 1000 --output sod1_1ns
 python $EX/cocomo/msd.py sod1_1ns_com.txt
 ```
 

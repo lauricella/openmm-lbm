@@ -6,12 +6,12 @@
 
 """Mean square displacement and diffusion coefficient of the centre of mass.
 
-Reads the file <prefix>_com.txt written by sod1.py (time in ps, centre of mass x y z in nm, not
+Reads the file <prefix>_com.txt written by diffusion.py (time in ps, centre of mass x y z in nm, not
 wrapped into the box), computes the mean square displacement MSD(t) averaged over all time origins,
 for lag times up to a tenth of the run, and fits MSD = 6 D t + c over a range of lag times.  The
 components are fitted as MSD_x = 2 D_x t + c.
 
-    python msd.py sod1_sod1_lb_on_com.txt
+    python msd.py sod1_lb_on_com.txt
 
 The MSD is written to <input>.msd (lag time in ps, MSD total, x, y, z in nm^2).  For a free particle
 of mass M with friction gamma and no hydrodynamics, D = kT/(M gamma).

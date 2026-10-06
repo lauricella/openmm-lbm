@@ -4,20 +4,23 @@
 # SPDX-License-Identifier: MIT
 # --------------------------------------------------------------------------
 
-"""Diffusion of the folded protein SOD1, coarse grained with COCOMO2, in a lattice Boltzmann fluid.
+"""Diffusion of a protein, coarse grained with COCOMO2, in a lattice Boltzmann fluid.
 
-The protein (110 beads, data/sod1.pdb) is held folded by the elastic network of COCOMO2; its nonbonded
-interactions are scaled by the solvent exposure of each residue (data/sod1.surface).  Every bead is
-coupled to the fluid with the Euler-Maruyama scheme of LBMForce, which is also the thermostat.  With
---no-lb there is no fluid: OpenMM's LangevinMiddleIntegrator, at the same friction and temperature,
-moves the beads without hydrodynamic interactions.
+Every bead is coupled to the fluid with the Euler-Maruyama scheme of LBMForce, which is also the
+thermostat.  With --no-lb there is no fluid: OpenMM's LangevinMiddleIntegrator, at the same friction and
+temperature, moves the beads without hydrodynamic interactions.
 
 Parameter sets (--preset):
-  sod1       box 15 nm, friction 10/ps, 200 ns: the runs of the DragOpenMM project
-  fabio-g30  box 30 nm, friction 30/ps, 50 ns
-  smoke      box 15 nm, friction 5/ps, 2000 steps: a quick check that everything runs
-All use a lattice spacing of 0.5 nm, a time step of 10 fs, water density and viscosity
-nu = 5.0175 nm^2/ps (tau = 1.10), 298 K and the removal of the fluid momentum at every step.
+  sod1       the folded protein SOD1 (110 beads, data/sod1.pdb), held folded by the elastic network of
+             COCOMO2, with the nonbonded terms scaled by the solvent exposure of each residue
+             (data/sod1.surface); box 15 nm, friction 10/ps, time step 10 fs, nu = 5.0175 nm^2/ps
+             (tau = 1.10), 200 ns: the runs of the DragOpenMM project
+  fabio-g30  SOD1 in a box of 30 nm, friction 30/ps, 50 ns
+  smoke      SOD1 with friction 5/ps for 2000 steps: a quick check that everything runs
+  rlp        an intrinsically disordered protein (166 beads, data/rlp.pdb), no elastic network; box
+             20 nm, friction 100/ps, time step 2 fs, nu = 1.0035 nm^2/ps (tau = 0.52), 10 ns
+All use a lattice spacing of 0.5 nm, water density, 298 K and the removal of the fluid momentum at
+every step.
 
 The protocol is that of the original scripts: velocities at T, energy minimization, new velocities at
 T, production.  Files written, with the prefix given by --output:
@@ -43,10 +46,13 @@ import cocomo2
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 
+SOD1 = dict(pdb='sod1.pdb', surface='sod1.surface', domain=[1, 108], enm_domain=[2, 109], dt=0.01, viscosity=5.0175)
 PRESETS = {
-    'sod1': dict(box=15.0, friction=10.0, steps=20000000, report=10000),
-    'fabio-g30': dict(box=30.0, friction=30.0, steps=5000000, report=10000),
-    'smoke': dict(box=15.0, friction=5.0, steps=2000, report=100),
+    'sod1': dict(SOD1, box=15.0, friction=10.0, steps=20000000, report=10000),
+    'fabio-g30': dict(SOD1, box=30.0, friction=30.0, steps=5000000, report=10000),
+    'smoke': dict(SOD1, box=15.0, friction=5.0, steps=2000, report=100),
+    'rlp': dict(pdb='rlp.pdb', surface=None, domain=None, enm_domain=None, dt=0.002, viscosity=1.0035,
+                box=20.0, friction=100.0, steps=5000000, report=5000),
 }
 
 
@@ -57,28 +63,31 @@ def parse_arguments():
     parser.add_argument('--box', type=float, help='side of the cubic box (nm)')
     parser.add_argument('--spacing', type=float, default=0.5, help='lattice spacing (nm, default 0.5)')
     parser.add_argument('--friction', type=float, help='friction (1/ps)')
-    parser.add_argument('--viscosity', type=float, default=5.0175, help='kinematic viscosity (nm^2/ps, default 5.0175)')
+    parser.add_argument('--viscosity', type=float, help='kinematic viscosity (nm^2/ps)')
     parser.add_argument('--temperature', type=float, default=298.0, help='temperature (K, default 298)')
-    parser.add_argument('--dt', type=float, default=0.01, help='time step (ps, default 0.01)')
+    parser.add_argument('--dt', type=float, help='time step (ps)')
     parser.add_argument('--steps', type=int, help='number of production steps')
     parser.add_argument('--report', type=int, help='steps between reports')
     parser.add_argument('--seed', type=int, default=1234, help='random number seed (default 1234)')
-    parser.add_argument('--pdb', default=os.path.join(DATA, 'sod1.pdb'), help='coarse-grained structure')
-    parser.add_argument('--surface', default=os.path.join(DATA, 'sod1.surface'),
-                        help='solvent accessible surface of each residue (nm^2)')
-    parser.add_argument('--domain', type=int, nargs=2, default=[1, 108], metavar=('FIRST', 'LAST'),
-                        help='folded domain for the exposure scaling, residues counted from 1 (default 1 108)')
-    parser.add_argument('--enm-domain', type=int, nargs=2, default=[2, 109], metavar=('FIRST', 'LAST'),
-                        help='residues joined by the elastic network (default 2 109)')
+    parser.add_argument('--pdb', help='coarse-grained structure (default from the preset, in data/)')
+    parser.add_argument('--surface', help='solvent accessible surface of each residue in nm^2 (default from the preset)')
+    parser.add_argument('--domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
+                        help='folded domain for the exposure scaling, residues counted from 1 (sod1: 1 108)')
+    parser.add_argument('--enm-domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
+                        help='residues joined by the elastic network (sod1: 2 109)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA and OpenCL (default mixed)')
-    parser.add_argument('--output', help='prefix of the output files (default sod1_<preset>_lb_on or _lb_off)')
+    parser.add_argument('--output', help='prefix of the output files (default <preset>_lb_on or _lb_off)')
     args = parser.parse_args()
     for key, value in PRESETS[args.preset].items():
         if getattr(args, key) is None:
             setattr(args, key, value)
+    for key in ('pdb', 'surface'):
+        value = getattr(args, key)
+        if value is not None and not os.path.exists(value):
+            setattr(args, key, os.path.join(DATA, value))
     if args.output is None:
-        args.output = 'sod1_%s_lb_%s' % (args.preset, 'off' if args.no_lb else 'on')
+        args.output = '%s_lb_%s' % (args.preset, 'off' if args.no_lb else 'on')
     return args
 
 
@@ -148,8 +157,8 @@ def main():
     args = parse_arguments()
     names, chains, positions = cocomo2.read_beads(args.pdb)
     positions = cocomo2.centred(positions, args.box)
-    xi = cocomo2.exposure(names, np.loadtxt(args.surface), [tuple(args.domain)])
-    pairs = cocomo2.elastic_network(positions, [tuple(args.enm_domain)])
+    xi = cocomo2.exposure(names, np.loadtxt(args.surface), [tuple(args.domain)]) if args.domain else None
+    pairs = cocomo2.elastic_network(positions, [tuple(args.enm_domain)]) if args.enm_domain else []
     system = cocomo2.create_system(names, chains, args.box, xi, pairs)
     masses = [system.getParticleMass(i).value_in_unit(unit.dalton) for i in range(system.getNumParticles())]
 
