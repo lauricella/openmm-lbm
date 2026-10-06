@@ -210,4 +210,11 @@ exp(-gamma dt)); they were regenerated with the Euler-Maruyama scheme for this c
   cation-pi, pi-pi, elastic network with 478 bonds) is identical to that of the COCOMO2 script of the
   DragOpenMM runs, and the forces agree within 1e-16 of the largest force, at the reference structure
   and with the beads displaced at random by 0.03 nm.
+- **Diffusion of SOD1** (`cocomo/diffusion.py --preset sod1`, two runs of 200 ns, CUDA in mixed
+  precision): the apparent diffusion coefficient of the centre of mass, MSD(t)/(6t), is 2.36, 2.41,
+  2.43, 2.49, 2.67, 2.86 and 2.92 A^2/ns (mean of the two runs) at lag times of 0.1, 1, 2, 3, 5, 10 and
+  18 ns. Three runs of the DragOpenMM plugin with the same parameters and the Euler-Maruyama coupling
+  give 2.3, 2.4, 2.3, 2.3, 2.4, 2.4 and 2.6 A^2/ns, with a spread between runs of 1.9 to 3.4 A^2/ns at
+  18 ns. Both stay close to kT/(M gamma) = 2.26 A^2/ns, as expected without thermal fluctuations of
+  the fluid. The full-step temperature is 293-294 K at 298 K.
 
