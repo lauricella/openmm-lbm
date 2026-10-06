@@ -233,3 +233,40 @@ constant only to O(Ma^2, Kn^2). The test checks the size and scaling of the resi
 Tolerances: below 1% for the finer shear wave and a ratio between 3 and 5; below 6% for the kick and a
 difference below 1e-3 between the two Mach numbers.
 
+## Stochastic tests T2, T6, T7 (CUDA, mixed precision, NVIDIA A100)
+
+The stochastic tests of the reference campaign of the DragOpenMM plugin, run with openmm-lbm with the same
+cases, seeds, protocol and analysis (zero initial total momentum in T6). Both plugins draw the random
+numbers from OpenMM's generator in the same order, so the agreement is closer than the statistical error.
+The fluid has no thermal fluctuations of its own: the diffusion coefficient is kT/(m gamma) and the
+Einstein relation with the hydrodynamic mobility is not satisfied, as in the reference.
+
+**T2, equipartition** (100 free particles of 100 Da, 300 K, L = 8 nm, viscosity fixed, 200 ps). Mean
+temperatures in K, openmm-lbm / reference; statistical error about 0.5 K.
+
+| dt (ps) | tau | gamma (1/ps) | half step | full step |
+|---|---|---|---|---|
+| 0.005 | 0.80 | 1 | 299.7 / 299.7 | 298.9 / 298.9 |
+| 0.005 | 0.80 | 5 | 299.0 / 299.2 | 295.4 / 295.3 |
+| 0.005 | 0.80 | 10 | 300.5 / 300.1 | 292.9 / 292.6 |
+| 0.01 | 1.10 | 1 | 303.6 / 303.6 | 302.0 / 302.1 |
+| 0.01 | 1.10 | 5 | 306.5 / 306.6 | 298.9 / 298.8 |
+| 0.01 | 1.10 | 10 | 310.6 / 311.0 | 294.8 / 295.0 |
+| 0.02 | 1.70 | 1 | 302.8 / 302.5 | 299.8 / 299.6 |
+| 0.02 | 1.70 | 5 | 315.6 / 316.1 | 300.1 / 300.0 |
+| 0.02 | 1.70 | 10 | 333.1 / 333.1 | 299.6 / 299.8 |
+
+**T6, diffusion** (64 particles of 1000 Da, 300 K, 5 ns), openmm-lbm / reference:
+
+| gamma (1/ps) | L (nm) | D/(kT/m gamma), MSD | D/(kT/m gamma), Green-Kubo | full-step T (K) |
+|---|---|---|---|---|
+| 1 | 16 | 1.038 / 1.038 | 1.010 / 1.010 | 292.4 / 292.4 |
+| 5 | 16 | 0.984 / 0.984 | 0.984 / 0.985 | 270.4 / 270.4 |
+| 10 | 16 | 1.010 / 1.011 | 1.007 / 1.004 | 254.0 / 254.0 |
+| 5 | 8 | 0.979 / 0.983 | 0.979 / 0.980 | 271.4 / 271.4 |
+
+**T7, velocity autocorrelation against the kick response** (gamma = 10, L = 16 nm): the ratio of the
+normalized VACF at half steps to the kick response minus its plateau is 0.93, 0.90, 0.85, 0.81, 0.69 and
+0.50 at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps (reference: 0.93, 0.90, 0.85, 0.81, 0.70, 0.47). With thermal
+fluctuations of the fluid the two curves would coincide (fluctuation-dissipation theorem).
+
