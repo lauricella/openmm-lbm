@@ -151,6 +151,22 @@ On the GPU platforms the random numbers will come from OpenMM's generator, as in
 relative to the fluid by 1 - gamma dt. It changes sign at every step for gamma dt > 1, and it grows
 without bound for gamma dt >= 2. A warning is printed when a Context is created with gamma dt > 1.
 
+**Self-mobility and relaxation time.** The mobility of a dragged particle is 1/(m gamma) + y, where y is
+the hydrodynamic self-mobility from the fluid around its node. y should depend only on the viscosity
+(y ~ 1/eta), but with the explicit drag at the nearest node it contains a lattice term that does not
+decrease with the viscosity. As a result y eta dx, which should not depend on tau, falls with tau and
+changes sign. Measured on the Reference platform (L = 8 nm, dx = 0.5 nm, dt = 0.01 ps, m = 1000 Da,
+gamma = 5/ps, protocol of `docs/validation.md`):
+
+| tau | 0.62 | 0.8 | 1.1 | 1.5 | 1.6 | 1.7 | 1.8 | 1.9 | 2.0 | 3.51 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| y eta dx | 0.0609 | 0.0577 | 0.0442 | 0.0202 | 0.0134 | 0.0065 | -0.0007 | -0.0080 | -0.0154 | -0.1406 |
+
+y vanishes at tau = 1.79 (1.79 also for m = 100 Da, gamma = 10/ps), the value found with the reference
+library. Above it, particles move less than Langevin particles with the same friction. A warning is
+printed when a Context with coupled particles has tau > 1.7. Time-centred drag and a relaxation of the
+ghost moments independent of tau are the candidate corrections, to be studied.
+
 **Kinetic temperature.** OpenMM's leapfrog stores the velocities at half steps.
 - For a free particle with fluid at rest, the temperature measured from half-step velocities is
   T/(1 - gamma dt/2). Measured from full-step velocities v(t) = (v(t - dt/2) + v(t + dt/2))/2, it is T.

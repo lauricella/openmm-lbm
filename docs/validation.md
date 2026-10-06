@@ -69,11 +69,37 @@ the fluid momentum.
 | Momentum with walls | fluid flowing against two walls, a particle reflected, drag and random force, 100 steps: particles + fluid + the sum of `getWallForce()` dt is constant | 1e-12 relative |
 | Restart | checkpoint plus `setFluidState()` at step 13, removal every 5 steps, T = 0 | bitwise |
 | Warning | friction*dt > 1 is reported at Context creation | |
+| Equipartition | 100 free particles, gamma dt = 0.1, T = 300 K: full-step temperature close to T, half-step temperature close to T/(1 - gamma dt/2) | 10% (measured 4% below, from the missing fluid fluctuations) |
+| Warning on tau | tau > 1.7 with coupled particles is reported at Context creation | |
 
 **Temperature** (Reference, 200 free beads of 100 Da, 16^3 nodes, tau = 1.10, gamma dt = 0.1, T = 300 K,
 20000 steps): 295.8 +- 0.4 K from full-step velocities, 311.7 +- 0.4 K from half-step velocities
 (T/(1 - gamma dt/2) = 315.8 K). The kinetic energy reported by OpenMM gives 359 K and is not valid for
 coupled particles (`docs/theory.md`, section 2).
+
+## Equivalence with the reference implementation: coupled particles (E0)
+
+The Reference platform was compared with the validation campaign of the reference CUDA library (version
+tagged `ref-explicit-2026-10`, built in double precision), run with the same scripts, at T = 0, with all
+particles coupled and no removal of the fluid momentum: 80 cases.
+- **Cases.**
+  - Nearest-node artefacts of a dragged particle (8 cases);
+  - kick of a particle in a fluid at rest (6 cases, lattices up to 64^3, 20000 steps);
+  - pair mobility (15 cases);
+  - composite sphere of 300 beads in translation and rotation (7 cases);
+  - mobility of a dragged particle (44 cases) as a function of mass, friction, force, direction, box size,
+    tau and time step.
+- **Result.**
+  - Trajectories agree within 5e-13 relative over 30000 steps.
+  - Derived quantities (mobilities, self-mobility y, hydrodynamic radii, velocity decay) agree within
+    2e-6, and within 1.7e-5 for the velocity of a kicked particle at its last plateau (5e-6 of its initial
+    velocity).
+  - The criterion was 1e-4.
+- **Rounding of small momenta.** On large lattices the total momentum of particles and fluid drifts by
+  rounding. With 10 Da nm/ps spread over a fluid of 2e7 Da (64^3 nodes, 20000 steps) the drift is 3e-5 of
+  the momentum; the reference library shows a drift of the same order (4.5e-6, read from its single-precision
+  output). A momentum that small is a difference between populations of
+  order 0.05 at the ninth digit. The tests with smaller lattices conserve it to 1e-12.
 
 ## Equivalence with the reference implementation: fluid only
 

@@ -12,6 +12,8 @@
  * TestLBMFluid.h and call runCouplingTests().
  */
 
+#include "openmm/reference/SimTKOpenMMRealType.h"
+
 /** Mass (Da) of the particles of the coupling tests. */
 const double couplingMass = 100.0;
 
@@ -338,6 +340,79 @@ void testRestartWithParticles(Platform& platform) {
 }
 
 /**
+ * The random force has the amplitude required by the fluctuation-dissipation theorem: free particles reach the
+ * temperature T measured from full-step velocities (mean of two consecutive half-step velocities), and
+ * T/(1 - gamma dt/2) measured from half-step velocities.  The fluid has no thermal fluctuations of its own and
+ * takes part of the momentum of the particles, so both are a few per cent lower (here 100 particles of 100 Da,
+ * a fifth of the mass of the fluid): the tolerance of 10% catches errors in the amplitude of the noise, which
+ * would appear as factors such as 2 or 1/2.  The seed is fixed, so the test is deterministic.
+ */
+void testEquipartition(Platform& platform) {
+    int numParticles = 100;
+    double temperature = 300.0, friction = 10.0;
+    LBMForce* force;
+    System* system = createCoupledSystem(force, numParticles, friction, temperature);
+    force->setRandomNumberSeed(1);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    vector<Vec3> positions(numParticles);
+    for (int i = 0; i < numParticles; i++)
+        positions[i] = Vec3(fmod(0.37*i, 4.0), fmod(0.53*i+0.1, 4.0), fmod(0.71*i+0.2, 4.0));
+    context.setPositions(positions);
+    integrator.step(500);
+    vector<Vec3> previous = context.getState(State::Velocities).getVelocities();
+    double fullStep = 0, halfStep = 0;
+    int numSamples = 2000;
+    for (int n = 0; n < numSamples; n++) {
+        integrator.step(1);
+        vector<Vec3> v = context.getState(State::Velocities).getVelocities();
+        for (int i = 0; i < numParticles; i++) {
+            Vec3 mid = (v[i]+previous[i])*0.5;
+            fullStep += couplingMass*mid.dot(mid);
+            halfStep += couplingMass*v[i].dot(v[i]);
+        }
+        previous = v;
+    }
+    double scale = 1.0/(3*numParticles*numSamples*BOLTZ);
+    ASSERT_EQUAL_TOL(temperature, fullStep*scale, 0.1);
+    ASSERT_EQUAL_TOL(temperature/(1-0.5*friction*fluidDt), halfStep*scale, 0.1);
+    delete system;
+}
+
+/**
+ * A warning is printed when tau > 1.7 and particles are coupled: the self-mobility of a particle becomes small,
+ * and negative above tau = 1.79.
+ */
+void testSelfMobilityWarning(Platform& platform) {
+    double taus[] = {1.6, 1.75};
+    for (double tau : taus)
+        for (bool coupled : {false, true}) {
+            LBMForce* force;
+            System* system;
+            if (coupled) {
+                system = createCoupledSystem(force, 1, 1.0, 0.0);
+                force->setKinematicViscosity((tau-0.5)/3.0*fluidDx*fluidDx/fluidDt);
+            }
+            else
+                system = createFluidSystem(force, 8, 8, 8, tau);     // one particle, not coupled
+            VerletIntegrator integrator(fluidDt);
+            stringstream captured;
+            streambuf* original = cerr.rdbuf(captured.rdbuf());
+            try {
+                Context context(*system, integrator, platform);
+            }
+            catch (...) {
+                cerr.rdbuf(original);
+                throw;
+            }
+            cerr.rdbuf(original);
+            bool warned = (captured.str().find("> 1.7") != string::npos);
+            ASSERT(warned == (tau > 1.7 && coupled));
+            delete system;
+        }
+}
+
+/**
  * A warning is printed when friction*dt > 1 and particles are coupled.
  */
 void testFrictionWarning(Platform& platform) {
@@ -374,5 +449,7 @@ void runCouplingTests(Platform& platform) {
     testWallReflectionDirection(platform);
     testWallMomentumBalance(platform);
     testRestartWithParticles(platform);
+    testEquipartition(platform);
     testFrictionWarning(platform);
+    testSelfMobilityWarning(platform);
 }

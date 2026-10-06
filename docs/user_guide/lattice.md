@@ -134,6 +134,12 @@ If tau is too close to 1/2, increase dt or the viscosity, or decrease dx. If tau
 opposite. Coarse-grained models often use a viscosity larger than that of water, which also moves tau
 up. Inside a Context, `getLatticeParametersInContext(context)` returns dx, dt and tau.
 
+**Coupled particles need tau below about 1.7.** With the explicit drag at the nearest node, the
+hydrodynamic part of the mobility of a particle decreases as tau grows. At tau = 1.7 it is about 15% of
+its value at tau = 1.1, and above tau = 1.79 it is negative: particles then move less than a Langevin
+particle with the same friction. A warning is printed when a Context with coupled particles has
+tau > 1.7 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-the-reference-platform)).
+
 ## Velocity of the fluid
 
 The fluid responds to the body force F = rho g with the forced velocity

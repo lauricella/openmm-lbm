@@ -32,6 +32,11 @@ platform in this version` is printed on stderr when a Context is created on the 
 platform: there the fluid keeps its initial state and no force acts on the particles. Use the Reference
 platform until the port is complete.
 
+The warning `tau = ... > 1.7: with the explicit drag at the nearest node the hydrodynamic self-mobility of
+a coupled particle is small` is printed when particles are coupled and the relaxation time is large:
+above tau = 1.79 the hydrodynamic mobility of a particle is negative. Reduce the viscosity or the time
+step, or use a coarser lattice; see [relaxation time](lattice.md#relaxation-time).
+
 The warning `friction*dt = ... > 1` is printed on stderr when the explicit drag overshoots: the velocity
 of a particle relative to the fluid changes sign at every step, and grows without bound for
 friction*dt >= 2. Reduce the friction or the time step.

@@ -60,6 +60,10 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
 - Warning at Context creation on the CUDA, OpenCL and HIP platforms: the fluid update and the coupling
   are implemented only on the Reference platform in this version.
 
+- Equivalence of the coupling with the reference library (E0, 80 cases at T = 0): trajectories within
+  5e-13, derived quantities within 2e-5. Measured self-mobility as a function of tau
+  (`docs/theory.md`, section 2), and a warning for coupled particles when tau > 1.7. Equipartition test.
+
 ### Not yet implemented
 - Fluid update, solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

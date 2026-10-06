@@ -126,6 +126,15 @@ void LBMForceImpl::initialize(ContextImpl& context) {
              << "in which the lattice Boltzmann model is accurate. tau = 3 nu dt/dx^2 + 1/2: change the viscosity, "
              << "the time step or the lattice spacing." << endl;
 
+    // With the explicit drag at the nearest node, the hydrodynamic part of the self-mobility of a coupled particle
+    // decreases as tau grows and becomes negative at tau = 1.79 (docs/theory.md, section 2).
+
+    if (!lattice.particles.empty() && lattice.tau > 1.7)
+        cerr << "Warning: LBMForce: tau = " << lattice.tau << " > 1.7: with the explicit drag at the nearest node "
+             << "the hydrodynamic self-mobility of a coupled particle is small, and negative above tau = 1.79, so "
+             << "particles move less than they should. Reduce the viscosity or the time step, or use a coarser "
+             << "lattice." << endl;
+
     // The explicit drag multiplies the velocity of a particle relative to the fluid by 1 - gamma*dt in one step
     // (docs/theory.md, section 2).
 
