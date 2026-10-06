@@ -37,7 +37,8 @@ public:
     double tau, omega;
     /** Initial fluid velocity and body acceleration, in lattice units. */
     OpenMM::Vec3 initialVelocity, bodyAcceleration;
-    /** Friction (1/ps) and thermal energy kT (kJ/mol) of the coupling. */
+    /** Friction (1/ps) and thermal energy kT (kJ/mol) of the coupling.  kT is 0 with the NVE scheme, which has
+        no random force. */
     double friction, kT;
     int randomNumberSeed, momentumRemovalFrequency;
     /** Frequency (steps) of the Mach number check, 0 to disable, and the largest Mach number allowed. */

@@ -39,6 +39,9 @@ def test_parameters_with_units():
     assert force.getFriction() == 5.0/unit.picosecond
     assert force.getTemperature() == 310*unit.kelvin
     assert force.getInitialFluidVelocity()[0] == 0.1*unit.nanometer/unit.picosecond
+    assert force.getCouplingScheme() == LBMForce.EulerMaruyama
+    force.setCouplingScheme(LBMForce.NVE)
+    assert force.getCouplingScheme() == LBMForce.NVE
 
 
 def test_fluid_fields_and_state():

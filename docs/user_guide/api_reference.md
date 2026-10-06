@@ -199,6 +199,23 @@ for i in range(system.getNumParticles()):
 
 Number of coupled particles; System index of the coupled particle `index`; change it.
 
+### `setCouplingScheme(scheme)`, `getCouplingScheme()`
+
+Scheme of the coupling:
+- `LBMForce.EulerMaruyama`, the default: friction and random force at the temperature of
+  `setTemperature()`;
+- `LBMForce.NVE`: friction only, without random force whatever the temperature, so particles and fluid
+  exchange momentum through the drag with no thermostat.
+
+The total momentum is conserved with both schemes; the kinetic energy is dissipated by the drag and by
+the viscosity of the fluid ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-the-reference-platform)).
+The scheme is saved with the force by `XmlSerializer`. It can be changed in a Context with
+`updateParametersInContext()`.
+
+```python
+force.setCouplingScheme(LBMForce.NVE)
+```
+
 ### `setFriction(friction)`, `getFriction()`
 
 Friction coefficient gamma of the coupling, in 1/ps. The default is 1/ps. It must not be negative.
@@ -279,7 +296,7 @@ force.updateParametersInContext(context)
 It updates:
 
 - the body acceleration;
-- the friction and the temperature;
+- the friction, the temperature and the coupling scheme;
 - the frequency of the removal of the fluid momentum;
 - the frequency and the limit of the Mach number check.
 

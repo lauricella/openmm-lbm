@@ -90,6 +90,9 @@ void testParameters() {
     ASSERT_EQUAL_VEC(Vec3(-0.1, 0.0, 0.05), force.getInitialFluidVelocity(), 0.0);
     ASSERT_EQUAL(10, force.getFluidMomentumRemovalFrequency());
     ASSERT_EQUAL(100, force.getMachCheckFrequency());
+    ASSERT_EQUAL(LBMForce::EulerMaruyama, force.getCouplingScheme());
+    force.setCouplingScheme(LBMForce::NVE);
+    ASSERT_EQUAL(LBMForce::NVE, force.getCouplingScheme());
     ASSERT_EQUAL(0.3, force.getMachNumberLimit());
     force.setMachCheckFrequency(50);
     force.setMachNumberLimit(0.25);

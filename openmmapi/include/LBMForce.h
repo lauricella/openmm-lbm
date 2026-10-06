@@ -37,6 +37,21 @@ namespace LBMPlugin {
 class OPENMM_EXPORT_LBM LBMForce : public OpenMM::Force {
 public:
     /**
+     * The scheme of the coupling between the particles and the fluid.
+     */
+    enum CouplingScheme {
+        /**
+         * Explicit Euler-Maruyama scheme: friction and random force at the temperature set with setTemperature().
+         * This is the default.
+         */
+        EulerMaruyama = 0,
+        /**
+         * Friction only, without random force, whatever the temperature: particles and fluid exchange momentum
+         * through the drag at zero temperature, with no thermostat.
+         */
+        NVE = 1
+    };
+    /**
      * Create an LBMForce.  The grid size must be set with setGridSize() before the force is used.
      */
     LBMForce();
@@ -90,6 +105,15 @@ public:
      * Set the temperature of the random force on the coupled particles, measured in K.
      */
     void setTemperature(double temperature);
+    /**
+     * Get the scheme of the coupling between the particles and the fluid.
+     */
+    CouplingScheme getCouplingScheme() const;
+    /**
+     * Set the scheme of the coupling between the particles and the fluid: EulerMaruyama (the default), with
+     * friction and random force, or NVE, with friction only and no random force.
+     */
+    void setCouplingScheme(CouplingScheme scheme);
     /**
      * Get the random number seed.  See setRandomNumberSeed() for details.
      */
@@ -253,7 +277,8 @@ public:
     void getLatticeParametersInContext(const OpenMM::Context& context, double& dx, double& dt, double& tau) const;
     /**
      * Update the parameters of a Context to match those stored in this Force object: the friction,
-     * the temperature, the body acceleration, the frequency of the removal of the fluid momentum, and the
+     * the temperature, the coupling scheme, the body acceleration, the frequency of the removal of the
+     * fluid momentum, and the
      * frequency and limit of the Mach number check.  The grid, the fluid density and viscosity, the solid
      * nodes and the set of coupled particles cannot be changed this way, and an exception is thrown if
      * they differ.  The initial fluid velocity and the random number seed are used only when a Context
@@ -272,6 +297,7 @@ protected:
 private:
     int nx, ny, nz, randomNumberSeed, momentumRemovalFrequency, machCheckFrequency;
     double density, viscosity, friction, temperature, machNumberLimit;
+    CouplingScheme couplingScheme;
     OpenMM::Vec3 bodyAcceleration, initialVelocity;
     std::vector<int> particles, solidNodes;
 };

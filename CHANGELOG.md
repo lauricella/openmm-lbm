@@ -69,6 +69,9 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   `getFluidState()`/`setFluidState()` is made of these deviations (a population is the value plus w_q);
   saving and restoring it remains exact.
 
+- Coupling schemes, `setCouplingScheme()`: `EulerMaruyama` (default) or `NVE`, friction only without random
+  force. Saved by the serialization (version 3, which still reads versions 1 and 2).
+
 ### Not yet implemented
 - Fluid update, solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

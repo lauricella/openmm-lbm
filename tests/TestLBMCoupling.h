@@ -192,6 +192,33 @@ void testForceEvaluationsAndSeeds(Platform& platform) {
 }
 
 /**
+ * With the NVE scheme there is no random force, whatever the temperature: the first step at 300 K is the
+ * deterministic drag, and two runs with different seeds are identical.
+ */
+void testNVEScheme(Platform& platform) {
+    double friction = 5.0;
+    auto run = [&](int seed, int numSteps) {
+        LBMForce* force;
+        System* system = createCoupledSystem(force, 2, friction, 300.0);
+        force->setCouplingScheme(LBMForce::NVE);
+        force->setRandomNumberSeed(seed);
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        context.setPositions({Vec3(1.1, 1.3, 1.7), Vec3(2.6, 0.4, 3.1)});
+        context.setVelocities({Vec3(0.3, -0.2, 0.1), Vec3(-0.1, 0.4, 0.2)});
+        integrator.step(numSteps);
+        vector<Vec3> v = context.getState(State::Velocities).getVelocities();
+        delete system;
+        return v;
+    };
+    vector<Vec3> v1 = run(1, 1);
+    ASSERT_EQUAL_VEC(Vec3(0.3, -0.2, 0.1)*(1.0-friction*fluidDt), v1[0], 1e-14);
+    vector<Vec3> a = run(1, 30), b = run(2, 30);
+    for (int i = 0; i < 2; i++)
+        ASSERT_EQUAL_VEC(a[i], b[i], 0.0);
+}
+
+/**
  * A coupled particle that reaches a solid node moving into the wall has every component of its velocity
  * reversed and feels the drag of a fluid at rest; an uncoupled particle does not see the wall.
  */
@@ -445,6 +472,7 @@ void runCouplingTests(Platform& platform) {
     testComoving(platform);
     testPartialCoupling(platform);
     testForceEvaluationsAndSeeds(platform);
+    testNVEScheme(platform);
     testWallReflection(platform);
     testWallReflectionDirection(platform);
     testWallMomentumBalance(platform);

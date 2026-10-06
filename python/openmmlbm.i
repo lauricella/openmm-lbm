@@ -151,6 +151,10 @@ namespace LBMPlugin {
 
 class LBMForce : public OpenMM::Force {
 public:
+    enum CouplingScheme {
+        EulerMaruyama = 0,
+        NVE = 1
+    };
     LBMForce();
 
     %apply int& OUTPUT {int& nx};
@@ -170,6 +174,8 @@ public:
     void setFriction(double friction);
     double getTemperature() const;
     void setTemperature(double temperature);
+    CouplingScheme getCouplingScheme() const;
+    void setCouplingScheme(CouplingScheme scheme);
     int getRandomNumberSeed() const;
     void setRandomNumberSeed(int seed);
     OpenMM::Vec3 getBodyAcceleration() const;

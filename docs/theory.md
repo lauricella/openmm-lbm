@@ -111,6 +111,19 @@ multiplying the whole Hermite expansion.
 - This is the explicit scheme of the reference CUDA library. openmm-lbm reproduces it first, and studies
   changes (time-centred drag, relaxation of the ghost moments) only afterwards.
 
+**Coupling schemes** (`setCouplingScheme()`).
+- `EulerMaruyama`, the default: friction and random force as above.
+- `NVE`: friction only, with no random force whatever the temperature, that is the same scheme at zero
+  temperature.
+- With either scheme the total momentum of particles, fluid and walls is conserved. The total kinetic
+  energy, sum of rho u^2/2 dx^3 over the fluid nodes and m v^2/2 over the particles, is not conserved. The
+  drag dissipates about gamma m |v - u|^2 dt per step. The viscosity damps the motion of the fluid, and in
+  an isothermal lattice Boltzmann model the energy damped by viscosity leaves the model instead of
+  heating the fluid.
+- Example: a particle kicked in a fluid at rest ends up moving with the fluid at m v0/(m + M), as in a
+  perfectly inelastic collision. The momentum is conserved, and the kinetic energy falls by the factor
+  m/(m + M).
+
 **Order in the lattice step.** Moments, removal of the fluid momentum, coupling, collision and
 streaming, bounce-back. The coupling therefore sees the fluid momentum after the removal.
 

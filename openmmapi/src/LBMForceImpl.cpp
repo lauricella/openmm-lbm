@@ -95,7 +95,10 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     if ((int) lattice.solidNodes.size() == lattice.getNumNodes())
         throw OpenMMException("LBMForce: all lattice nodes are solid");
     lattice.friction = force.getFriction();
-    lattice.kT = BOLTZ*force.getTemperature();
+    if (force.getCouplingScheme() != LBMForce::EulerMaruyama && force.getCouplingScheme() != LBMForce::NVE)
+        throw OpenMMException("LBMForce: unknown coupling scheme");
+    // The NVE scheme has friction only: no random force, whatever the temperature.
+    lattice.kT = (force.getCouplingScheme() == LBMForce::NVE ? 0.0 : BOLTZ*force.getTemperature());
     lattice.randomNumberSeed = force.getRandomNumberSeed();
     lattice.momentumRemovalFrequency = force.getFluidMomentumRemovalFrequency();
     set<int> seen;
