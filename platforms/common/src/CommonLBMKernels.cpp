@@ -139,6 +139,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         particleWallMomentum.initialize(cc, 3*numCoupled, elementSize, "lbmParticleWallMomentum");
         particleWallMomentum.upload(vector<double>(3*numCoupled, 0.0), true);
         sortKeys.initialize(cc, numCoupled, sizeof(long long), "lbmSortKeys");
+        noise.initialize<mm_float4>(cc, numCoupled, "lbmNoise");
+        noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
         sort = cc.createSort(new CouplingSortTrait(), numCoupled, false);
         cc.getIntegrationUtilities().initRandomNumberGenerator((unsigned int) lattice.randomNumberSeed);
     }
@@ -233,8 +235,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         coupleKernel->addArg(sortKeys);
         coupleKernel->addArg(particleWallMomentum);
         coupleKernel->addArg(cc.getIntegrationUtilities().getRandom());
-        for (int i = 0; i < 3; i++)
-            coupleKernel->addArg();     // the index of the random numbers, set at every step, and gamma and kT
+        coupleKernel->addArg(noise);
+        for (int i = 0; i < 5; i++)
+            coupleKernel->addArg();     // index of the random numbers, drawNoise, isStep, gamma and kT, set later
         sumReactionsKernel = coupling->createKernel("sumCellReactions");
         sumReactionsKernel->addArg(sortKeys);
         sumReactionsKernel->addArg(particleForce);
@@ -265,14 +268,16 @@ void CommonCalcLBMForceKernel::setFluidParameters() {
             collideKernel->setArg(6+i, (float) values[i]);
     }
     if (!lattice.particles.empty()) {
-        coupleKernel->setArg(12, 0);
+        coupleKernel->setArg(13, 0);       // index of the random numbers, set when they are drawn
+        coupleKernel->setArg(14, 0);       // drawNoise
+        coupleKernel->setArg(15, 1);       // isStep
         if (useDouble) {
-            coupleKernel->setArg(13, gamma);
-            coupleKernel->setArg(14, kT);
+            coupleKernel->setArg(16, gamma);
+            coupleKernel->setArg(17, kT);
         }
         else {
-            coupleKernel->setArg(13, (float) gamma);
-            coupleKernel->setArg(14, (float) kT);
+            coupleKernel->setArg(16, (float) gamma);
+            coupleKernel->setArg(17, (float) kT);
         }
     }
 }
@@ -290,15 +295,18 @@ void CommonCalcLBMForceKernel::beginStep(ContextImpl& context) {
 }
 
 double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
-    // The fluid advances, and the coupling forces are computed, once per integration step: on the first force
-    // evaluation after beginStep().  Every force evaluation applies the coupling forces of the last step, so that
-    // evaluations outside the integration steps (getState(), for example) neither advance the fluid nor draw new
-    // random numbers.  The coupling is dissipative: its energy is zero.
+    // As on the Reference platform: the fluid advances once per integration step, on the first force evaluation
+    // after beginStep(), which also computes the coupling forces of the step.  The evaluations between steps do
+    // not change the fluid and return the coupling force of the next step, as OpenMM does for every force, so
+    // that the kinetic energy of VerletIntegrator is that of the full step.  The random numbers of a step are
+    // drawn once.  Before the first step of the Context the coupling force is zero.  The energy is zero.
     ContextSelector selector(cc);
     if (stepPending) {
         stepPending = false;
         advanceFluid();
     }
+    else if (includeForces && !lattice.particles.empty() && context.getStepCount() > 0)
+        computeNextStepForces(context);
     if (includeForces && !lattice.particles.empty())
         applyForcesKernel->execute(cc.getNumAtoms());
     return 0.0;
@@ -314,13 +322,7 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     }
     int numCoupled = lattice.particles.size();
     if (numCoupled > 0) {
-        // Fresh N(0,1) numbers for this step from OpenMM's generator, only when there is a random force.
-        // One float4 per padded atom is reserved, although only the first numCoupled are used: this is
-        // how the DragOpenMM plugin consumes the generator, so with the same seed both plugins draw the
-        // same numbers and their stochastic runs can be compared step by step.
-        if (lattice.kT > 0 && lattice.friction > 0)
-            coupleKernel->setArg(12, cc.getIntegrationUtilities().prepareRandomNumbers(cc.getPaddedNumAtoms()));
-        coupleKernel->execute(cc.getNumAtoms());
+        computeCouplingForces(true);
         sort->sort(sortKeys);
         sumReactionsKernel->execute(numCoupled);
     }
@@ -333,6 +335,38 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     stepIndex++;
     if (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)
         checkMachNumber();
+}
+
+void CommonCalcLBMForceKernel::computeNextStepForces(ContextImpl& context) {
+    // The coupling of the next lattice step computed on the current fluid, positions and velocities, without its
+    // reaction on the fluid.  The step recomputes it, with the same random numbers, after any change of the
+    // velocities in between (the reflection at the walls, setVelocities()).
+    int numNodes = lattice.getNumNodes();
+    computeMomentsKernel->execute(numNodes);
+    long long nextStep = context.getStepCount();
+    if (lattice.momentumRemovalFrequency > 0 && nextStep%lattice.momentumRemovalFrequency == 0) {
+        sumMomentumKernel->execute(numGroups*blockSize, blockSize);
+        centerVelocityKernel->execute(blockSize, blockSize);
+        removeMomentumKernel->execute(numNodes);
+    }
+    computeCouplingForces(false);
+}
+
+void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
+    // The N(0,1) numbers of a step are drawn once, when there is a random force, by the first computation that
+    // needs them, and copied into the array noise.  One float4 per padded atom is reserved, although only the
+    // first numCoupled are used: this is how the DragOpenMM plugin consumes the generator, so with the same seed
+    // both plugins draw the same numbers and their stochastic runs can be compared step by step.
+    bool draw = (lattice.kT > 0 && lattice.friction > 0 && !noiseDrawn);
+    if (draw) {
+        coupleKernel->setArg(13, cc.getIntegrationUtilities().prepareRandomNumbers(cc.getPaddedNumAtoms()));
+        noiseDrawn = true;
+    }
+    coupleKernel->setArg(14, draw ? 1 : 0);
+    coupleKernel->setArg(15, isStep ? 1 : 0);
+    coupleKernel->execute(cc.getNumAtoms());
+    if (isStep)
+        noiseDrawn = false;
 }
 
 void CommonCalcLBMForceKernel::checkMachNumber() {

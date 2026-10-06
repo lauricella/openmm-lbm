@@ -51,7 +51,7 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   forces computed once per step and reused by other force evaluations; a random generator owned by the
   force; warning for friction*dt > 1. Tests in `tests/TestLBMCoupling.h`. Documentation:
   `docs/theory.md` section 2, the user guide (two new examples, including a reporter of the full-step
-  temperature, since the temperature reported by OpenMM is not valid for coupled particles).
+  temperature).
 
 - Force on the walls, `getWallForce()`: the momentum given to the solid nodes in the last step by
   bounce-back (momentum exchange method of Ladd) and by the coupled particles (reaction at solid nodes,
@@ -108,6 +108,11 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   SOD1 and of a disordered protein with and without the fluid (`diffusion.py`, with the parameter sets
   of the DragOpenMM runs), kicks of a peptide and of ubiquitin (`kick.py`), and the diffusion
   coefficient of the centre of mass (`msd.py`).
+- Between integration steps the coupling force is that of the next step, as OpenMM does for every force,
+  instead of that of the last step. With `VerletIntegrator` the kinetic energy of a State, and so the
+  temperature of `StateDataReporter`, is then that of the full step also for coupled particles (before,
+  363 K at 300 K for a free particle with friction*dt = 0.1). The random numbers of a step are drawn once
+  and the trajectories are unchanged. Test `testFullStepKineticEnergy` on every platform.
 - Approximate kinetic energy budget with the NVE scheme (kinetic energy plus viscous and drag dissipation,
   valid to O(Ma^2, Kn^2)), described in `docs/theory.md` and checked by `python/tests/TestEnergyBudget.py`.
 - User guide: step-by-step installation of conda, OpenMM and the plugin for beginners

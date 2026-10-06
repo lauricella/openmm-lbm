@@ -74,8 +74,8 @@ Vec3 totalMomentum(Context& context, LBMForce* force) {
 
 /**
  * In one step the explicit drag multiplies the velocity of a particle relative to a fluid at rest by
- * 1 - gamma dt.  Before the first step the coupling force is zero; afterwards getState() returns the force of
- * the last step.
+ * 1 - gamma dt.  Before the first step the coupling force is zero.  Between steps getState() returns the force
+ * of the next step, as for any OpenMM force: the one that takes v1 to v2.
  */
 void testFirstStepDrag(Platform& platform) {
     LBMForce* force;
@@ -91,8 +91,46 @@ void testFirstStepDrag(Platform& platform) {
     State state = context.getState(State::Velocities | State::Forces | State::Energy);
     Vec3 v1 = state.getVelocities()[0];
     ASSERT_EQUAL_VEC(v0*(1.0-friction*fluidDt), v1, getCouplingTolerance(platform, 1e-14));
-    ASSERT_EQUAL_VEC((v1-v0)*(couplingMass/fluidDt), state.getForces()[0], getCouplingTolerance(platform, 1e-12));
     ASSERT_EQUAL(0.0, state.getPotentialEnergy());
+    integrator.step(1);
+    Vec3 v2 = context.getState(State::Velocities).getVelocities()[0];
+    ASSERT_EQUAL_VEC((v2-v1)*(couplingMass/fluidDt), state.getForces()[0], getCouplingTolerance(platform, 1e-12));
+    delete system;
+}
+
+/**
+ * With VerletIntegrator OpenMM computes the kinetic energy from v(t - dt/2) + dt F(t)/(2m), with the forces of
+ * the State.  Since the coupling force between steps is that of the next step, this is the kinetic energy at
+ * the full step, sum m ((v(t - dt/2) + v(t + dt/2))/2)^2/2, also with the random force and the removal of the
+ * fluid momentum: the temperature that OpenMM reports is that of the full step.
+ */
+void testFullStepKineticEnergy(Platform& platform) {
+    LBMForce* force;
+    int numParticles = 6;
+    System* system = createCoupledSystem(force, numParticles, 10.0, 300.0);
+    force->setRandomNumberSeed(5);
+    force->setFluidMomentumRemovalFrequency(2);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    vector<Vec3> positions, velocities;
+    for (int i = 0; i < numParticles; i++) {
+        positions.push_back(Vec3(0.6*i, 0.4*i+0.3, 3.7-0.5*i));
+        velocities.push_back(Vec3(0.2*cos(i), -0.3*sin(i), 0.1*i-0.25));
+    }
+    context.setPositions(positions);
+    context.setVelocities(velocities);
+    integrator.step(5);
+    for (int n = 0; n < 4; n++) {
+        State state = context.getState(State::Velocities | State::Energy);
+        integrator.step(1);
+        State next = context.getState(State::Velocities);
+        double expected = 0;
+        for (int i = 0; i < numParticles; i++) {
+            Vec3 v = (state.getVelocities()[i]+next.getVelocities()[i])*0.5;
+            expected += 0.5*couplingMass*v.dot(v);
+        }
+        ASSERT_EQUAL_TOL(expected, state.getKineticEnergy(), getCouplingTolerance(platform, 1e-10));
+    }
     delete system;
 }
 
@@ -478,6 +516,7 @@ void testFrictionWarning(Platform& platform) {
 
 void runCouplingTests(Platform& platform) {
     testFirstStepDrag(platform);
+    testFullStepKineticEnergy(platform);
     testMomentumConservation(platform, 1.0);
     testMomentumConservation(platform, 0.98);
     testMomentumConservation(platform, 1.02);

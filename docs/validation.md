@@ -84,8 +84,10 @@ the platform runs in double precision (`docs/theory.md`, section 2).
 
 **Temperature** (Reference, 200 free beads of 100 Da, 16^3 nodes, tau = 1.10, gamma dt = 0.1, T = 300 K,
 20000 steps): 295.8 +- 0.4 K from full-step velocities, 311.7 +- 0.4 K from half-step velocities
-(T/(1 - gamma dt/2) = 315.8 K). The kinetic energy reported by OpenMM gives 359 K and is not valid for
-coupled particles (`docs/theory.md`, section 2).
+(T/(1 - gamma dt/2) = 315.8 K). The kinetic energy that OpenMM reports is that of the full step: on 200
+samples of the same system (seed 7) it gives 293.98 K, the same as the full-step velocities within 4e-12 K
+(`testFullStepKineticEnergy` checks it on every platform; `docs/theory.md`, section 2). Before the change of
+the coupling forces between steps to those of the next step it read 359 K.
 
 ## Equivalence with the reference implementation: coupled particles (E0)
 

@@ -35,7 +35,7 @@ namespace LBMPlugin {
 class ReferenceCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     ReferenceCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform) : CalcLBMForceKernel(name, platform),
-            stepPending(false), stepIndex(0), machWarningPrinted(false), hasStoredGaussian(false), storedGaussian(0) {
+            stepPending(false), stepIndex(0), machWarningPrinted(false), noiseDrawn(false), hasStoredGaussian(false), storedGaussian(0) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
@@ -48,9 +48,10 @@ public:
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
 private:
     void advanceFluid(OpenMM::ContextImpl& context);
+    void computeNextStepForces(OpenMM::ContextImpl& context);
     void computeMoments();
     void removeFluidMomentum();
-    void coupleParticles(OpenMM::ContextImpl& context);
+    void coupleParticles(OpenMM::ContextImpl& context, bool isStep);
     int nearestNode(const OpenMM::Vec3& position) const;
     OpenMM::Vec3 wallNormal(const OpenMM::Vec3& position) const;
     double getGaussianRandom();
@@ -78,9 +79,14 @@ private:
     bool machWarningPrinted;
     /** Masses of the coupled particles in lattice units, m/m_c. */
     std::vector<double> particleMass;
-    /** Forces on the coupled particles (kJ/mol/nm) computed in the last lattice step.  Every force evaluation
-        applies them, so that evaluations outside the integration steps draw no new random numbers. */
+    /** Forces on the coupled particles (kJ/mol/nm): in the force evaluation of an integration step, the force of
+        that step; in the evaluations between steps, the force of the next step (docs/theory.md, section 2). */
     std::vector<OpenMM::Vec3> particleForces;
+    /** Random numbers xi of the next lattice step, three per coupled particle, drawn once per step by the first
+        evaluation that needs them and used by the step itself. */
+    std::vector<OpenMM::Vec3> noise;
+    /** True if noise holds the random numbers of the next step. */
+    bool noiseDrawn;
     /** Momentum (Da nm/ps) given to the solid nodes in the current or last lattice step. */
     OpenMM::Vec3 wallMomentum;
     /** Reaction of the coupled particles on each node (3 per node), in lattice units. */

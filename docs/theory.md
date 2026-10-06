@@ -171,11 +171,25 @@ the velocities are v(t - dt/2). The fluid momentum before the step is j(t - dt/2
 j(t + dt/2) = j(t - dt/2) + F(t). The drag therefore compares particle and fluid velocities at the
 same half step, explicitly.
 
-**Forces once per step.** The coupling forces are computed once per integration step, in the force
-evaluation that advances the fluid, and are kept until the next step. Every other force evaluation
-(`getState(getForces=True)`, `setVelocitiesToTemperature()`) applies the same forces: it does not
-draw new random numbers, so it does not change the trajectory. Before the first step the coupling
-forces are zero. The coupling is dissipative and has no energy.
+**When the coupling forces are computed.** The fluid advances once per integration step, in the force
+evaluation of the step, which also computes the coupling forces of that step and their reaction on the
+fluid. The force evaluations between steps (`getState(getForces=True)`, `getState(getEnergy=True)`)
+return the coupling force of the next step, computed on the current fluid, positions and velocities,
+without changing the fluid.
+- This is OpenMM's convention for every force. `VerletIntegrator` computes the forces at the current
+  positions x(t) and uses them for the next update v(t + dt/2) = v(t - dt/2) + dt F(t)/m, and the force in
+  a State at time t is that F(t).
+- OpenMM relies on it for the kinetic energy of a State: for `VerletIntegrator` it shifts the velocities
+  by half a step with the forces of the State, v(t - dt/2) + dt F(t)/(2m), which is the full-step velocity
+  (v(t - dt/2) + v(t + dt/2))/2 only if F(t) is the force of the next step.
+- The random numbers of a step are drawn once, by the first evaluation that needs them, and the step
+  uses the same ones. The step recomputes the drag with the velocities it finds, so a change of the
+  velocities between the evaluations and the step (the reflection at the walls, `setVelocities()`) is
+  taken into account. Extra evaluations therefore do not change the trajectory, which is identical with
+  and without them.
+- Before the first step of the Context the coupling forces are zero, so that an energy minimization
+  before the dynamics sees only the forces of the other terms.
+- The coupling is dissipative and has no energy.
 
 **Random force.** On the Reference platform the random numbers come from a generator owned by the
 force (SFMT, Box-Muller transform).
@@ -237,12 +251,13 @@ ghost moments independent of tau are the candidate corrections, to be studied.
   the particles are slightly colder than T. Measured on the Reference platform with 200 free beads of
   100 Da, dx = 0.5 nm, dt = 0.01 ps, tau = 1.10, gamma dt = 0.1 and T = 300 K: 295.8 +- 0.4 K from
   full-step velocities and 311.7 +- 0.4 K from half-step velocities, where T/(1 - gamma dt/2) = 315.8 K.
-- **The temperature reported by OpenMM is not valid for coupled particles.** This is the kinetic energy
-  of the State, used by `StateDataReporter`. For `VerletIntegrator`, OpenMM shifts the velocities by half
-  a step with the forces of the current evaluation, which for the coupling are those of the last step,
-  random force included. For a free particle this gives T [(1 - 3a/2)^2/(1 - a/2) + 9a/2], with
-  a = gamma dt: 363 K at 300 K and a = 0.1. 359 K was measured in the run above. Compute the
-  temperature from full-step velocities instead (user guide, examples).
+- **The temperature reported by OpenMM is the full-step one.** The kinetic energy of a State, used by
+  `StateDataReporter`, is computed by OpenMM from v(t - dt/2) + dt F(t)/(2m) with the coupling force of the
+  next step (see above), which is the full-step velocity: it equals the temperature from full-step
+  velocities to rounding (`testFullStepKineticEnergy`; 293.98 K both, within 4e-12 K, for 200 beads at
+  300 K on the Reference platform). Before version 0.1.0 of this plugin the forces between steps were
+  those of the last step, and this temperature was wrong for coupled particles: for a free particle
+  T [(1 - 3a/2)^2/(1 - a/2) + 9a/2] with a = gamma dt, 363 K at 300 K and a = 0.1.
 
 **Per-cell reaction on the GPU platforms.** The reaction forces of the particles in the same cell are
 summed without atomic operations (`platforms/common/src/kernels/lbmCoupling.cc`):

@@ -146,8 +146,9 @@ mean temperature computed in two ways:
 - from the velocities that OpenMM stores, which with `VerletIntegrator` are half a step behind the
   positions ("half step");
 - from the mean of two consecutive velocities, the velocity at the same time as the positions ("full
-  step"). This is the correct temperature of coupled particles. The temperature that OpenMM itself
-  reports (for example in `StateDataReporter`) is not correct for them: see [examples](examples.md).
+  step"). This is the temperature of the coupled particles, and it is also the one that OpenMM itself
+  reports, for example in `StateDataReporter`, because OpenMM shifts the stored velocities by half a step
+  with the forces of the next step (see [examples](examples.md#temperature-of-coupled-particles)).
 
 With one bead and a small friction the mean converges slowly. A gas of 100 beads with a larger
 friction gives a precise value in a few seconds, on a GPU or on the Reference platform:

@@ -73,8 +73,11 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `getWallForce()` sums the momentum exchange of the solid nodes of the last step on the host, so a step
    costs no transfer. The atoms are addressed through OpenMM's atom index array, since OpenMM may reorder
    them: every per-particle array is indexed by the position of the particle in the list of the force.
-   Every force evaluation runs `applyCouplingForces`, which adds the forces of the last step to OpenMM's
-   force buffer.
+   Every force evaluation runs `applyCouplingForces`, which adds the coupling forces to OpenMM's force
+   buffer: in the evaluation of a step, those of the step; between steps, those of the next step, computed
+   by `computeFluidMoments`, the momentum removal if due and `coupleParticles` without the reaction on the
+   fluid. The random numbers of a step are copied from OpenMM's generator into the array `noise` once, by the
+   first `coupleParticles` that needs them (`drawNoise`), and reused by the step.
 4. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
    through `LBMForceImpl`, to the kernel. The common implementation computes density and momentum on
    the device (`computeFluidMoments`), then converts them to OpenMM units on the host.

@@ -66,7 +66,7 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
         }
     }
 
-    // Coupled particles: masses in units of the mass of a cell, m_c = rho0 dx^3.  No coupling force exists
+    // Coupled particles: masses in units of the mass of a cell, m_c = rho0 dx^3.  The coupling force is zero
     // before the first step.
 
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
@@ -75,6 +75,8 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
     for (int i = 0; i < numParticles; i++)
         particleMass[i] = system.getParticleMass(lattice.particles[i])/cellMass;
     particleForces.assign(numParticles, Vec3());
+    noise.assign(numParticles, Vec3());
+    noiseDrawn = false;
     reaction.resize(3*numNodes);
     wallMomentum = Vec3();
     int seed = lattice.randomNumberSeed;
@@ -113,14 +115,19 @@ void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
 }
 
 double ReferenceCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
-    // The fluid advances, and the coupling forces are computed, once per integration step: on the first force
-    // evaluation after beginStep().  Every force evaluation applies the coupling forces of the last step, so
-    // that evaluations outside the integration steps (getState(), for example) neither advance the fluid nor
-    // draw new random forces.  The coupling is dissipative: its energy is zero.
+    // The fluid advances once per integration step, on the first force evaluation after beginStep(), which also
+    // computes the coupling forces of the step.  The force evaluations between steps (getState(), for example)
+    // do not change the fluid: they return the coupling force of the next step, as OpenMM does for every force,
+    // whose value at time t is the one the next step uses.  With VerletIntegrator the kinetic energy that OpenMM
+    // computes from v(t - dt/2) + dt F(t)/(2m) is then that of the full step.  The random numbers of a step are
+    // drawn once, by the first evaluation that needs them, so extra evaluations do not change the run.  Before
+    // the first step of the Context the coupling force is zero.  The coupling is dissipative: its energy is zero.
     if (stepPending) {
         stepPending = false;
         advanceFluid(context);
     }
+    else if (includeForces && !lattice.particles.empty() && context.getStepCount() > 0)
+        computeNextStepForces(context);
     if (includeForces) {
         vector<Vec3>& forces = extractForces(context);
         for (int i = 0; i < (int) lattice.particles.size(); i++)
@@ -134,13 +141,24 @@ void ReferenceCalcLBMForceKernel::advanceFluid(ContextImpl& context) {
     if (lattice.momentumRemovalFrequency > 0 && stepIndex%lattice.momentumRemovalFrequency == 0)
         removeFluidMomentum();
     if (!lattice.particles.empty())
-        coupleParticles(context);
+        coupleParticles(context, true);
     collideAndStream();
     if (!isFluid.empty())
         bounceBack();
     stepIndex++;
     if (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)
         checkMachNumber();
+}
+
+void ReferenceCalcLBMForceKernel::computeNextStepForces(ContextImpl& context) {
+    // The coupling of the next lattice step computed on the current fluid, positions and velocities, without
+    // its reaction on the fluid.  The step recomputes it, with the same random numbers, after any change of
+    // the velocities in between (the reflection at the walls, setVelocities()).
+    computeMoments();
+    long long nextStep = context.getStepCount();
+    if (lattice.momentumRemovalFrequency > 0 && nextStep%lattice.momentumRemovalFrequency == 0)
+        removeFluidMomentum();
+    coupleParticles(context, false);
 }
 
 void ReferenceCalcLBMForceKernel::checkMachNumber() {
@@ -219,13 +237,14 @@ void ReferenceCalcLBMForceKernel::removeFluidMomentum() {
     }
 }
 
-void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context) {
+void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isStep) {
     // Explicit Euler-Maruyama coupling at the nearest node, in lattice units (time step 1):
     //   F = -gamma m (v - j/rho) + sqrt(2 gamma m kT) xi,
     // with xi three independent N(0,1) numbers.  v is the velocity of OpenMM's leapfrog, v(t - dt/2), and j is
-    // the momentum of the fluid before the force of this step, j(t - dt/2).  The particle receives F and the
-    // node -F: the reactions of the particles of a node are summed in particle order, then added to the force
-    // density of the node.  A solid node has rho = 0 and is at rest; the reaction it receives leaves the fluid.
+    // the momentum of the fluid before the force of this step, j(t - dt/2).  In a lattice step (isStep) the
+    // particle receives F and the node -F: the reactions of the particles of a node are summed in particle
+    // order, then added to the force density of the node.  A solid node has rho = 0 and is at rest; the
+    // reaction it receives leaves the fluid.  The random numbers are drawn once per step, in particle order.
     int numNodes = lattice.getNumNodes();
     vector<Vec3>& positions = extractPositions(context);
     vector<Vec3>& velocities = extractVelocities(context);
@@ -234,7 +253,18 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context) {
     double kT = lattice.kT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
     double velocityScale = lattice.getVelocityScale();
     double forceScale = cellMass*lattice.dx/(lattice.dt*lattice.dt);
-    fill(reaction.begin(), reaction.end(), 0.0);
+    bool randomForce = (kT > 0 && gamma > 0);
+    if (randomForce && !noiseDrawn) {
+        for (int i = 0; i < (int) lattice.particles.size(); i++) {
+            double xi0 = getGaussianRandom();
+            double xi1 = getGaussianRandom();
+            double xi2 = getGaussianRandom();
+            noise[i] = Vec3(xi0, xi1, xi2);
+        }
+        noiseDrawn = true;
+    }
+    if (isStep)
+        fill(reaction.begin(), reaction.end(), 0.0);
     for (int i = 0; i < (int) lattice.particles.size(); i++) {
         int particle = lattice.particles[i];
         int node = nearestNode(positions[particle]);
@@ -244,15 +274,16 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context) {
         Vec3 v = velocities[particle]*(1.0/velocityScale);
         double m = particleMass[i];
         Vec3 f = (v-u)*(-gamma*m);
-        if (kT > 0 && gamma > 0) {
-            double sigma = sqrt(2.0*gamma*m*kT);
-            double xi0 = getGaussianRandom(), xi1 = getGaussianRandom(), xi2 = getGaussianRandom();
-            f += Vec3(xi0, xi1, xi2)*sigma;
-        }
+        if (randomForce)
+            f += noise[i]*sqrt(2.0*gamma*m*kT);
         particleForces[i] = f*forceScale;
-        for (int k = 0; k < 3; k++)
-            reaction[3*node+k] -= f[k];
+        if (isStep)
+            for (int k = 0; k < 3; k++)
+                reaction[3*node+k] -= f[k];
     }
+    if (!isStep)
+        return;
+    noiseDrawn = false;
     for (int k = 0; k < 3*numNodes; k++)
         forceDensity[k] += reaction[k];
 

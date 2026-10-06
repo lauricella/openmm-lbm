@@ -25,9 +25,9 @@ every step.
 The protocol is that of the original scripts: velocities at T, energy minimization, new velocities at
 T, production.  Files written, with the prefix given by --output:
   <prefix>.dcd               trajectory (DCD), every --report steps
-  <prefix>.log               step, time, potential energy, speed (OpenMM's StateDataReporter)
-  <prefix>_temperature.txt   temperature of the beads from full-step velocities (the temperature that
-                             OpenMM reports is not valid for particles coupled to the fluid)
+  <prefix>.log               step, time, potential energy, temperature, speed (OpenMM's StateDataReporter;
+                             its temperature is that of the full step, docs/theory.md, section 2)
+  <prefix>_temperature.txt   temperature of the beads from full-step and from half-step velocities
   <prefix>_com.txt           time (ps) and centre of mass x y z (nm), not wrapped into the box: the
                              input of msd.py, which computes the diffusion coefficient
   <prefix>_final.xml, <prefix>_fluid.npz   final state of the particles and of the fluid
@@ -208,7 +208,8 @@ def main():
 
     simulation.reporters.append(app.DCDReporter(args.output + '.dcd', args.report))
     simulation.reporters.append(app.StateDataReporter(args.output + '.log', args.report, step=True, time=True,
-                                                      potentialEnergy=True, speed=True, separator='\t'))
+                                                      potentialEnergy=True, temperature=True, speed=True,
+                                                      separator='\t'))
     simulation.reporters.append(FullStepTemperatureReporter(args.output + '_temperature.txt', args.report, masses))
     simulation.reporters.append(CentreOfMassReporter(args.output + '_com.txt', args.report, masses))
     simulation.step(args.steps)

@@ -62,10 +62,12 @@ library path.
 come from different generators, so the trajectories differ while their statistics agree. At T = 0, or with
 the NVE scheme, the platforms agree to rounding in double precision.
 
-**The temperature in the log is too high.** The temperature that OpenMM reports (`StateDataReporter`,
-the kinetic energy of a State) is not valid for particles coupled to the fluid: with friction*dt = 0.1 it
-reads about 20% above the temperature of the random force. Compute it from full-step velocities, as in
-the [temperature example](examples.md#temperature-of-coupled-particles).
+**The temperature in the log is a little below the set temperature.** The temperature that OpenMM
+reports for coupled particles is the full-step one. It is below T because the fluid has no thermal
+fluctuations of its own and takes part of the momentum of the particles: about 1-2% with friction*dt =
+0.1, more with a large friction (13% for the disordered protein of `examples/cocomo/diffusion.py
+--preset rlp`, friction 100/ps). See [validation.md](../validation.md). The velocities that OpenMM stores
+are those of the half step, whose temperature is higher, T/(1 - friction*dt/2) for a free particle.
 
 **Particles that are not coupled cross the walls.** Only coupled particles are reflected at solid
 nodes.

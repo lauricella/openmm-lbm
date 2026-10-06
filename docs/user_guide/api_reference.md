@@ -169,9 +169,11 @@ nearest lattice node, plus a random force at the given temperature, and the flui
 the opposite force (explicit Euler-Maruyama scheme,
 [theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)), on every platform.
 
-- **Once per step.** The coupling forces are computed once per integration step. Every other force
-  evaluation, for example `getState(getForces=True)`, returns the forces of the last step, without new
-  random numbers. Before the first step they are zero. The energy of the coupling is zero.
+- **Forces between steps.** The fluid advances once per integration step. Between steps, a force
+  evaluation such as `getState(getForces=True)` returns the coupling force of the next step, as OpenMM does
+  for every force, without changing the fluid; the random numbers of a step are drawn once, so extra
+  evaluations do not change the run. Before the first step the coupling forces are zero. The energy of the
+  coupling is zero.
 - **Walls.** A coupled particle whose nearest node is solid and that moves into the wall has every
   component of its velocity reversed at the start of the step, as for a no-slip wall. A particle that
   already moves out of the wall keeps its velocity. Uncoupled particles do not see the walls.
@@ -179,8 +181,8 @@ the opposite force (explicit Euler-Maruyama scheme,
   1 - friction*dt. A warning is printed when friction*dt > 1, and the motion is unstable for
   friction*dt >= 2.
 - **Temperature.** The temperature that OpenMM reports for the System (`StateDataReporter`, the kinetic
-  energy of a State) is not valid for coupled particles. Use full-step velocities, as in the
-  [temperature example](examples.md#temperature-of-coupled-particles).
+  energy of a State) is that of the full step, which is the temperature of the coupled particles
+  ([temperature example](examples.md#temperature-of-coupled-particles)).
 
 ### `addParticle(particle)`
 

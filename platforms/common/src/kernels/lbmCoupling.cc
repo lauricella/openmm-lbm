@@ -110,15 +110,17 @@ KERNEL void reflectParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const rea
  * Explicit Euler-Maruyama coupling at the nearest node, in lattice units:
  *   F = -gamma m (v - j/rho) + sqrt(2 gamma m kT) xi,
  * with v the velocity of the leapfrog and j the momentum of the fluid after the momentum removal.  A solid node
- * has rho = 0 and is at rest.  The force is stored in particleForce, the key node*NUM_COUPLED + i in sortKeys
- * (sorted next, to sum the reactions of each node in particle order), and the reaction on a solid node is
- * added to wallMomentum.  xi comes from OpenMM's random numbers, random[randomIndex + i].
+ * has rho = 0 and is at rest.  The force is stored in particleForce and the key node*NUM_COUPLED + i in sortKeys
+ * (sorted next, to sum the reactions of each node in particle order).  In a lattice step (isStep) the reaction
+ * on a solid node is added to wallMomentum.  xi is noise[i]; with drawNoise it is first copied from OpenMM's
+ * random numbers, random[randomIndex + i].
  */
 KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection,
         GLOBAL const mixed4* RESTRICT velm, GLOBAL const int* RESTRICT atomIndex, GLOBAL const int* RESTRICT couplingIndex,
         GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum,
         GLOBAL mixed* RESTRICT particleForce, GLOBAL mm_long* RESTRICT sortKeys, GLOBAL mixed* RESTRICT wallMomentum,
-        GLOBAL const float4* RESTRICT random, int randomIndex, mixed gamma, mixed kT) {
+        GLOBAL const float4* RESTRICT random, GLOBAL float4* RESTRICT noise, int randomIndex, int drawNoise, int isStep,
+        mixed gamma, mixed kT) {
     for (int j = GLOBAL_ID; j < NUM_ATOMS; j += GLOBAL_SIZE) {
         int i = couplingIndex[atomIndex[j]];
         if (i < 0)
@@ -138,7 +140,13 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
         mixed fx = (vx-ux)*(-gamma*m), fy = (vy-uy)*(-gamma*m), fz = (vz-uz)*(-gamma*m);
         if (kT > 0 && gamma > 0) {
             mixed sigma = sqrt(2*gamma*m*kT);
-            float4 xi = random[randomIndex+i];
+            float4 xi;
+            if (drawNoise) {
+                xi = random[randomIndex+i];
+                noise[i] = xi;
+            }
+            else
+                xi = noise[i];
             fx += xi.x*sigma;
             fy += xi.y*sigma;
             fz += xi.z*sigma;
@@ -148,7 +156,7 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
         particleForce[2*NUM_COUPLED+i] = fz;
         sortKeys[i] = ((mm_long) node)*NUM_COUPLED + i;
 #ifdef HAS_SOLID_NODES
-        if (rho == 0) {
+        if (isStep && rho == 0) {
             wallMomentum[i] -= fx;
             wallMomentum[NUM_COUPLED+i] -= fy;
             wallMomentum[2*NUM_COUPLED+i] -= fz;

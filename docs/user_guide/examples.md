@@ -198,11 +198,12 @@ Notes:
 ## Temperature of coupled particles
 
 The random force at temperature T and the friction keep the coupled particles at about T: `LBMForce`
-is their thermostat. OpenMM's leapfrog stores the velocities at half steps, and the temperature that
-OpenMM reports is not valid for coupled particles
+is their thermostat. OpenMM's leapfrog stores the velocities at half steps. The temperature that OpenMM
+reports (`StateDataReporter`) is that of the full step, because OpenMM shifts the velocities by half a
+step with the coupling force of the next step
 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)). The
-reporter below computes the temperature from full-step velocities: the mean of the velocities of two
-consecutive steps.
+reporter below computes both temperatures explicitly: the full-step one from the mean of the velocities
+of two consecutive steps, and the half-step one from the stored velocities.
 
 ```python
 import numpy as np
@@ -291,8 +292,9 @@ Notes:
   ([validation.md](../validation.md)).
 - **Half step.** For a free particle it is T/(1 - gamma dt/2) = 315.8 K, lowered by the same factor:
   311.7 +- 0.4 K over 20000 steps.
-- **OpenMM's own temperature.** With `StateDataReporter(..., temperature=True)` this system reads
-  359 K. Do not use it for coupled particles.
+- **OpenMM's own temperature.** `StateDataReporter(..., temperature=True)` gives the full-step
+  temperature at the report step; the reporter above computes it one step earlier, from steps n - 1 and n.
+  On this system the means over the same reports are 292 K and 293 K, equal within the statistical error.
 - **Using the reporter.** It works with any Simulation: pass the indices of the coupled particles. It
   stops one step before each report to record the velocities.
 
@@ -569,8 +571,8 @@ Notes:
   `LBMForce`, which is the thermostat of the coupled particles.
 - **Initial velocities.** They come from NumPy here because `setVelocitiesToTemperature()` gives
   different velocities in different OpenMM versions; either is fine in practice.
-- **Temperature.** The temperature column of `StateDataReporter` is not valid for coupled particles;
-  use the reporter of the [temperature example](#temperature-of-coupled-particles).
+- **Temperature.** The temperature column of `StateDataReporter` is that of the full step, as in the
+  [temperature example](#temperature-of-coupled-particles).
 - **Reporters.** A reporter can read the fluid with any of the methods of `LBMForce` that take the
   Context; none of them advances the fluid.
 - **Which particles to couple.** Only the particles passed to `addParticle()` interact with the fluid.
