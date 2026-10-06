@@ -163,6 +163,12 @@ On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's gene
 library (`IntegrationUtilities`, Gaussian numbers in single precision), seeded with `setRandomNumberSeed()`.
 OpenMM keeps one generator per Context: another component that uses it with a different seed (an
 `AndersenThermostat`, for example) makes OpenMM stop with an error, and the two seeds must then be set equal.
+At every step the plugin reserves one Gaussian float4 per (padded) atom of the System and uses element i,
+components x, y, z, for coupled particle i. This is how the reference library consumes the generator, so
+with the same seed both draw the same numbers and a run with the random force can be compared with it step
+by step: the thermal example agrees to 3e-11 over 20000 steps on CUDA in double precision
+([examples/README.md](../examples/README.md#comparison-with-the-dragopenmm-plugin)). OpenCL generates the
+same sequence with slightly different rounding.
 The random forces of the GPU platforms and of the Reference platform are different sequences with the same
 statistics; at T = 0 (or with the NVE scheme) the platforms agree to rounding.
 

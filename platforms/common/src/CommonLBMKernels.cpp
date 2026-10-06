@@ -315,8 +315,11 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     int numCoupled = lattice.particles.size();
     if (numCoupled > 0) {
         // Fresh N(0,1) numbers for this step from OpenMM's generator, only when there is a random force.
+        // One float4 per padded atom is reserved, although only the first numCoupled are used: this is
+        // how the DragOpenMM plugin consumes the generator, so with the same seed both plugins draw the
+        // same numbers and their stochastic runs can be compared step by step.
         if (lattice.kT > 0 && lattice.friction > 0)
-            coupleKernel->setArg(12, cc.getIntegrationUtilities().prepareRandomNumbers(numCoupled));
+            coupleKernel->setArg(12, cc.getIntegrationUtilities().prepareRandomNumbers(cc.getPaddedNumAtoms()));
         coupleKernel->execute(cc.getNumAtoms());
         sort->sort(sortKeys);
         sumReactionsKernel->execute(numCoupled);
