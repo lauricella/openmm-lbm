@@ -1,9 +1,18 @@
 # Changelog
 
-All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; 0.x
-versions precede equivalence with the reference CUDA lattice Boltzmann library.
+All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
+versions the API may still change.
 
-## Unreleased (0.1.0)
+## 0.1.0 (2026-10-07)
+
+First release. A native OpenMM plugin (OpenMM 8.3 to 8.6) with a D3Q19 regularized lattice Boltzmann fluid
+coupled to the particles by friction and random force (Euler-Maruyama, or NVE at zero temperature), solid
+walls with momentum exchange, checkpoints of the fluid, on the Reference, CUDA, OpenCL and HIP platforms. It
+reproduces the reference CUDA library of the DragOpenMM project: trajectories of the deterministic tests within
+1e-12 and the quantities derived from them within 1e-5,
+stochastic tests (equipartition, diffusion, velocity autocorrelation) and the examples of that project
+within their statistical error (`docs/validation.md`). Tested on NVIDIA A100 with OpenMM 8.3.1 and 8.6.1,
+and in continuous integration with every minor version from 8.3 to 8.6 and a HIP build.
 
 ### Added
 - Plugin structure following the OpenMM example plugin: API, Reference platform, common implementation
@@ -128,4 +137,8 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   examples (`docs/user_guide/tutorial.md`).
 
 ### Not yet implemented
+- Thermal fluctuations of the fluid (fluctuating lattice Boltzmann): without them the diffusion coefficient
+  of the coupled particles stays close to kT/(m friction) (user guide, limitations of the model).
+- Time-centred drag.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).
+- Tests of the HIP platform on AMD GPUs (it is built in continuous integration, not run).
