@@ -206,7 +206,7 @@ plugin, in which OpenMM's `LangevinIntegrator` supplies friction and noise (firs
 exp(-gamma dt)); they were regenerated with the Euler-Maruyama scheme for this comparison
 (v1/v0 = 1 - gamma dt).
 - **Disordered protein rlp** (`cocomo/diffusion.py --preset rlp`, 166 beads, friction 100/ps, dt 2 fs,
-  298 K): full-step temperature 259.7 K and half-step 294.3 K over 10 ns; the DragOpenMM plugin with the
+  298 K): full-step temperature 259.1 K and half-step 293.6 K over 10 ns; the DragOpenMM plugin with the
   same parameters gives 259.9 K and 294.7 K. The 13% deficit is that of the model without thermal
   fluctuations of the fluid, large at this friction (T2 and T6 below).
 - **COCOMO2 model** (`cocomo/cocomo2.py`), written from the article: on SOD1 (`cocomo/data/sod1.pdb`,

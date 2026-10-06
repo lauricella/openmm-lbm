@@ -163,7 +163,7 @@ the same parameters, the DragOpenMM plugin in double precision gives the same tr
 | uniform flow, 400 steps | CUDA double | equal to the 6 digits printed |
 | protein kick, peptide (COCOMO2), 2000 steps | CUDA double | velocity of the centre of mass 1e-13 of v0; positions equal to the printed digits |
 | SOD1 diffusion, `--preset sod1`, two runs of 200 ns | CUDA mixed | apparent diffusion coefficient of the centre of mass 2.4-2.9 A^2/ns at lag times from 0.1 to 18 ns, against 2.3-2.6 in three runs of the DragOpenMM plugin (spread between runs 1.9-3.4 at 18 ns); kT/(M gamma) = 2.26 A^2/ns |
-| `--preset rlp`, 10 ns | CUDA mixed | full-step temperature 259.7 K and half-step 294.3 K at 298 K, against 259.9 K and 294.7 K for the DragOpenMM plugin (0.2 ns, double precision) |
+| `--preset rlp`, 10 ns | CUDA mixed | full-step temperature 259.1 K and half-step 293.6 K at 298 K, against 259.9 K and 294.7 K for the DragOpenMM plugin (0.2 ns, double precision) |
 | `--preset fabio-g30`, 50 ns | CUDA mixed | 0.89-1.0 A^2/ns between 0.1 and 1 ns, against 0.86 for the DragOpenMM plugin; kT/(M gamma) = 0.75 A^2/ns |
 
 The thermal run can be compared step by step because both plugins draw their random numbers from
