@@ -50,7 +50,7 @@ reproducible and understandable by someone who arrives without any prior context
 
 ## Supported OpenMM versions
 
-- **Supported range: OpenMM 8.3 to 8.6.** The range is declared in `README.md`, and CMake stops with an error below the minimum. The minimum is 8.3 because the plugin uses `ComputeSort`, which entered the OpenMM common compute layer in 8.3.0.
+- **Supported range: OpenMM 8.3 to 8.6.** The range is declared in `README.md`. CMake reads the version of the OpenMM in `OPENMM_DIR` from its library (`Platform::getOpenMMVersion()`, with that library preloaded so that another OpenMM on the library path does not interfere), stops with an error below the minimum and warns above the newest tested version; if the version cannot be read, it checks for `openmm/common/ComputeSort.h`. The minimum is 8.3 because the plugin uses `ComputeSort`, which entered the OpenMM common compute layer in 8.3.0.
 - **What "supported" means.** A compiled plugin is tied to the OpenMM version it was built against. "Supported" therefore means that the plugin builds, and passes all tests, against every minor version in the range.
 - **Test matrix.** Continuous integration builds and tests against every minor version in the range (Reference and OpenCL on CPU). GPU tests run on the minimum and on the maximum version.
 - **New OpenMM releases** are added to the test matrix and, once the tests pass, to the supported range.

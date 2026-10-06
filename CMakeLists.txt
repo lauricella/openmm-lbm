@@ -16,7 +16,52 @@ LINK_DIRECTORIES("${OPENMM_DIR}/lib" "${OPENMM_DIR}/lib/plugins")
 
 # Supported OpenMM versions: 8.3 to 8.6 (see CONTRIBUTING.md). The minimum is 8.3 because the
 # per-cell reduction of the coupling forces sorts on the device with ComputeSort, which entered
-# the OpenMM common compute layer in 8.3.0.
+# the OpenMM common compute layer in 8.3.0.  The headers of OpenMM do not contain its version: a small
+# program linked to the OpenMM library in OPENMM_DIR prints Platform::getOpenMMVersion().
+SET(LBM_MINIMUM_OPENMM_VERSION 8.3)
+SET(LBM_NEWEST_TESTED_OPENMM_VERSION 8.6)
+IF(NOT EXISTS "${OPENMM_DIR}/include/openmm/Platform.h")
+    MESSAGE(FATAL_ERROR "OpenMM was not found in ${OPENMM_DIR}: set OPENMM_DIR to the directory where OpenMM is installed (with conda: -DOPENMM_DIR=$CONDA_PREFIX)")
+ENDIF()
+FILE(WRITE "${CMAKE_BINARY_DIR}/CMakeFiles/openmm_version.cpp"
+    "#include \"openmm/Platform.h\"\n#include <iostream>\nint main() {\n    std::cout << OpenMM::Platform::getOpenMMVersion();\n    return 0;\n}\n")
+# The library of OPENMM_DIR must be the one that runs, also when the run path of the active environment
+# (which conda adds to the linker flags) or the library path point to another OpenMM: the program runs with
+# that library preloaded.
+SET(OPENMM_LIBRARY_FOR_VERSION "${OPENMM_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}OpenMM${CMAKE_SHARED_LIBRARY_SUFFIX}")
+SET(OPENMM_VERSION_OUTPUT "")
+IF(EXISTS "${OPENMM_LIBRARY_FOR_VERSION}")
+    SET(OPENMM_VERSION_PROGRAM "${CMAKE_BINARY_DIR}/CMakeFiles/print_openmm_version${CMAKE_EXECUTABLE_SUFFIX}")
+    TRY_COMPILE(OPENMM_VERSION_COMPILED "${CMAKE_BINARY_DIR}/CMakeFiles/openmm_version_check"
+        SOURCES "${CMAKE_BINARY_DIR}/CMakeFiles/openmm_version.cpp"
+        CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${OPENMM_DIR}/include"
+        LINK_LIBRARIES "${OPENMM_LIBRARY_FOR_VERSION}"
+        CXX_STANDARD 17
+        COPY_FILE "${OPENMM_VERSION_PROGRAM}")
+    IF(OPENMM_VERSION_COMPILED)
+        IF(APPLE)
+            SET(OPENMM_VERSION_PRELOAD "DYLD_INSERT_LIBRARIES=${OPENMM_LIBRARY_FOR_VERSION}")
+        ELSEIF(UNIX)
+            SET(OPENMM_VERSION_PRELOAD "LD_PRELOAD=${OPENMM_LIBRARY_FOR_VERSION}")
+        ELSE()
+            SET(OPENMM_VERSION_PRELOAD "")
+        ENDIF()
+        EXECUTE_PROCESS(COMMAND "${CMAKE_COMMAND}" -E env ${OPENMM_VERSION_PRELOAD} "${OPENMM_VERSION_PROGRAM}"
+            OUTPUT_VARIABLE OPENMM_VERSION_OUTPUT ERROR_QUIET)
+    ENDIF()
+ENDIF()
+STRING(REGEX MATCH "^[0-9]+\\.[0-9]+(\\.[0-9]+)?" OPENMM_VERSION "${OPENMM_VERSION_OUTPUT}")
+IF(OPENMM_VERSION)
+    MESSAGE(STATUS "OpenMM ${OPENMM_VERSION} in ${OPENMM_DIR}")
+    IF(OPENMM_VERSION VERSION_LESS LBM_MINIMUM_OPENMM_VERSION)
+        MESSAGE(FATAL_ERROR "openmm-lbm requires OpenMM ${LBM_MINIMUM_OPENMM_VERSION} or later, but the OpenMM in ${OPENMM_DIR} is version ${OPENMM_VERSION}. Install a supported version (8.3 to 8.6), for example with conda: conda install -c conda-forge openmm=8.6")
+    ENDIF()
+    IF(OPENMM_VERSION VERSION_GREATER_EQUAL 8.7)
+        MESSAGE(WARNING "OpenMM ${OPENMM_VERSION} is newer than the versions openmm-lbm is tested with (8.3 to ${LBM_NEWEST_TESTED_OPENMM_VERSION}): build and run the tests (ctest) before using it")
+    ENDIF()
+ELSE()
+    MESSAGE(WARNING "The version of the OpenMM in ${OPENMM_DIR} could not be determined; checking for the headers of OpenMM 8.3")
+ENDIF()
 IF(NOT EXISTS "${OPENMM_DIR}/include/openmm/common/ComputeSort.h")
     MESSAGE(FATAL_ERROR "openmm-lbm requires OpenMM 8.3 or later: openmm/common/ComputeSort.h was not found in ${OPENMM_DIR}/include")
 ENDIF()
