@@ -218,3 +218,18 @@ exp(-gamma dt)); they were regenerated with the Euler-Maruyama scheme for this c
   18 ns. Both stay close to kT/(M gamma) = 2.26 A^2/ns, as expected without thermal fluctuations of
   the fluid. The full-step temperature is 293-294 K at 298 K.
 
+## Kinetic energy budget (`python/tests/TestEnergyBudget.py`, Reference)
+
+The kinetic energy plus the viscous and drag dissipation of [theory.md](theory.md), section 2, is
+constant only to O(Ma^2, Kn^2). The test checks the size and scaling of the residual (E + dissipated)/E0 - 1:
+
+| Case | Residual |
+|---|---|
+| shear wave, 16 nodes per wavelength, tau = 1.1 | -3.06% |
+| shear wave, 32 nodes per wavelength, tau = 1.1 | -0.77% (ratio 3.97: O(k^2)) |
+| bead kicked at Mach 0.035, 12^3 nodes, NVE | -4.448% |
+| bead kicked at Mach 0.10, same system | -4.445% (independent of the Mach number) |
+
+Tolerances: below 1% for the finer shear wave and a ratio between 3 and 5; below 6% for the kick and a
+difference below 1e-3 between the two Mach numbers.
+

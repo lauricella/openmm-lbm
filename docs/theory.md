@@ -138,6 +138,31 @@ multiplying the whole Hermite expansion.
   perfectly inelastic collision. The momentum is conserved, and the kinetic energy falls by the factor
   m/(m + M).
 
+**Kinetic energy budget (approximate).** With the NVE scheme the kinetic energy plus the energy dissipated
+by viscosity and drag stays constant, but only in the hydrodynamic limit, to O(Ma^2, Kn^2). It is a check
+of the model, not an exact conservation law like that of the momentum. In lattice units (dx = dt = 1, mass
+in cells m_c):
+- the kinetic energy is E = sum over the nodes of rho u^2/2, with u = j/rho, plus sum over the particles
+  of m v^2/2;
+- the viscous dissipation in one step is sum over the nodes of (tau - 1/2)/(2 tau^2 rho c_s^2)
+  Pi_neq:Pi_neq. It follows from the Chapman-Enskog relation Pi_neq = -2 rho c_s^2 tau S and the
+  dissipation 2 rho nu S:S with nu = c_s^2 (tau - 1/2), and is computed from Pi_neq of the state without
+  finite differences;
+- the drag dissipation in one step follows from the discrete update: the particle loses -F.(v_n + v_n+1)/2
+  and the fluid, with Guo's forcing, receives -F at the velocity u - F/(2 rho) of the node, so the energy
+  dissipated is -F.[(v_n + v_n+1)/2 - u + F/(2 rho)], with F = -gamma m (v_n - u) the force on the particle.
+
+Measured on the Reference platform (`python/tests/TestEnergyBudget.py`, tau = 1.1):
+- a shear wave without particles closes to -3.1% of the initial energy with 16 nodes per wavelength and to
+  -0.77% with 32: the residual falls as k^2, as an O(Kn^2) error should;
+- a particle kicked in the fluid closes to -4.4%, the same at Mach numbers 0.035 and 0.10 and with 12^3 to
+  24^3 nodes (-5.5% at tau = 0.62). The reaction of the drag acts on a single node, far from the
+  hydrodynamic limit (Kn of order 1): part of the energy goes into non-hydrodynamic moments, which the
+  regularized collision removes and the hydrodynamic formula does not count.
+
+With the Euler-Maruyama scheme the budget gains the work of the random force; in a steady state its mean
+power balances the dissipation of the drag.
+
 **Order in the lattice step.** Moments, removal of the fluid momentum, coupling, collision and
 streaming, bounce-back. The coupling therefore sees the fluid momentum after the removal.
 

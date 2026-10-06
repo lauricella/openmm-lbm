@@ -108,6 +108,8 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   SOD1 and of a disordered protein with and without the fluid (`diffusion.py`, with the parameter sets
   of the DragOpenMM runs), kicks of a peptide and of ubiquitin (`kick.py`), and the diffusion
   coefficient of the centre of mass (`msd.py`).
+- Approximate kinetic energy budget with the NVE scheme (kinetic energy plus viscous and drag dissipation,
+  valid to O(Ma^2, Kn^2)), described in `docs/theory.md` and checked by `python/tests/TestEnergyBudget.py`.
 - User guide: step-by-step installation of conda, OpenMM and the plugin for beginners
   (`docs/user_guide/installation.md`), and a tutorial that teaches OpenMM and the plugin through the
   examples (`docs/user_guide/tutorial.md`).
