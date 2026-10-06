@@ -74,6 +74,7 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
         particleMass[i] = system.getParticleMass(lattice.particles[i])/cellMass;
     particleForces.assign(numParticles, Vec3());
     reaction.resize(3*numNodes);
+    wallMomentum = Vec3();
     int seed = lattice.randomNumberSeed;
     if (seed == 0)
         seed = osrngseed();
@@ -92,13 +93,20 @@ void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
     // pointing into the wall, has every component of its velocity reversed, as for a no-slip wall.  A particle
     // that already moves out of the wall keeps its velocity.  This is done here, at the start of the step,
     // where OpenMM's AndersenThermostat also changes velocities, so that the coupling and the integrator see
-    // the new values.
+    // the new values.  The wall receives the momentum 2 m v taken from the particle.
+    wallMomentum = Vec3();
     if (!isFluid.empty()) {
         vector<Vec3>& positions = extractPositions(context);
         vector<Vec3>& velocities = extractVelocities(context);
-        for (int particle : lattice.particles)
-            if (!isFluid[nearestNode(positions[particle])] && velocities[particle].dot(wallNormal(positions[particle])) > 0)
-                velocities[particle] = -velocities[particle];
+        double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+        for (int i = 0; i < (int) lattice.particles.size(); i++) {
+            int particle = lattice.particles[i];
+            Vec3 v = velocities[particle];
+            if (!isFluid[nearestNode(positions[particle])] && v.dot(wallNormal(positions[particle])) > 0) {
+                wallMomentum += v*(2.0*particleMass[i]*cellMass);
+                velocities[particle] = -v;
+            }
+        }
     }
 }
 
@@ -241,6 +249,12 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context) {
     }
     for (int k = 0; k < 3*numNodes; k++)
         forceDensity[k] += reaction[k];
+
+    // The reaction on a solid node goes to the wall.
+
+    double momentumScale = cellMass*lattice.dx/lattice.dt;
+    for (int node : lattice.solidNodes)
+        wallMomentum += Vec3(reaction[3*node], reaction[3*node+1], reaction[3*node+2])*momentumScale;
 }
 
 int ReferenceCalcLBMForceKernel::nearestNode(const Vec3& position) const {
@@ -335,17 +349,25 @@ void ReferenceCalcLBMForceKernel::collideAndStream() {
 void ReferenceCalcLBMForceKernel::bounceBack() {
     // Halfway bounce-back: the population that streamed from the fluid node s + c_q into the solid node s,
     // moving along -c_q, returns to s + c_q moving along c_q.  The wall lies halfway between the two nodes.
+    // Momentum exchange (Ladd 1994): on each such link the wall at rest receives the momentum f (-c_q) - f c_q.
     int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
     int numNodes = lattice.getNumNodes();
+    Vec3 exchanged;
     for (int node : lattice.solidNodes) {
         int i = node%nx, j = (node/nx)%ny, k = node/(nx*ny);
         for (int q = 1; q < D3Q19::numVelocities; q++) {
             int di = (i + D3Q19::cx[q] + nx)%nx;
             int dj = (j + D3Q19::cy[q] + ny)%ny;
             int dk = (k + D3Q19::cz[q] + nz)%nz;
-            populations[q*numNodes + di + nx*(dj + ny*dk)] = populations[D3Q19::opposite[q]*numNodes + node];
+            int target = di + nx*(dj + ny*dk);
+            double f = populations[D3Q19::opposite[q]*numNodes + node];
+            populations[q*numNodes + target] = f;
+            if (isFluid[target])
+                exchanged -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*f);
         }
     }
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    wallMomentum += exchanged*(cellMass*lattice.dx/lattice.dt);
 }
 
 void ReferenceCalcLBMForceKernel::copyParametersToContext(ContextImpl& context, const LBMLatticeParameters& lattice) {
@@ -375,6 +397,10 @@ void ReferenceCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<do
         density[node] = r*lattice.density;
         velocity[node] = (Vec3(jx, jy, jz)*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
     }
+}
+
+Vec3 ReferenceCalcLBMForceKernel::getWallForce(ContextImpl& context) {
+    return wallMomentum*(1.0/lattice.dt);
 }
 
 double ReferenceCalcLBMForceKernel::getFluidMachNumber(ContextImpl& context) {

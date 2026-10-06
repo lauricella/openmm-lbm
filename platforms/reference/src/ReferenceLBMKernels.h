@@ -43,6 +43,7 @@ public:
     void copyParametersToContext(OpenMM::ContextImpl& context, const LBMLatticeParameters& lattice);
     void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity);
     double getFluidMachNumber(OpenMM::ContextImpl& context);
+    OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context);
     void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
 private:
@@ -76,6 +77,8 @@ private:
     /** Forces on the coupled particles (kJ/mol/nm) computed in the last lattice step.  Every force evaluation
         applies them, so that evaluations outside the integration steps draw no new random numbers. */
     std::vector<OpenMM::Vec3> particleForces;
+    /** Momentum (Da nm/ps) given to the solid nodes in the current or last lattice step. */
+    OpenMM::Vec3 wallMomentum;
     /** Reaction of the coupled particles on each node (3 per node), in lattice units. */
     std::vector<double> reaction;
     /** Generator of the random force, owned by the kernel so that its sequence does not depend on other forces. */

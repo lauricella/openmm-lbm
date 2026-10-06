@@ -196,6 +196,10 @@ double LBMForceImpl::getFluidMachNumber(ContextImpl& context) {
     return kernel.getAs<CalcLBMForceKernel>().getFluidMachNumber(context);
 }
 
+Vec3 LBMForceImpl::getWallForce(ContextImpl& context) {
+    return kernel.getAs<CalcLBMForceKernel>().getWallForce(context);
+}
+
 void LBMForceImpl::getLatticeParameters(double& dx, double& dt, double& tau) const {
     dx = lattice.dx;
     dt = lattice.dt;

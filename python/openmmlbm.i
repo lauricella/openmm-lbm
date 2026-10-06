@@ -128,6 +128,9 @@ import openmm.unit as unit
 %pythonappend LBMPlugin::LBMForce::getLatticeParametersInContext(const OpenMM::Context& context, double& dx, double& dt, double& tau) const %{
     val = (unit.Quantity(val[0], unit.nanometer), unit.Quantity(val[1], unit.picosecond), val[2])
 %}
+%pythonappend LBMPlugin::LBMForce::getWallForce(OpenMM::Context& context) const %{
+    val = unit.Quantity(val, unit.kilojoule_per_mole/unit.nanometer)
+%}
 %pythonappend LBMPlugin::LBMForce::getFluidFields(OpenMM::Context& context) %{
     val = (unit.Quantity(val[0], unit.dalton/unit.nanometer**3), unit.Quantity(val[1], unit.nanometer/unit.picosecond))
 %}
@@ -195,6 +198,7 @@ public:
     %clear std::vector<double>& state;
     void setFluidState(OpenMM::Context& context, const std::vector<double>& state);
     double getFluidMachNumber(OpenMM::Context& context) const;
+    OpenMM::Vec3 getWallForce(OpenMM::Context& context) const;
 
     %apply double& OUTPUT {double& dx};
     %apply double& OUTPUT {double& dt};

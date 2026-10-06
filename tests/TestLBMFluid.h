@@ -501,6 +501,13 @@ void testPoiseuille(Platform& platform, double tau) {
                 double exact = g/(2*nu)*(j-0.5)*(ny-0.5-j) + g*(16*lambda-3)/(24*nu);
                 ASSERT_EQUAL_VEC(Vec3(exact/umax, 0, 0), u*(1.0/umax), 1e-9);
             }
+
+    // In the steady state the walls carry the whole body force: g times the mass of the fluid.
+    double mass = 0;
+    for (double d : density)
+        mass += d*fluidDx*fluidDx*fluidDx;
+    Vec3 bodyForce(g*fluidDx/(fluidDt*fluidDt)*mass, 0, 0);
+    ASSERT_EQUAL_VEC(bodyForce, force->getWallForce(context), 1e-8);
     delete system;
 }
 

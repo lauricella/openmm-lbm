@@ -42,7 +42,9 @@ second-order scheme. It vanishes at tau = 1, where the collision relaxes the pop
 in one step.
 
 **Walls.** With halfway bounce-back the steady Poiseuille profile matches the exact solution of the
-scheme to 1e-12 for every tau tested (0.7 to 1.5, channel widths 11 and 19). Its wall position differs
+scheme to 1e-12 for every tau tested (0.7 to 1.5, channel widths 11 and 19). In the steady state the
+force on the walls from the momentum exchange (`getWallForce()`) equals the body force on the fluid, g
+times its mass, to 1e-8 (`testPoiseuille`). Its wall position differs
 from the halfway position by (3 - 16 Lambda)/(12 H), Lambda = (tau - 1/2)/2; measured in a channel of
 width H = 23:
 
@@ -64,6 +66,7 @@ the fluid momentum.
 | Force evaluations and seeds | `getState()` before and after every step does not change the trajectory; two runs with seed 0 differ | bitwise |
 | Walls | a coupled particle reaching a solid node: v2 = -v0 (1 - gamma dt)^2; an uncoupled one passes | 1e-14 |
 | Walls, direction | at a wall one node thick, a particle is reversed only if it moves into the wall, from either side | 1e-14 |
+| Momentum with walls | fluid flowing against two walls, a particle reflected, drag and random force, 100 steps: particles + fluid + the sum of `getWallForce()` dt is constant | 1e-12 relative |
 | Restart | checkpoint plus `setFluidState()` at step 13, removal every 5 steps, T = 0 | bitwise |
 | Warning | friction*dt > 1 is reported at Context creation | |
 

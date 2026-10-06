@@ -49,6 +49,7 @@ public:
     void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
     double getFluidMachNumber(OpenMM::ContextImpl& context);
+    OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context);
     void getLatticeParameters(double& dx, double& dt, double& tau) const;
     /**
      * Compute the lattice parameters for a force, a System and an integrator step size, checking

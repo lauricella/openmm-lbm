@@ -77,6 +77,12 @@ print('centre: %.6f nm/ps, parabola %.6f, exact solution of the scheme %.6f' % (
 print('max relative deviation: from the parabola %.1e, from the exact solution %.1e'
       % (np.abs(u - parabola).max()/parabola.max(), np.abs(u - exact).max()/exact.max()))
 
+# In the steady state the walls carry the whole body force on the fluid, g times its mass.
+density, velocity = force.getFluidFields(context)
+mass = np.sum(density.value_in_unit(unit.dalton/unit.nanometer**3))*dx**3
+wall = force.getWallForce(context)[0].value_in_unit(unit.kilojoule_per_mole/unit.nanometer)
+print('force on the walls %.4f kJ/mol/nm, body force g M %.4f kJ/mol/nm' % (wall, g*mass))
+
 # Switch the driving off and follow the decay of the centre-line velocity.
 force.setBodyAcceleration(mm.Vec3(0, 0, 0))
 force.updateParametersInContext(context)
@@ -94,6 +100,7 @@ Output:
 tau = 0.6204, Mach = 0.0086
 centre: 0.248082 nm/ps, parabola 0.248505, exact solution of the scheme 0.248082
 max relative deviation: from the parabola 1.7e-03, from the exact solution 2.5e-09
+force on the walls 481.7712 kJ/mol/nm, body force g M 481.7712 kJ/mol/nm
 decay rate 0.0992 /ps, slowest viscous mode pi^2 nu/H^2 = 0.0990 /ps
 ```
 
@@ -110,6 +117,8 @@ Notes:
   so the channel is infinite along the flow.
 - **Momentum removal.** It must be off (`setFluidMomentumRemovalFrequency(0)`): otherwise the plugin
   would subtract the momentum given by the acceleration.
+- **Force on the walls.** `getWallForce()` measures the momentum that the fluid gives to the solid nodes
+  (momentum exchange method). In the steady state it balances the body force on the fluid.
 - **Changing a parameter during the run.** `updateParametersInContext()` applies the new body
   acceleration from the next step, without touching the fluid. After the driving stops, the flow decays
   at the rate of the slowest viscous mode of the channel.

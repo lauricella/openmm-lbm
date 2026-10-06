@@ -107,6 +107,11 @@ public:
      */
     virtual double getFluidMachNumber(OpenMM::ContextImpl& context) = 0;
     /**
+     * Get the force (kJ/mol/nm) exerted on the solid nodes during the last lattice step: the momentum given
+     * to them by bounce-back (momentum exchange) and by the coupled particles, divided by the time step.
+     */
+    virtual OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context) = 0;
+    /**
      * Get the populations of all nodes, in lattice units.
      */
     virtual void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state) = 0;

@@ -140,6 +140,19 @@ therefore lies halfway between a solid node and its fluid neighbours, and has no
 
 `getSolidNodes()` returns the list of indices.
 
+### `getWallForce(context)`
+
+Returns the force exerted on the solid nodes during the last lattice step, as a `Vec3` in kJ/mol/nm.
+It is the momentum given to the walls, divided by the time step, by:
+- the fluid, through bounce-back (momentum exchange method of Ladd,
+  [theory.md](../theory.md#solid-nodes-implemented-on-the-reference-platform));
+- the coupled particles: the reaction of particles at solid nodes and their reflections.
+
+It is zero before the first step and without solid nodes. With it, the total momentum of particles, fluid
+and walls is conserved. In a steady flow driven by a body acceleration g it equals g times the mass of
+the fluid. It is the total over all solid nodes: the force on each wall separately is not available yet.
+It does not advance the fluid.
+
 ```python
 import numpy as np
 

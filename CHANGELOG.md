@@ -52,6 +52,11 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   `docs/theory.md` section 2, the user guide (two new examples, including a reporter of the full-step
   temperature, since the temperature reported by OpenMM is not valid for coupled particles).
 
+- Force on the walls, `getWallForce()`: the momentum given to the solid nodes in the last step by
+  bounce-back (momentum exchange method of Ladd) and by the coupled particles (reaction at solid nodes,
+  reflections), divided by dt. Tests: momentum of particles, fluid and walls conserved; in steady
+  Poiseuille flow the force on the walls equals the body force on the fluid.
+
 ### Not yet implemented
 - Fluid update, solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

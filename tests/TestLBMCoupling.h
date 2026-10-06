@@ -242,6 +242,59 @@ void testWallReflectionDirection(Platform& platform) {
 }
 
 /**
+ * With walls the total momentum of particles, fluid and walls is conserved, the momentum given to the walls
+ * being the sum of getWallForce() dt over the steps.  The fluid flows against the walls j = 0 and j = 4, one
+ * particle is reflected by a wall, and all particles feel drag and random force.
+ */
+void testWallMomentumBalance(Platform& platform) {
+    LBMForce* force;
+    System* system = createCoupledSystem(force, 4, 10.0, 300.0);
+    vector<int> walls = wallPlane(8, 8, 8);
+    for (int node : wallPlane(8, 8, 8))
+        walls.push_back(node + 8*4);                   // the plane j = 4
+    force->setSolidNodes(walls);
+    force->setInitialFluidVelocity(Vec3(0.3, 0.4, -0.2));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions({Vec3(1.1, 0.30, 1.7), Vec3(2.3, 1.2, 0.6), Vec3(0.7, 3.1, 2.9), Vec3(3.3, 1.6, 3.6)});
+    context.setVelocities({Vec3(0.5, -10.0, 0.2), Vec3(0.4, 0.3, -0.2), Vec3(-0.6, 0.2, 0.5), Vec3(0.1, -0.4, 0.3)});
+    auto momentum = [&](double& scale) {
+        State state = context.getState(State::Velocities);
+        Vec3 p;
+        scale = 0;
+        for (int i = 0; i < 4; i++) {
+            Vec3 v = state.getVelocities()[i];
+            p += v*couplingMass;
+            scale += couplingMass*sqrt(v.dot(v));
+        }
+        vector<double> density;
+        vector<Vec3> velocity;
+        force->getFluidFields(context, density, velocity);
+        for (int node = 0; node < (int) density.size(); node++) {
+            Vec3 pNode = velocity[node]*(density[node]*fluidDx*fluidDx*fluidDx);
+            p += pNode;
+            scale += sqrt(pNode.dot(pNode));
+        }
+        return p;
+    };
+    double scale;
+    Vec3 p0 = momentum(scale);
+    ASSERT_EQUAL_VEC(Vec3(), force->getWallForce(context), 0.0);
+    Vec3 wall;
+    for (int n = 0; n < 100; n++) {
+        integrator.step(1);
+        wall += force->getWallForce(context)*fluidDt;
+        if (n == 1)
+            ASSERT(context.getState(State::Velocities).getVelocities()[0][1] > 0);     // reflected by the wall j = 0
+    }
+    Vec3 p1 = momentum(scale);
+    ASSERT(wall.dot(wall) > 1.0);
+    Vec3 balance = p1 + wall - p0;
+    ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, 1e-12);
+    delete system;
+}
+
+/**
  * A run with coupled particles restarted from a checkpoint, with the fluid restored by setFluidState(), is
  * identical to an uninterrupted run.  The temperature is zero, since the state of the random generator is not
  * part of the checkpoint.
@@ -319,6 +372,7 @@ void runCouplingTests(Platform& platform) {
     testForceEvaluationsAndSeeds(platform);
     testWallReflection(platform);
     testWallReflectionDirection(platform);
+    testWallMomentumBalance(platform);
     testRestartWithParticles(platform);
     testFrictionWarning(platform);
 }

@@ -231,6 +231,16 @@ public:
      */
     double getFluidMachNumber(OpenMM::Context& context) const;
     /**
+     * Get the force exerted on the solid nodes during the last lattice step, measured in kJ/mol/nm: the
+     * momentum given to the walls by the fluid, through bounce-back (momentum exchange method of Ladd), and by
+     * the coupled particles, through their coupling forces at solid nodes and their reflections, divided by
+     * the time step.  It is zero before the first step and without solid nodes.  With it, the total momentum
+     * of particles, fluid and walls is conserved.
+     *
+     * @param context    the Context in which to get the force
+     */
+    OpenMM::Vec3 getWallForce(OpenMM::Context& context) const;
+    /**
      * Get the parameters of the lattice used in a Context.
      *
      * @param context    the Context for which to get the parameters

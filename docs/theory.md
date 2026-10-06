@@ -74,6 +74,21 @@ The curvature is the exact one for every tau; the second term is a slip that shi
 (3 - 16 Lambda)/(12 H), with H = ny - 1, and vanishes at Lambda = 3/16, that is tau = 7/8. The
 validation tests check this profile to 1e-9 (`docs/validation.md`).
 
+**Force on the walls: momentum exchange.** The momentum that the fluid gives to the solid nodes is
+measured with the momentum exchange method of Ladd [9, 10] ([11], section 5.4.3.1, eqs. 5.79 and
+5.80).
+- On every boundary link, from a fluid node x_f to a solid node x_s = x_f + c, the population f that
+  streams into the wall along c comes back along -c. The wall at rest receives the momentum
+  f c - f (-c) = 2 f c.
+- The sum over all boundary links, times m_c dx/dt, is the momentum given to the walls in one step.
+- The coupled particles also exchange momentum with the walls. The reaction -F of a particle whose
+  nearest node is solid goes to the wall, and the reflection of a particle gives the wall the momentum
+  2 m v.
+
+`getWallForce()` returns the sum of these contributions over the last lattice step, divided by dt. With
+it the total momentum of particles, fluid and walls is conserved, and in a steady channel flow the force
+on the walls equals the body force on the fluid (`docs/validation.md`).
+
 **Planned: open faces with imposed density or velocity.** Nodes will be of three kinds: fluid, solid,
 and wet (fluid nodes with at least one solid neighbour). A wet node rebuilds every population that comes
 from a solid neighbour as f^eq(rho, u_bc) + (1 - omega) f^neq,reg(Pi^neq), with the prescribed quantity
@@ -327,3 +342,8 @@ spacing, the lattice time step and the relaxation time, in the style of
 7. J. Latt, Choice of units in lattice Boltzmann simulations, LBMethod.org (2008).
 8. I. Ginzburg, F. Verhaeghe and D. d'Humières, Commun. Comput. Phys. 3, 427 (2008): two-relaxation-time
    scheme, magic parameter Lambda and exact bounce-back solutions.
+9. A. J. C. Ladd, J. Fluid Mech. 271, 285 (1994): lattice Boltzmann simulations of particulate
+   suspensions, part 1, theoretical foundation.
+10. A. J. C. Ladd, J. Fluid Mech. 271, 311 (1994): part 2, numerical results.
+11. T. Krüger, H. Kusumaatmaja, A. Kuzmin, O. Shardt, G. Silva and E. M. Viggen, The Lattice Boltzmann
+    Method: Principles and Practice (Springer, 2017).

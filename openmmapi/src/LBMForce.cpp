@@ -152,6 +152,10 @@ double LBMForce::getFluidMachNumber(Context& context) const {
     return dynamic_cast<LBMForceImpl&>(getImplInContext(context)).getFluidMachNumber(getContextImpl(context));
 }
 
+Vec3 LBMForce::getWallForce(Context& context) const {
+    return dynamic_cast<LBMForceImpl&>(getImplInContext(context)).getWallForce(getContextImpl(context));
+}
+
 void LBMForce::getLatticeParametersInContext(const Context& context, double& dx, double& dt, double& tau) const {
     dynamic_cast<const LBMForceImpl&>(getImplInContext(context)).getLatticeParameters(dx, dt, tau);
 }

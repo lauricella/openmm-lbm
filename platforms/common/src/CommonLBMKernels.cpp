@@ -106,6 +106,11 @@ void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<doubl
     }
 }
 
+Vec3 CommonCalcLBMForceKernel::getWallForce(ContextImpl& context) {
+    // Solid nodes are not supported on this platform yet.
+    return Vec3();
+}
+
 double CommonCalcLBMForceKernel::getFluidMachNumber(ContextImpl& context) {
     // The maximum is taken on the host for now; the periodic check during the simulation will use a
     // two-stage reduction on the device when the fluid update is ported to this platform.

@@ -105,6 +105,21 @@ def test_coupling_first_step():
         assert found == pytest.approx(initial*(1 - 5.0*0.01), rel=1e-12)
 
 
+def test_wall_force():
+    # A fluid moving towards the solid plane k = 0 pushes it along -z.
+    import numpy as np
+    system, force, positions = create_system(num_particles=1)
+    force.setSolidNodes(np.arange(64))
+    force.setInitialFluidVelocity(mm.Vec3(0, 0, -0.5))
+    force.setFluidMomentumRemovalFrequency(0)      # the default removal would stop the fluid
+    integrator = mm.VerletIntegrator(0.01)
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+    context.setPositions([mm.Vec3(1.1, 1.3, 1.7)])
+    assert force.getWallForce(context)[2].value_in_unit(unit.kilojoule_per_mole/unit.nanometer) == 0.0
+    integrator.step(1)
+    assert force.getWallForce(context)[2].value_in_unit(unit.kilojoule_per_mole/unit.nanometer) < 0.0
+
+
 def test_serialization():
     system, force, positions = create_system()
     force.setFriction(7.0)
