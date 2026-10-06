@@ -92,14 +92,14 @@ particles coupled and no removal of the fluid momentum: 80 cases.
 - **Result.**
   - Trajectories agree within 5e-13 relative over 30000 steps.
   - Derived quantities (mobilities, self-mobility y, hydrodynamic radii, velocity decay) agree within
-    2e-6, and within 1.7e-5 for the velocity of a kicked particle at its last plateau (5e-6 of its initial
+    2e-6, and within 1.1e-5 for the velocity of a kicked particle at its last plateau (5e-6 of its initial
     velocity).
   - The criterion was 1e-4.
-- **Rounding of small momenta.** On large lattices the total momentum of particles and fluid drifts by
-  rounding. With 10 Da nm/ps spread over a fluid of 2e7 Da (64^3 nodes, 20000 steps) the drift is 3e-5 of
-  the momentum; the reference library shows a drift of the same order (4.5e-6, read from its single-precision
-  output). A momentum that small is a difference between populations of
-  order 0.05 at the ninth digit. The tests with smaller lattices conserve it to 1e-12.
+- **Rounding of small momenta.** With 10 Da nm/ps spread over a fluid of 2e7 Da (64^3 nodes, 20000 steps),
+  the total momentum of particles and fluid drifts by at most 1e-8 of the momentum; the reference library
+  drifts by 4.5e-6 (read from its single-precision output). Such a momentum is a difference between
+  populations of order 0.05 at the ninth digit. Before the populations were stored as deviations from the
+  rest equilibrium (`docs/theory.md`, section 4), the drift of openmm-lbm was 3e-5.
 
 ## Equivalence with the reference implementation: fluid only
 
