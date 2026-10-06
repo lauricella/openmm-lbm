@@ -23,8 +23,10 @@ namespace LBMPlugin {
  * mixed and double precision.
  *
  * One lattice step has the structure of the Reference platform (ReferenceLBMKernels.h): moments, removal of
- * the fluid momentum when due, collision and streaming, bounce-back at the solid nodes, and the Mach number
- * check when due.  The particle-fluid coupling is not implemented on these platforms yet.
+ * the fluid momentum when due, coupling of the particles, collision and streaming, bounce-back at the solid
+ * nodes, and the Mach number check when due.  The reactions of the particles are summed per node in particle
+ * order without atomic operations: the keys node*numCoupled + i are sorted with OpenMM's ComputeSort, and the
+ * first entry of each node sums its segment.
  */
 class CommonCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
@@ -76,8 +78,15 @@ private:
     /** 1 for fluid nodes and 0 for solid nodes; the list of the solid nodes; the momentum given to each solid
         node by the deviations f - w in the last step (3 components of numSolidNodes each). */
     OpenMM::ComputeArray isFluid, solidNodes, wallExchange;
+    /** Coupled particles: index in the list of the force of every atom of the System (-1 if not coupled); masses
+        (lattice units); forces of the last step (lattice units, 3 components of numCoupled each); sort keys
+        node*numCoupled + i; momentum given to the walls in the last step by reflections and reactions at solid
+        nodes (lattice units); reaction of the particles on every node (3 components of numNodes each). */
+    OpenMM::ComputeArray couplingIndex, particleMass, particleForce, sortKeys, particleWallMomentum, cellReaction;
+    OpenMM::ComputeSort sort;
     OpenMM::ComputeKernel computeMomentsKernel, sumMomentumKernel, centerVelocityKernel, removeMomentumKernel;
     OpenMM::ComputeKernel collideKernel, bounceBackKernel, maxSpeedKernel;
+    OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
 };
 
 } // namespace LBMPlugin

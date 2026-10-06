@@ -59,10 +59,13 @@ width H = 23:
 |---|---|---|---|---|---|---|---|---|---|---|
 | wall shift (lattice units) | +0.00942 | +0.00797 | +0.00507 | +0.00217 | 0.00000 | -0.00072 | -0.00362 | -0.00942 | -0.01810 | -0.03256 |
 
-## Coupling of particles and fluid (`tests/TestLBMCoupling.h`, Reference platform)
+## Coupling of particles and fluid (`tests/TestLBMCoupling.h`, all platforms)
 
 Particles of 100 Da in a fluid of 8x8x8 nodes (dx = 0.5 nm, dt = 0.01 ps, tau = 0.8), without removal of
-the fluid momentum.
+the fluid momentum. The tests run on every platform and precision mode. The tolerances below hold on the
+Reference platform and in `double` precision; otherwise the tolerances below 2e-6 become 2e-6
+(`getCouplingTolerance()`), because OpenMM handles the forces on the particles in single precision unless
+the platform runs in double precision (`docs/theory.md`, section 2).
 
 | Test | Checks | Tolerance |
 |---|---|---|
@@ -151,7 +154,29 @@ into fused multiply-adds. Each GPU platform is deterministic: the removal of the
 number use reductions in a fixed order, without atomic operations, and each population returned by the
 bounce-back is written by one thread, so two runs give identical results.
 
-## Planned
+## GPU platforms against the Reference platform: coupled particles
 
-- The coupling of the particles on the CUDA, OpenCL and HIP platforms, with the same tests as on the
-  Reference platform and a comparison with it at T = 0.
+The Python test `test_coupling_agrees_with_reference` runs four coupled particles at T = 0 (friction
+10/ps, 60 steps; two particles share a node, one crosses the periodic boundary), without and with the solid
+plane j = 0, which reflects two of them, on the Reference platform and in double precision on each GPU
+platform. Positions, velocities, fluid state and force on the walls must agree to 1e-10. Largest relative
+differences measured on an NVIDIA A100 with OpenMM 8.6.1:
+
+| Platform and precision | positions | velocities | fluid | force on the walls |
+|---|---|---|---|---|
+| CUDA double and mixed, OpenCL double | 2e-14 | 8e-12 to 2e-11 | 4e-12 | 5e-13 |
+| OpenCL mixed | 3e-10 | 1e-8 | 7e-9 | 2e-9 |
+| CUDA and OpenCL single | 4e-7 | 1e-6 | 1e-6 | 2e-6 |
+
+The velocities differ at 1e-11 because OpenMM adds the forces in fixed point, with a resolution of
+2^-32 kJ/mol/nm. The OpenCL platform rounds the total force on a particle to single precision in mixed
+precision.
+
+**Momentum conservation** (`testMomentumConservation`, 50 steps, 300 K): relative drift of the total
+momentum 7e-14 on the Reference platform, 5e-14 with CUDA in double and mixed precision, 7e-14 with
+OpenCL in double precision, 1e-8 with OpenCL in mixed precision and 3e-7 to 6e-7 in single precision.
+
+**Speed.** With 110 coupled particles on a 30^3 lattice at 300 K and the removal of the fluid momentum at
+every step, a step takes 61 us with CUDA in mixed precision (51 us in single, 55 us in double) and 64 us
+with OpenCL in mixed precision, on an NVIDIA A100 with OpenMM 8.6.1. The CUDA library of the DragOpenMM
+project takes 517 us for the same system.

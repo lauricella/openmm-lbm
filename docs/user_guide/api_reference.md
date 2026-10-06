@@ -135,8 +135,8 @@ therefore lies halfway between a solid node and its fluid neighbours, and has no
   matter.
 - Solid nodes hold no fluid: `getFluidFields()` returns zero density and zero velocity there. They do
   not enter the removal of the fluid momentum or the Mach number.
-- Solid nodes are supported on every platform. Coupled particles are reflected at the walls only where
-  the coupling is implemented, on the Reference platform in this version.
+- Solid nodes are supported on every platform, and coupled particles are reflected at the walls on every
+  platform.
 
 `getSolidNodes()` returns the list of indices.
 
@@ -145,7 +145,7 @@ therefore lies halfway between a solid node and its fluid neighbours, and has no
 Returns the force exerted on the solid nodes during the last lattice step, as a `Vec3` in kJ/mol/nm.
 It is the momentum given to the walls, divided by the time step, by:
 - the fluid, through bounce-back (momentum exchange method of Ladd,
-  [theory.md](../theory.md#solid-nodes-implemented-on-the-reference-platform));
+  [theory.md](../theory.md#solid-nodes-implemented-on-all-platforms));
 - the coupled particles: the reaction of particles at solid nodes and their reflections.
 
 It is zero before the first step and without solid nodes. With it, the total momentum of particles, fluid
@@ -167,8 +167,7 @@ force.setSolidNodes(index[(j == 0) | (j == ny - 1)])     # walls on the planes j
 Each coupled particle feels a friction force -gamma m (v - u) relative to the fluid velocity u at the
 nearest lattice node, plus a random force at the given temperature, and the fluid at that node receives
 the opposite force (explicit Euler-Maruyama scheme,
-[theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-the-reference-platform)). This is
-implemented on the Reference platform; on the other platforms no force acts on the particles yet.
+[theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)), on every platform.
 
 - **Once per step.** The coupling forces are computed once per integration step. Every other force
   evaluation, for example `getState(getForces=True)`, returns the forces of the last step, without new
@@ -208,7 +207,7 @@ Scheme of the coupling:
   exchange momentum through the drag with no thermostat.
 
 The total momentum is conserved with both schemes; the kinetic energy is dissipated by the drag and by
-the viscosity of the fluid ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-the-reference-platform)).
+the viscosity of the fluid ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)).
 The scheme is saved with the force by `XmlSerializer`. It can be changed in a Context with
 `updateParametersInContext()`.
 
@@ -230,8 +229,10 @@ negative.
 
 Seed of the random force. With 0, the default, a different seed is chosen for every Context. Two
 simulations with different seeds have different random forces. On the Reference platform the random
-force has its own generator, so the same seed reproduces a simulation; as for other OpenMM forces, this
-is not guaranteed on the other platforms. The state of the generator is not part of OpenMM checkpoints.
+force has its own generator, so the same seed reproduces a simulation. On the CUDA, OpenCL and HIP
+platforms it uses OpenMM's generator, which has a single seed per Context: a component that uses it with a
+different seed, such as an `AndersenThermostat`, makes OpenMM stop with an error, and the two seeds must be
+set equal. The state of the generator is not part of OpenMM checkpoints.
 
 ## Reading and writing the fluid of a Context
 

@@ -160,12 +160,14 @@ KERNEL void removeFluidMomentum(GLOBAL const mixed* RESTRICT densityDeviation, G
 
 /**
  * Regularized collision with Guo forcing and push streaming,
- *   f_q(x + c_q) = feq_q(rho, u) + (1 - omega) fneq_q(Pi_neq) + S_q(u, F)/2,  u = (j + F/2)/rho,  F = rho*g,
+ *   f_q(x + c_q) = feq_q(rho, u) + (1 - omega) fneq_q(Pi_neq) + S_q(u, F)/2,  u = (j + F/2)/rho,
+ * with F = rho*g plus, with coupled particles (HAS_COUPLED_PARTICLES), the reaction of the particles of the node,
  * stored as the deviation f_q - w_q.  Each population is computed from the moments of its own node only, so the
  * populations can be overwritten in place: every (q, target node) is written by exactly one thread.
  */
 KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT isFluid, GLOBAL const mixed* RESTRICT densityDeviation,
-        GLOBAL const mixed* RESTRICT momentum, GLOBAL const mixed* RESTRICT piNeq, mixed omega, mixed gx, mixed gy, mixed gz) {
+        GLOBAL const mixed* RESTRICT momentum, GLOBAL const mixed* RESTRICT piNeq, GLOBAL const mixed* RESTRICT cellReaction,
+        mixed omega, mixed gx, mixed gy, mixed gz) {
     DECLARE_D3Q19_VELOCITIES
     for (int node = GLOBAL_ID; node < NUM_NODES; node += GLOBAL_SIZE) {
 #ifdef HAS_SOLID_NODES
@@ -176,6 +178,11 @@ KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRIC
         mixed dr = densityDeviation[node];
         mixed rho = 1 + dr;
         mixed fx = rho*gx, fy = rho*gy, fz = rho*gz;
+#ifdef HAS_COUPLED_PARTICLES
+        fx += cellReaction[node];
+        fy += cellReaction[NUM_NODES+node];
+        fz += cellReaction[2*NUM_NODES+node];
+#endif
         mixed ux = (momentum[node] + 0.5f*fx)/rho;
         mixed uy = (momentum[NUM_NODES+node] + 0.5f*fy)/rho;
         mixed uz = (momentum[2*NUM_NODES+node] + 0.5f*fz)/rho;

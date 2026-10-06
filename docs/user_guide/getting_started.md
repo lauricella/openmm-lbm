@@ -144,17 +144,18 @@ print(force.getFluidDensity())    # 602.214... Da/nm^3
 
 ## Platforms
 
-The fluid update and the solid nodes run on every platform. The coupling of the particles is implemented
-on the Reference platform in this version: on the CUDA, OpenCL and HIP platforms no force acts on the
-particles (see the [status table](README.md#what-works-in-this-version)).
-On those platforms the fluid is stored in the "mixed" type of the platform:
+The fluid, the solid nodes and the coupling of the particles run on every platform (see the
+[status table](README.md#what-works-in-this-version)). The Reference platform is for tests and small
+systems; CUDA, OpenCL and HIP are for production. On those platforms the fluid is stored in the "mixed"
+type of the platform:
 
 - single precision with `Precision` = `single`;
 - double precision with `mixed` and `double`.
 
 In `mixed` and `double` precision the fluid agrees with the Reference platform to rounding (relative
 differences of order 1e-15 after 1000 steps); in `single` precision the differences grow to about 1e-5.
-`mixed` is recommended for production.
+The forces on the particles are handled by OpenMM in single precision unless the platform runs in `double`
+precision. `mixed` is recommended for production.
 
 ## Next steps
 

@@ -58,8 +58,8 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   reflections), divided by dt. Tests: momentum of particles, fluid and walls conserved; in steady
   Poiseuille flow the force on the walls equals the body force on the fluid.
 
-- Warning at Context creation on the CUDA, OpenCL and HIP platforms when particles are coupled: the
-  coupling is implemented only on the Reference platform in this version.
+- Warning at Context creation on the CUDA, OpenCL and HIP platforms when particles are coupled, while the
+  coupling was implemented only on the Reference platform (removed when the coupling was ported, below).
 
 - Equivalence of the coupling with the reference library (E0, 80 cases at T = 0): trajectories within
   5e-13, derived quantities within 2e-5. Measured self-mobility as a function of tau
@@ -88,6 +88,15 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   and the force on the walls unchanged and makes the populations stored at solid nodes independent of the
   order of the solid nodes.
 
+- Particle-fluid coupling on the CUDA, OpenCL and HIP platforms, with the arithmetic of the Reference
+  platform: drag and random force at the nearest node (random numbers from OpenMM's generator), the
+  reactions summed per node in particle order without atomic operations (keys sorted with OpenMM's
+  `ComputeSort`, one writer per node), reflection of the particles at walls and their contribution to
+  `getWallForce()`, forces computed once per step and added at every force evaluation. The coupling tests
+  run on every platform and precision mode; at T = 0 in double precision particles and fluid agree with the
+  Reference platform to 2e-11 (`test_coupling_agrees_with_reference`). 61 us per step for 110 particles on
+  a 30^3 lattice on an NVIDIA A100, against 517 us for the reference library. The warning of the GPU
+  platforms is removed.
+
 ### Not yet implemented
-- Particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

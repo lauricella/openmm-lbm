@@ -12,6 +12,7 @@
 #include "internal/D3Q19.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/common/ContextSelector.h"
+#include "openmm/common/IntegrationUtilities.h"
 #include "openmm/internal/ContextImpl.h"
 #include <algorithm>
 #include <cmath>
@@ -22,6 +23,20 @@
 using namespace LBMPlugin;
 using namespace OpenMM;
 using namespace std;
+
+/**
+ * The sort keys of the coupled particles, node*numCoupled + i: 64-bit integers, sorted by their value.
+ */
+class CouplingSortTrait : public ComputeSortImpl::SortTrait {
+    int getDataSize() const {return 8;}
+    int getKeySize() const {return 8;}
+    const char* getDataType() const {return "mm_long";}
+    const char* getKeyType() const {return "mm_long";}
+    const char* getMinKey() const {return "0";}
+    const char* getMaxKey() const {return "0x7FFFFFFFFFFFFFFF";}
+    const char* getMaxValue() const {return "0x7FFFFFFFFFFFFFFF";}
+    const char* getSortKey() const {return "value";}
+};
 
 /**
  * Download an array of floats or doubles into a vector of doubles.  ComputeArray::download() converts
@@ -44,13 +59,6 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
     this->lattice = lattice;
-
-    // Until the coupling is ported, coupled particles on this platform would silently feel no force: say so at
-    // every Context creation.
-    if (!lattice.particles.empty())
-        cerr << "Warning: LBMForce: the particle-fluid coupling is implemented only on the Reference platform in "
-             << "this version. On this platform no force acts on the coupled particles, and the fluid feels no "
-             << "reaction." << endl;
 
     // The fluid is stored in the mixed type: double unless the platform runs in single precision.
 
@@ -107,6 +115,34 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         solidNodes.upload(lattice.solidNodes);
     wallExchange.upload(vector<double>(wallExchange.getSize(), 0.0), true);
 
+    // Coupled particles: their index in the list of the force for every atom, masses in units of the mass of a
+    // cell, m_c = rho0 dx^3, and no coupling force before the first step.  The random force uses OpenMM's
+    // generator, seeded with the seed of the force.
+
+    int numCoupled = lattice.particles.size();
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    cellReaction.initialize(cc, (numCoupled > 0 ? 3*numNodes : 1), elementSize, "lbmCellReaction");
+    cellReaction.upload(vector<double>(cellReaction.getSize(), 0.0), true);
+    if (numCoupled > 0) {
+        vector<int> index(system.getNumParticles(), -1);
+        vector<double> mass(numCoupled);
+        for (int i = 0; i < numCoupled; i++) {
+            index[lattice.particles[i]] = i;
+            mass[i] = system.getParticleMass(lattice.particles[i])/cellMass;
+        }
+        couplingIndex.initialize<int>(cc, index.size(), "lbmCouplingIndex");
+        couplingIndex.upload(index);
+        particleMass.initialize(cc, numCoupled, elementSize, "lbmParticleMass");
+        particleMass.upload(mass, true);
+        particleForce.initialize(cc, 3*numCoupled, elementSize, "lbmParticleForce");
+        particleForce.upload(vector<double>(3*numCoupled, 0.0), true);
+        particleWallMomentum.initialize(cc, 3*numCoupled, elementSize, "lbmParticleWallMomentum");
+        particleWallMomentum.upload(vector<double>(3*numCoupled, 0.0), true);
+        sortKeys.initialize(cc, numCoupled, sizeof(long long), "lbmSortKeys");
+        sort = cc.createSort(new CouplingSortTrait(), numCoupled, false);
+        cc.getIntegrationUtilities().initRandomNumberGenerator((unsigned int) lattice.randomNumberSeed);
+    }
+
     // Compile the kernels.
 
     map<string, string> defines;
@@ -123,6 +159,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         defines["HAS_SOLID_NODES"] = "1";
         defines["NUM_SOLID_NODES"] = cc.intToString(numSolidNodes);
     }
+    if (numCoupled > 0)
+        defines["HAS_COUPLED_PARTICLES"] = "1";
     ComputeProgram program = cc.compileProgram(CommonLBMKernelSources::lbmFluid, defines);
     computeMomentsKernel = program->createKernel("computeFluidMoments");
     computeMomentsKernel->addArg(populations);
@@ -148,6 +186,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     collideKernel->addArg(densityDeviation);
     collideKernel->addArg(momentum);
     collideKernel->addArg(piNeq);
+    collideKernel->addArg(cellReaction);
     for (int i = 0; i < 4; i++)
         collideKernel->addArg();        // omega and the body acceleration, set by setFluidParameters()
     if (numSolidNodes > 0) {
@@ -161,36 +200,107 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     maxSpeedKernel->addArg(populations);
     maxSpeedKernel->addArg(isFluid);
     maxSpeedKernel->addArg(partialMax);
+
+    if (numCoupled > 0) {
+        defines["NUM_ATOMS"] = cc.intToString(cc.getNumAtoms());
+        defines["PADDED_NUM_ATOMS"] = cc.intToString(cc.getPaddedNumAtoms());
+        defines["NUM_COUPLED"] = cc.intToString(numCoupled);
+        defines["DX"] = cc.doubleToString(lattice.dx, true);
+        defines["VELOCITY_SCALE"] = cc.doubleToString(lattice.getVelocityScale(), true);
+        defines["FORCE_SCALE"] = cc.doubleToString(cellMass*lattice.dx/(lattice.dt*lattice.dt), true);
+        ComputeProgram coupling = cc.compileProgram(CommonLBMKernelSources::lbmCoupling, defines);
+        if (numSolidNodes > 0) {
+            reflectKernel = coupling->createKernel("reflectParticles");
+            reflectKernel->addArg(cc.getPosq());
+            reflectKernel->addArg(cc.getPosqCorrection());
+            reflectKernel->addArg(cc.getVelm());
+            reflectKernel->addArg(cc.getAtomIndexArray());
+            reflectKernel->addArg(couplingIndex);
+            reflectKernel->addArg(isFluid);
+            reflectKernel->addArg(particleMass);
+            reflectKernel->addArg(particleWallMomentum);
+        }
+        coupleKernel = coupling->createKernel("coupleParticles");
+        coupleKernel->addArg(cc.getPosq());
+        coupleKernel->addArg(cc.getPosqCorrection());
+        coupleKernel->addArg(cc.getVelm());
+        coupleKernel->addArg(cc.getAtomIndexArray());
+        coupleKernel->addArg(couplingIndex);
+        coupleKernel->addArg(particleMass);
+        coupleKernel->addArg(densityDeviation);
+        coupleKernel->addArg(momentum);
+        coupleKernel->addArg(particleForce);
+        coupleKernel->addArg(sortKeys);
+        coupleKernel->addArg(particleWallMomentum);
+        coupleKernel->addArg(cc.getIntegrationUtilities().getRandom());
+        for (int i = 0; i < 3; i++)
+            coupleKernel->addArg();     // the index of the random numbers, set at every step, and gamma and kT
+        sumReactionsKernel = coupling->createKernel("sumCellReactions");
+        sumReactionsKernel->addArg(sortKeys);
+        sumReactionsKernel->addArg(particleForce);
+        sumReactionsKernel->addArg(cellReaction);
+        clearReactionsKernel = coupling->createKernel("clearCellReactions");
+        clearReactionsKernel->addArg(sortKeys);
+        clearReactionsKernel->addArg(cellReaction);
+        applyForcesKernel = coupling->createKernel("applyCouplingForces");
+        applyForcesKernel->addArg(cc.getAtomIndexArray());
+        applyForcesKernel->addArg(couplingIndex);
+        applyForcesKernel->addArg(particleForce);
+        applyForcesKernel->addArg(cc.getLongForceBuffer());
+    }
     setFluidParameters();
 }
 
 void CommonCalcLBMForceKernel::setFluidParameters() {
-    // The relaxation rate and the body acceleration (lattice units) are arguments of the collision, in the mixed type.
+    // The relaxation rate, the body acceleration, the friction gamma = friction*dt and the temperature (lattice
+    // units) are kernel arguments in the mixed type, so that updateParametersInContext() can change them.
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    double gamma = lattice.friction*lattice.dt;
+    double kT = lattice.kT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
     double values[4] = {lattice.omega, lattice.bodyAcceleration[0], lattice.bodyAcceleration[1], lattice.bodyAcceleration[2]};
     for (int i = 0; i < 4; i++) {
         if (useDouble)
-            collideKernel->setArg(5+i, values[i]);
+            collideKernel->setArg(6+i, values[i]);
         else
-            collideKernel->setArg(5+i, (float) values[i]);
+            collideKernel->setArg(6+i, (float) values[i]);
+    }
+    if (!lattice.particles.empty()) {
+        coupleKernel->setArg(12, 0);
+        if (useDouble) {
+            coupleKernel->setArg(13, gamma);
+            coupleKernel->setArg(14, kT);
+        }
+        else {
+            coupleKernel->setArg(13, (float) gamma);
+            coupleKernel->setArg(14, (float) kT);
+        }
     }
 }
 
 void CommonCalcLBMForceKernel::beginStep(ContextImpl& context) {
     // As on the Reference platform, the removal of the fluid momentum and the Mach number check are timed by the
-    // step count of the Context, which checkpoints save and restore.
+    // step count of the Context, which checkpoints save and restore, and coupled particles that move into a wall
+    // are reflected here, where OpenMM's AndersenThermostat also changes velocities.
     stepIndex = context.getStepCount();
     stepPending = true;
+    if (!lattice.particles.empty() && !lattice.solidNodes.empty()) {
+        ContextSelector selector(cc);
+        reflectKernel->execute(cc.getNumAtoms());
+    }
 }
 
 double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
-    // The fluid advances once per integration step: on the first force evaluation after beginStep().  Other force
-    // evaluations (getState(), for example) do not advance it.  The particle-fluid coupling is not implemented on
-    // this platform yet: no force is applied.
+    // The fluid advances, and the coupling forces are computed, once per integration step: on the first force
+    // evaluation after beginStep().  Every force evaluation applies the coupling forces of the last step, so that
+    // evaluations outside the integration steps (getState(), for example) neither advance the fluid nor draw new
+    // random numbers.  The coupling is dissipative: its energy is zero.
+    ContextSelector selector(cc);
     if (stepPending) {
         stepPending = false;
-        ContextSelector selector(cc);
         advanceFluid();
     }
+    if (includeForces && !lattice.particles.empty())
+        applyForcesKernel->execute(cc.getNumAtoms());
     return 0.0;
 }
 
@@ -202,7 +312,18 @@ void CommonCalcLBMForceKernel::advanceFluid() {
         centerVelocityKernel->execute(blockSize, blockSize);
         removeMomentumKernel->execute(numNodes);
     }
+    int numCoupled = lattice.particles.size();
+    if (numCoupled > 0) {
+        // Fresh N(0,1) numbers for this step from OpenMM's generator, only when there is a random force.
+        if (lattice.kT > 0 && lattice.friction > 0)
+            coupleKernel->setArg(12, cc.getIntegrationUtilities().prepareRandomNumbers(numCoupled));
+        coupleKernel->execute(cc.getNumAtoms());
+        sort->sort(sortKeys);
+        sumReactionsKernel->execute(numCoupled);
+    }
     collideKernel->execute(numNodes);
+    if (numCoupled > 0)
+        clearReactionsKernel->execute(numCoupled);
     if (!lattice.solidNodes.empty())
         bounceBackKernel->execute(lattice.solidNodes.size());
     hasAdvanced = true;
@@ -270,7 +391,8 @@ void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<doubl
 
 Vec3 CommonCalcLBMForceKernel::getWallForce(ContextImpl& context) {
     // The momentum given to the solid nodes in the last step, divided by dt: the part of the deviations f - w,
-    // summed over the solid nodes in the order of the list, plus the static part of the weights w.
+    // summed over the solid nodes in the order of the list, plus the static part of the weights w, plus the
+    // reflections and reactions of the coupled particles, summed in particle order.
     int numSolidNodes = lattice.solidNodes.size();
     if (numSolidNodes == 0 || !hasAdvanced)
         return Vec3();
@@ -281,6 +403,13 @@ Vec3 CommonCalcLBMForceKernel::getWallForce(ContextImpl& context) {
     for (int i = 0; i < numSolidNodes; i++)
         momentum += Vec3(exchange[i], exchange[numSolidNodes+i], exchange[2*numSolidNodes+i]);
     momentum += staticWallMomentum;
+    int numCoupled = lattice.particles.size();
+    if (numCoupled > 0) {
+        vector<double> particles;
+        downloadAsDouble(particleWallMomentum, particles);
+        for (int i = 0; i < numCoupled; i++)
+            momentum += Vec3(particles[i], particles[numCoupled+i], particles[2*numCoupled+i]);
+    }
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     return momentum*(cellMass*lattice.dx/lattice.dt)*(1.0/lattice.dt);
 }

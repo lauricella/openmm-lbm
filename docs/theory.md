@@ -96,8 +96,8 @@ measured with the momentum exchange method of Ladd [9, 10] ([11], section 5.4.3.
   double precision. Kept apart, it does not hide the hydrodynamic part in single precision.
 - The coupled particles also exchange momentum with the walls. The reaction -F of a particle whose
   nearest node is solid goes to the wall, and the reflection of a particle gives the wall the momentum
-  2 m v. These contributions exist only where the coupling is implemented, on the Reference platform in
-  this version.
+  2 m v. On the GPU platforms each particle stores its contribution of the last step, and the host sums
+  them in particle order.
 
 `getWallForce()` returns the sum of these contributions over the last lattice step, divided by dt. With
 it the total momentum of particles, fluid and walls is conserved, and in a steady channel flow the force
@@ -110,7 +110,7 @@ from a solid neighbour as f^eq(rho, u_bc) + (1 - omega) f^neq,reg(Pi^neq), with 
 itself; the wall lies halfway along the link. The equilibrium is the weakly compressible one, with rho
 multiplying the whole Hermite expansion.
 
-## 2. Particle-fluid coupling (implemented on the Reference platform)
+## 2. Particle-fluid coupling (implemented on all platforms)
 
 **Euler-Maruyama scheme.** Each coupled particle k of mass m_k feels
 
@@ -159,7 +159,12 @@ force (SFMT, Box-Muller transform).
   simulation.
 - Its state is not part of OpenMM checkpoints.
 
-On the GPU platforms the random numbers will come from OpenMM's generator, as in the reference library.
+On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's generator, as in the reference
+library (`IntegrationUtilities`, Gaussian numbers in single precision), seeded with `setRandomNumberSeed()`.
+OpenMM keeps one generator per Context: another component that uses it with a different seed (an
+`AndersenThermostat`, for example) makes OpenMM stop with an error, and the two seeds must then be set equal.
+The random forces of the GPU platforms and of the Reference platform are different sequences with the same
+statistics; at T = 0 (or with the NVE scheme) the platforms agree to rounding.
 
 **Walls.** A coupled particle whose nearest node is solid has entered a wall.
 - At the start of the step (`updateContextState()`, where OpenMM's `AndersenThermostat` also changes
@@ -208,14 +213,24 @@ ghost moments independent of tau are the candidate corrections, to be studied.
   a = gamma dt: 363 K at 300 K and a = 0.1. 359 K was measured in the run above. Compute the
   temperature from full-step velocities instead (user guide, examples).
 
-**Per-cell reaction on the GPU platforms (to be implemented).** The reaction forces of the particles in
-the same cell will be summed without atomic operations:
+**Per-cell reaction on the GPU platforms.** The reaction forces of the particles in the same cell are
+summed without atomic operations (`platforms/common/src/kernels/lbmCoupling.cc`):
 
-1. the (cell, particle) pairs are sorted with OpenMM's `ComputeSort`, using unique keys;
-2. one thread per cell adds the forces of its particles, in particle order.
+1. one thread per particle computes its force and the key node*N_p + i, unique, with N_p the number of
+   coupled particles and i the index of the particle in the list of the force;
+2. the keys are sorted with OpenMM's `ComputeSort`;
+3. the first entry of each node adds the reactions of its particles, in particle order, and writes the sum
+   to the node: one writer per node;
+4. after the collision the nodes that received a reaction are set back to zero.
 
-The result will be bitwise reproducible, and equal to the sum in particle order of the Reference
-platform.
+The result is reproducible bit for bit, and the sum is taken in the order of the Reference platform.
+
+**Forces on the particles.** The forces of the last lattice step are added to OpenMM's force buffer, in
+fixed point (resolution 2^-32 kJ/mol/nm), at every force evaluation. OpenMM handles the forces in its
+"real" type: on the OpenCL platform, in single and mixed precision, the total force on a particle is
+rounded to single precision, while the fluid receives the exact reaction, so the total momentum is
+conserved there to about 1e-8. With CUDA in mixed or double precision, and with OpenCL in double
+precision, it is conserved to 1e-13 (`docs/validation.md`).
 
 **Momentum removal.** When it is enabled, on the steps whose index is a multiple of the removal
 frequency, the momentum of the fluid is removed right after the
@@ -251,8 +266,8 @@ lattice units only, as is usual for lattice Boltzmann [7]. The conversion is com
 | force on a cell | m_c dx/dt^2 | F_lattice = F dt^2/(m_c dx) |
 | kinematic viscosity | dx^2/dt | tau = 3 nu dt/dx^2 + 1/2 > 1/2 |
 | particle mass | m_c | m_lattice = m/m_c, with m from the System |
-| friction (to be implemented) | 1/dt | gamma_lattice = gamma dt |
-| thermal energy (to be implemented) | m_c dx^2/dt^2 | kT_lattice = kT dt^2/(m_c dx^2) |
+| friction | 1/dt | gamma_lattice = gamma dt |
+| thermal energy | m_c dx^2/dt^2 | kT_lattice = kT dt^2/(m_c dx^2) |
 
 With these units the drag and the noise keep their form on the lattice (time step 1):
 F_lattice = -gamma_lattice m_lattice (v_lattice - u_lattice) + sqrt(2 gamma_lattice m_lattice

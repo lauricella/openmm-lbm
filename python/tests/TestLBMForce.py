@@ -180,6 +180,44 @@ def test_fluid_agrees_with_reference(name, precision, walls):
     assert abs(wallForces[1] - wallForces[0]).max() <= 1e-10*max(1.0, abs(wallForces[0]).max())
 
 
+@pytest.mark.parametrize('name,walls', [(name, walls) for name in ('CUDA', 'OpenCL', 'HIP') for walls in (False, True)],
+                         ids=lambda value: {False: 'periodic', True: 'walls'}.get(value, value))
+def test_coupling_agrees_with_reference(name, walls):
+    # At T = 0 the coupling is deterministic: in double precision the particles and the fluid of the GPU platforms
+    # follow those of the Reference platform to rounding, also with particles that share a node, cross the
+    # periodic boundary or are reflected by a wall (the plane j = 0 of the 8^3 grid).
+    import numpy as np
+    try:
+        platform = mm.Platform.getPlatformByName(name)
+    except Exception:
+        pytest.skip('the %s platform is not available' % name)
+    results = []
+    for plat, properties in ((mm.Platform.getPlatformByName('Reference'), {}), (platform, {'Precision': 'double'})):
+        system, force, positions = create_system(num_particles=4)
+        force.setFriction(10.0)
+        force.setTemperature(0.0)
+        force.setFluidMomentumRemovalFrequency(0)
+        if walls:
+            force.setSolidNodes([i + 64*k for k in range(8) for i in range(8)])
+        integrator = mm.VerletIntegrator(0.01)
+        try:
+            context = mm.Context(system, integrator, plat, properties)
+        except Exception as e:
+            pytest.skip('no Context on the %s platform: %s' % (name, e))
+        context.setPositions([mm.Vec3(1.02, 2.01, 0.98), mm.Vec3(0.97, 1.99, 1.03), mm.Vec3(3.98, 0.52, 3.96),
+                              mm.Vec3(2.3, 0.6, 0.6)])
+        context.setVelocities([mm.Vec3(0.5, -0.2, 0.3), mm.Vec3(-0.4, 0.1, 0.2), mm.Vec3(2.0, -1.5, 1.0),
+                               mm.Vec3(0.0, -2.0, -0.6)])
+        integrator.step(60)
+        state = context.getState(getPositions=True, getVelocities=True)
+        results.append((state.getPositions(asNumpy=True).value_in_unit(unit.nanometer),
+                        state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond),
+                        np.array(force.getFluidState(context)),
+                        np.array(force.getWallForce(context).value_in_unit(unit.kilojoule_per_mole/unit.nanometer))))
+    for a, b in zip(results[0], results[1]):
+        assert abs(b - a).max() <= 1e-10*max(1.0, abs(a).max())
+
+
 def test_requires_verlet():
     system, force, positions = create_system()
     integrator = mm.LangevinMiddleIntegrator(300, 1, 0.01)

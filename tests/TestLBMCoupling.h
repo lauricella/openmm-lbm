@@ -18,6 +18,18 @@
 const double couplingMass = 100.0;
 
 /**
+ * Tolerance of a coupling test.  OpenMM handles the forces on the particles in its "real" type, which is single
+ * precision unless the platform runs in double precision: the OpenCL platform, for example, rounds the total
+ * force on every particle to that type.  Values that depend on the forces then have the resolution of single
+ * precision, 2e-6, while the given tolerance holds on the Reference platform and in double precision.
+ */
+double getCouplingTolerance(Platform& platform, double tolerance) {
+    if (platform.getName() == "Reference" || platform.getPropertyDefaultValue("Precision") == "double")
+        return tolerance;
+    return max(tolerance, 2e-6);
+}
+
+/**
  * Create a System with numParticles particles of mass couplingMass and a fluid of 8x8x8 nodes (tau = 0.8),
  * without removal of the fluid momentum.  The particles listed in coupled are coupled to the fluid; if the
  * list is empty, all of them are.
@@ -78,8 +90,8 @@ void testFirstStepDrag(Platform& platform) {
     integrator.step(1);
     State state = context.getState(State::Velocities | State::Forces | State::Energy);
     Vec3 v1 = state.getVelocities()[0];
-    ASSERT_EQUAL_VEC(v0*(1.0-friction*fluidDt), v1, 1e-14);
-    ASSERT_EQUAL_VEC((v1-v0)*(couplingMass/fluidDt), state.getForces()[0], 1e-12);
+    ASSERT_EQUAL_VEC(v0*(1.0-friction*fluidDt), v1, getCouplingTolerance(platform, 1e-14));
+    ASSERT_EQUAL_VEC((v1-v0)*(couplingMass/fluidDt), state.getForces()[0], getCouplingTolerance(platform, 1e-12));
     ASSERT_EQUAL(0.0, state.getPotentialEnergy());
     delete system;
 }
@@ -107,7 +119,7 @@ void testMomentumConservation(Platform& platform, double rho0) {
     // The momentum of the fluid is a sum over 19*512 populations, each much larger than the momentum exchanged
     // with the particles: its rounding is about 1e-12 of the momentum of the particles.  An error in the
     // coupling or in the forcing would appear at 1e-2.
-    ASSERT_EQUAL_TOL(0.0, sqrt((p1-p0).dot(p1-p0))/scale, 1e-11);
+    ASSERT_EQUAL_TOL(0.0, sqrt((p1-p0).dot(p1-p0))/scale, getCouplingTolerance(platform, 1e-11));
     State state = context.getState(State::Positions | State::Velocities);
     ASSERT(state.getPositions()[2][0] > 4.0);      // crossed the boundary
     Vec3 dv = state.getVelocities()[3]-velocities[3];
@@ -130,7 +142,7 @@ void testComoving(Platform& platform) {
         context.setPositions(vector<Vec3>(1, Vec3(1.1, 1.3, 1.7)));
         context.setVelocities(vector<Vec3>(1, u));
         integrator.step(100);
-        ASSERT_EQUAL_VEC(u, context.getState(State::Velocities).getVelocities()[0], 1e-13);
+        ASSERT_EQUAL_VEC(u, context.getState(State::Velocities).getVelocities()[0], getCouplingTolerance(platform, 1e-13));
         delete system;
     }
 }
@@ -152,7 +164,7 @@ void testPartialCoupling(Platform& platform) {
         Vec3 v = state.getVelocities()[i];
         if (i%2 == 0) {
             // OpenMM's Reference Verlet recomputes the velocity from the positions: rounding only.
-            ASSERT_EQUAL_VEC(v0, v, 1e-12);
+            ASSERT_EQUAL_VEC(v0, v, getCouplingTolerance(platform, 1e-12));
             ASSERT_EQUAL_VEC(Vec3(), state.getForces()[i], 0.0);
         }
         else
@@ -212,7 +224,7 @@ void testNVEScheme(Platform& platform) {
         return v;
     };
     vector<Vec3> v1 = run(1, 1);
-    ASSERT_EQUAL_VEC(Vec3(0.3, -0.2, 0.1)*(1.0-friction*fluidDt), v1[0], 1e-14);
+    ASSERT_EQUAL_VEC(Vec3(0.3, -0.2, 0.1)*(1.0-friction*fluidDt), v1[0], getCouplingTolerance(platform, 1e-14));
     vector<Vec3> a = run(1, 30), b = run(2, 30);
     for (int i = 0; i < 2; i++)
         ASSERT_EQUAL_VEC(a[i], b[i], 0.0);
@@ -235,13 +247,13 @@ void testWallReflection(Platform& platform) {
     double decay = 1.0-friction*fluidDt;
     integrator.step(1);         // y = 0.30 - 0.099: the nearest node is now on the plane j = 0
     State state = context.getState(State::Positions | State::Velocities);
-    ASSERT_EQUAL_VEC(v0*decay, state.getVelocities()[0], 1e-14);
+    ASSERT_EQUAL_VEC(v0*decay, state.getVelocities()[0], getCouplingTolerance(platform, 1e-14));
     ASSERT(state.getPositions()[0][1] < 0.25);
     integrator.step(1);         // reversed, then slowed down by the drag of the wall at rest
     state = context.getState(State::Positions | State::Velocities);
-    ASSERT_EQUAL_VEC(-v0*decay*decay, state.getVelocities()[0], 1e-14);
+    ASSERT_EQUAL_VEC(-v0*decay*decay, state.getVelocities()[0], getCouplingTolerance(platform, 1e-14));
     ASSERT(state.getPositions()[0][1] > 0.25);
-    ASSERT_EQUAL_VEC(v0, state.getVelocities()[1], 1e-12);
+    ASSERT_EQUAL_VEC(v0, state.getVelocities()[1], getCouplingTolerance(platform, 1e-12));
     delete system;
 }
 
@@ -264,9 +276,9 @@ void testWallReflectionDirection(Platform& platform) {
     integrator.step(1);
     vector<Vec3> v1 = context.getState(State::Velocities).getVelocities();
     double decay = 1.0-friction*fluidDt;
-    ASSERT_EQUAL_VEC(v0[0]*decay, v1[0], 1e-14);      // side j = 1, moving out: kept
-    ASSERT_EQUAL_VEC(-v0[1]*decay, v1[1], 1e-14);     // side j = 7, moving in: reversed
-    ASSERT_EQUAL_VEC(v0[2]*decay, v1[2], 1e-14);      // side j = 7, moving out: kept
+    ASSERT_EQUAL_VEC(v0[0]*decay, v1[0], getCouplingTolerance(platform, 1e-14));      // side j = 1, moving out: kept
+    ASSERT_EQUAL_VEC(-v0[1]*decay, v1[1], getCouplingTolerance(platform, 1e-14));     // side j = 7, moving in: reversed
+    ASSERT_EQUAL_VEC(v0[2]*decay, v1[2], getCouplingTolerance(platform, 1e-14));      // side j = 7, moving out: kept
     delete system;
 }
 
@@ -319,7 +331,7 @@ void testWallMomentumBalance(Platform& platform) {
     Vec3 p1 = momentum(scale);
     ASSERT(wall.dot(wall) > 1.0);
     Vec3 balance = p1 + wall - p0;
-    ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, 1e-12);
+    ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, getCouplingTolerance(platform, 1e-12));
     delete system;
 }
 

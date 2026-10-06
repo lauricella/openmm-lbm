@@ -112,7 +112,7 @@ Notes:
 - **Agreement with the parabola.** The profile has exactly the curvature of the parabola. The residual
   difference of 0.17% is a uniform slip of the bounce-back scheme, which depends on tau and vanishes at
   tau = 7/8. With this slip included, the profile matches the exact solution of the scheme to 1e-9
-  (see [theory.md](../theory.md#solid-nodes-implemented-on-the-reference-platform)).
+  (see [theory.md](../theory.md#solid-nodes-implemented-on-all-platforms)).
 - **Periodic directions.** The walls are planes of solid nodes. In x and z the lattice stays periodic,
   so the channel is infinite along the flow.
 - **Momentum removal.** It must be off (`setFluidMomentumRemovalFrequency(0)`): otherwise the plugin
@@ -200,7 +200,7 @@ Notes:
 The random force at temperature T and the friction keep the coupled particles at about T: `LBMForce`
 is their thermostat. OpenMM's leapfrog stores the velocities at half steps, and the temperature that
 OpenMM reports is not valid for coupled particles
-([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-the-reference-platform)). The
+([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)). The
 reporter below computes the temperature from full-step velocities: the mean of the velocities of two
 consecutive steps.
 
@@ -575,6 +575,6 @@ Notes:
   Context; none of them advances the fluid.
 - **Which particles to couple.** Only the particles passed to `addParticle()` interact with the fluid.
 - **GPU platforms.** To run on CUDA, replace the platform with `mm.Platform.getPlatformByName('CUDA')`
-  and pass `{'Precision': 'mixed'}`. In this version the fluid and the walls run on the GPU platforms,
-  but no force acts on the particles there yet (see the
+  and pass `{'Precision': 'mixed'}`. Every example runs unchanged; the random forces, and therefore
+  the outputs with T > 0, differ from those of the Reference platform (see the
   [status table](README.md#what-works-in-this-version)).

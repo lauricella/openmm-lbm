@@ -25,11 +25,7 @@ the plugin converts the parameters to lattice units.
 | `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration or the forces on the fluid, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). |
 | `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have 19 nx ny nz values. |
 | `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles and the solid nodes) | These parameters are fixed when the Context is created. Create a new Context. |
-
-The warning `the particle-fluid coupling is implemented only on the Reference platform in this version`
-is printed on stderr when a Context with coupled particles is created on the CUDA, OpenCL or HIP
-platform: there the fluid advances, but no force acts on the particles and the fluid feels no reaction.
-Use the Reference platform for coupled particles until the port is complete.
+| `IntegrationUtilities::initRandomNumberGenerator(): Requested two different values for the random number seed` | On the CUDA, OpenCL and HIP platforms the random force uses OpenMM's generator, which has one seed per Context. Another component of the System (an `AndersenThermostat`, for example) uses it with a different seed: give both the same seed. |
 
 The warning `tau = ... > 1.7: with the explicit drag at the nearest node the hydrodynamic self-mobility of
 a coupled particle is small` is printed when particles are coupled and the relaxation time is large:
@@ -62,8 +58,9 @@ OpenMM) are on `LD_LIBRARY_PATH`, the OpenCL driver can crash with a segmentatio
 compiles kernels, also without this plugin. Run OpenCL simulations without those libraries on the
 library path.
 
-**The particles do not feel the fluid on a GPU platform.** The coupling runs only on the Reference
-platform in this version; on CUDA, OpenCL and HIP `LBMForce` applies no force to the particles yet.
+**A run on a GPU differs from the same run on the Reference platform.** With T > 0 the random forces
+come from different generators, so the trajectories differ while their statistics agree. At T = 0, or with
+the NVE scheme, the platforms agree to rounding in double precision.
 
 **The temperature in the log is too high.** The temperature that OpenMM reports (`StateDataReporter`,
 the kinetic energy of a State) is not valid for particles coupled to the fluid: with friction*dt = 0.1 it

@@ -46,19 +46,23 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    step (moments, momentum removal, coupling of the particles, collision and streaming, bounce-back at
    solid nodes; see `docs/theory.md` sections 1 and 2) and computes the coupling forces; every
    `execute()` adds those forces to the particles, so other force evaluations neither advance the fluid
-   nor draw new random numbers. On the Reference platform `beginStep()` also reverses the velocity of a
-   coupled particle that has entered a solid node. Every platform advances the fluid and has solid
-   nodes; only the Reference platform couples the particles in this version.
+   nor draw new random numbers. `beginStep()` also reverses the velocity of a coupled particle that has
+   entered a solid node. Every platform does all of this.
 3. **Lattice step on the CUDA, OpenCL and HIP platforms** (`CommonCalcLBMForceKernel::advanceFluid()`,
-   kernels in `platforms/common/src/kernels/lbmFluid.cc`):
+   kernels in `platforms/common/src/kernels/lbmFluid.cc` and `lbmCoupling.cc`):
 
    | Kernel | Threads | Reads | Writes |
    |---|---|---|---|
+   | `reflectParticles` (in `beginStep()`, with coupled particles and solid nodes) | one per atom | positions, velocities, solid mask | velocities of the reflected particles, their momentum given to the wall |
    | `computeFluidMoments` | one per node | populations | rho - 1, j, Pi^neq of the node |
    | `sumFluidMomentum` (when the removal is due) | work groups of 64 | rho - 1, j | one partial sum per group |
    | `computeFluidCenterVelocity` | one work group | partial sums | u_cm |
    | `removeFluidMomentum` | one per node | rho - 1, u_cm | j |
-   | `collideAndStream` | one per fluid node | moments of the node | the 19 populations it sends to the neighbours |
+   | `coupleParticles` (with coupled particles) | one per atom | positions, velocities, moments of the nearest node, OpenMM's random numbers | force of the particle, its key node*N_p + i |
+   | OpenMM's `ComputeSort` | | keys | sorted keys |
+   | `sumCellReactions` | one per key | sorted keys, forces | the reaction of each node, written by its first key |
+   | `collideAndStream` | one per fluid node | moments and reaction of the node | the 19 populations it sends to the neighbours |
+   | `clearCellReactions` | one per key | sorted keys | zero reaction at the nodes of the step |
    | `bounceBack` (with solid nodes) | one per solid node | populations of the solid node | the populations it returns to the fluid neighbours, and its momentum exchange |
    | `computeMaxFluidSpeed` (when the Mach check is due) | work groups of 64 | populations | one maximum per group, reduced on the host |
 
@@ -66,7 +70,10 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    consecutive addresses; the Reference platform stores them node by node. With solid nodes, the kernels
    are compiled with `HAS_SOLID_NODES` and read a mask of the fluid nodes; without them they do not read it.
    `getWallForce()` sums the momentum exchange of the solid nodes of the last step on the host, so a step
-   costs no transfer.
+   costs no transfer. The atoms are addressed through OpenMM's atom index array, since OpenMM may reorder
+   them: every per-particle array is indexed by the position of the particle in the list of the force.
+   Every force evaluation runs `applyCouplingForces`, which adds the forces of the last step to OpenMM's
+   force buffer.
 4. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
    through `LBMForceImpl`, to the kernel. The common implementation computes density and momentum on
    the device (`computeFluidMoments`), then converts them to OpenMM units on the host.

@@ -107,7 +107,7 @@ The kinematic viscosity nu enters the model through the relaxation time
 which must be larger than 1/2. The model is accurate for tau between about 0.505 and 2; outside this
 range the plugin prints a warning on stderr when the Context is created. Near 1/2 the fluid is close
 to the stability limit, and at large tau the error on the position of walls grows (see
-[theory.md](../theory.md#solid-nodes-implemented-on-the-reference-platform)).
+[theory.md](../theory.md#solid-nodes-implemented-on-all-platforms)).
 
 Since dt is the time step of the molecular dynamics, the viscosity and the resolution are coupled:
 tau - 1/2 = 3 nu dt/dx^2. With dt = 0.01 ps:
@@ -138,7 +138,7 @@ up. Inside a Context, `getLatticeParametersInContext(context)` returns dx, dt an
 hydrodynamic part of the mobility of a particle decreases as tau grows. At tau = 1.7 it is about 15% of
 its value at tau = 1.1, and above tau = 1.79 it is negative: particles then move less than a Langevin
 particle with the same friction. A warning is printed when a Context with coupled particles has
-tau > 1.7 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-the-reference-platform)).
+tau > 1.7 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)).
 
 ## Velocity of the fluid
 
