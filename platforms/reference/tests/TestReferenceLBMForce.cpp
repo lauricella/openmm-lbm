@@ -16,6 +16,7 @@ int main(int argc, char* argv[]) {
         registerLBMReferenceKernelFactories();
         runPlatformTests(Platform::getPlatformByName("Reference"));
         runFluidTests(Platform::getPlatformByName("Reference"));
+        runWallTests(Platform::getPlatformByName("Reference"));
         runCouplingTests(Platform::getPlatformByName("Reference"));
     }
     catch (const exception& e) {

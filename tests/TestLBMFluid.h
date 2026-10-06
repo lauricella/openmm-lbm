@@ -8,8 +8,8 @@
 /**
  * Tests of the lattice Boltzmann fluid on its own (no coupled particles): steady uniform flow,
  * conservation, body force, removal of the fluid momentum, viscosity from the decay of a shear wave,
- * the rule that the fluid advances only in integration steps, and restarts from checkpoints.  Include after TestLBMForce.h and
- * call runFluidTests().
+ * the rule that the fluid advances only in integration steps, and restarts from checkpoints
+ * (runFluidTests()); solid nodes and walls (runWallTests()).  Include after TestLBMForce.h.
  */
 
 #include "openmm/internal/AssertionUtilities.h"
@@ -19,6 +19,15 @@
 
 /** Lattice spacing (nm), time step (ps) and density (Da/nm^3) of the fluid tests. */
 const double fluidDx = 0.5, fluidDt = 0.01, fluidDensity = 602.2;
+
+/**
+ * Tolerance of a fluid test: the given tolerance in double and mixed precision, where the fluid is stored in
+ * double precision, and the resolution of single precision (getStorageTolerance()) otherwise.
+ */
+double getFluidTolerance(Platform& platform, double tolerance) {
+    double storage = getStorageTolerance(platform);
+    return (storage > 1e-12 ? storage : tolerance);
+}
 
 /**
  * Create a System with a fluid of nx*ny*nz nodes and relaxation time tau, without removal of the fluid
@@ -87,8 +96,9 @@ void testUniformFlowIsSteady(Platform& platform) {
     force->getFluidState(context, before);
     integrator.step(50);
     force->getFluidState(context, after);
+    double tol = getFluidTolerance(platform, 1e-13);
     for (int i = 0; i < (int) before.size(); i++)
-        ASSERT_EQUAL_TOL(before[i], after[i], 1e-13);
+        ASSERT_EQUAL_TOL(before[i], after[i], tol);
     delete system;
 }
 
@@ -112,9 +122,10 @@ void testFluidConservation(Platform& platform) {
     integrator.step(100);
     force->getFluidState(context, state);
     totalMoments(state, mass1, p1);
-    ASSERT_EQUAL_TOL(mass0, mass1, 1e-13);
+    double tol = getFluidTolerance(platform, 1e-13);
+    ASSERT_EQUAL_TOL(mass0, mass1, tol);
     ASSERT(p0.dot(p0) > 1e-10);
-    ASSERT_EQUAL_VEC(p0, p1, 1e-13*mass0);
+    ASSERT_EQUAL_VEC(p0, p1, tol*mass0);
     delete system;
 }
 
@@ -141,12 +152,13 @@ void testBodyForce(Platform& platform, double rho0) {
     Vec3 p;
     totalMoments(state, mass, p);
     Vec3 gLattice = g*(fluidDt*fluidDt/fluidDx);
-    ASSERT_EQUAL_TOL(rho0*numNodes, mass, 1e-13);
-    ASSERT_EQUAL_VEC(gLattice*(numSteps*rho0*numNodes), p, 1e-13);
+    double tol = getFluidTolerance(platform, 1e-13);
+    ASSERT_EQUAL_TOL(rho0*numNodes, mass, tol);
+    ASSERT_EQUAL_VEC(gLattice*(numSteps*rho0*numNodes), p, tol);
     force->getFluidFields(context, density, velocity);
     for (int node = 0; node < numNodes; node++) {
-        ASSERT_EQUAL_TOL(rho0*fluidDensity, density[node], 1e-13);
-        ASSERT_EQUAL_VEC(g*((numSteps+0.5)*fluidDt), velocity[node], 1e-12);
+        ASSERT_EQUAL_TOL(rho0*fluidDensity, density[node], tol);
+        ASSERT_EQUAL_VEC(g*((numSteps+0.5)*fluidDt), velocity[node], getFluidTolerance(platform, 1e-12));
     }
     delete system;
 }
@@ -176,7 +188,7 @@ void testFluidMomentumRemoval(Platform& platform) {
         Vec3 p;
         totalMoments(state, mass, p);
         // The total momentum is a sum of 19*numNodes populations of order 0.05 with cancellations: rounding ~1e-14.
-        ASSERT_EQUAL_VEC(Vec3(((n-1)%3 + 1)*gLattice*numNodes, 0, 0), p, 1e-13);
+        ASSERT_EQUAL_VEC(Vec3(((n-1)%3 + 1)*gLattice*numNodes, 0, 0), p, getFluidTolerance(platform, 1e-13));
     }
     delete system;
 }
@@ -328,7 +340,7 @@ void testUpdateParameters(Platform& platform) {
     integrator.step(1);
     force->getFluidState(context, state);
     totalMoments(state, mass, p);
-    ASSERT_EQUAL_VEC(Vec3(), p, 1e-13);
+    ASSERT_EQUAL_VEC(Vec3(), p, getFluidTolerance(platform, 1e-13));
 
     // A Mach number limit below the current Mach number, checked at every step.
     force->setBodyAcceleration(Vec3(0.5, 0, 0));
@@ -375,7 +387,7 @@ void testMachNumberCheck(Platform& platform) {
         VerletIntegrator integrator(fluidDt);
         Context context(*system, integrator, platform);
         context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
-        ASSERT_EQUAL_TOL(mach, force->getFluidMachNumber(context), 1e-12);
+        ASSERT_EQUAL_TOL(mach, force->getFluidMachNumber(context), getFluidTolerance(platform, 1e-12));
         integrator.step(9);
         bool thrown = false;
         try {
@@ -573,6 +585,9 @@ void runFluidTests(Platform& platform) {
     testMachNumberCheck(platform);
     testLatticeParameters(platform);
     testRelaxationTimeWarning(platform);
+}
+
+void runWallTests(Platform& platform) {
     testSolidNodeChecks(platform);
     testPoiseuille(platform, 0.7);
     testPoiseuille(platform, 0.875);
