@@ -35,8 +35,9 @@ The model itself is described in [theory.md](../theory.md).
 | Solid nodes (`setSolidNodes()`) | yes | not yet: Context creation fails |
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | not yet: no force on the particles |
 
-On the CUDA, OpenCL and HIP platforms `LBMForce` does not yet apply any force to the particles. The
-coupling is dissipative: on every platform it adds no energy.
+On the CUDA, OpenCL and HIP platforms `LBMForce` does not yet apply any force to the particles, and a
+warning says so on stderr whenever a Context is created there. The coupling is dissipative: on every
+platform it adds no energy.
 
 ## Conventions
 

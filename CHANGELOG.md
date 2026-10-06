@@ -57,6 +57,9 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   reflections), divided by dt. Tests: momentum of particles, fluid and walls conserved; in steady
   Poiseuille flow the force on the walls equals the body force on the fluid.
 
+- Warning at Context creation on the CUDA, OpenCL and HIP platforms: the fluid update and the coupling
+  are implemented only on the Reference platform in this version.
+
 ### Not yet implemented
 - Fluid update, solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

@@ -21,6 +21,7 @@
 #include "openmm/internal/AssertionUtilities.h"
 #include <cmath>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -245,8 +246,32 @@ void testInvalidSetup(Platform& platform) {
     }
 }
 
+/**
+ * Creating a Context on a platform where the fluid update and the coupling are not implemented yet prints a
+ * warning; on the Reference platform it does not.
+ */
+void testPlatformWarning(Platform& platform) {
+    LBMForce* force;
+    System* system = createSystem(force);
+    VerletIntegrator integrator(0.01);
+    stringstream captured;
+    streambuf* original = cerr.rdbuf(captured.rdbuf());
+    try {
+        Context context(*system, integrator, platform);
+    }
+    catch (...) {
+        cerr.rdbuf(original);
+        throw;
+    }
+    cerr.rdbuf(original);
+    bool warned = (captured.str().find("implemented only on the Reference platform") != string::npos);
+    ASSERT(warned == (platform.getName() != "Reference"));
+    delete system;
+}
+
 void runPlatformTests(Platform& platform) {
     testParameters();
+    testPlatformWarning(platform);
     testZeroForce(platform);
     testInitialFluidFields(platform);
     testFluidStateRoundTrip(platform);

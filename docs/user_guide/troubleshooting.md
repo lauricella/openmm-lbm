@@ -27,6 +27,11 @@ the plugin converts the parameters to lattice units.
 | `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have 19 nx ny nz values. |
 | `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles and the solid nodes) | These parameters are fixed when the Context is created. Create a new Context. |
 
+The warning `the fluid update and the particle-fluid coupling are implemented only on the Reference
+platform in this version` is printed on stderr when a Context is created on the CUDA, OpenCL or HIP
+platform: there the fluid keeps its initial state and no force acts on the particles. Use the Reference
+platform until the port is complete.
+
 The warning `friction*dt = ... > 1` is printed on stderr when the explicit drag overshoots: the velocity
 of a particle relative to the fluid changes sign at every step, and grows without bound for
 friction*dt >= 2. Reduce the friction or the time step.

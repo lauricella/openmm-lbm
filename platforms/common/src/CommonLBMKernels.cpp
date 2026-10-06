@@ -15,6 +15,7 @@
 #include "openmm/internal/ContextImpl.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <map>
 
 using namespace LBMPlugin;
@@ -44,6 +45,12 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     if (!lattice.solidNodes.empty())
         throw OpenMMException("LBMForce: solid nodes are supported only on the Reference platform in this version");
     this->lattice = lattice;
+
+    // Until the lattice update and the coupling are ported, a simulation on this platform would silently run
+    // without fluid dynamics: say so at every Context creation.
+    cerr << "Warning: LBMForce: the fluid update and the particle-fluid coupling are implemented only on the "
+         << "Reference platform in this version. On this platform the fluid keeps its initial state and no force "
+         << "acts on the coupled particles." << endl;
 
     // The fluid is stored in the mixed type: double unless the platform runs in single precision.
 
