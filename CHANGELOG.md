@@ -80,6 +80,14 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   platform and precision mode, with tolerances that follow the precision; in mixed and double precision
   the fluid agrees with the Reference platform to 1e-14 (`test_fluid_agrees_with_reference`).
 
+- Solid nodes on the CUDA, OpenCL and HIP platforms: halfway bounce-back with one thread per solid node,
+  and the force on the walls (`getWallForce()`) from the momentum exchange, with the static pressure of the
+  weights computed once in double precision. The wall tests run on every platform; in mixed and double
+  precision the fluid and the force on the walls agree with the Reference platform to 1e-14. On every
+  platform the bounce-back now processes only the links from solid to fluid nodes, which leaves the fluid
+  and the force on the walls unchanged and makes the populations stored at solid nodes independent of the
+  order of the solid nodes.
+
 ### Not yet implemented
-- Solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
+- Particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

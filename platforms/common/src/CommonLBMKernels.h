@@ -23,13 +23,14 @@ namespace LBMPlugin {
  * mixed and double precision.
  *
  * One lattice step has the structure of the Reference platform (ReferenceLBMKernels.h): moments, removal of
- * the fluid momentum when due, collision and streaming, and the Mach number check when due.  The particle-fluid
- * coupling and the solid nodes are not implemented on these platforms yet.
+ * the fluid momentum when due, collision and streaming, bounce-back at the solid nodes, and the Mach number
+ * check when due.  The particle-fluid coupling is not implemented on these platforms yet.
  */
 class CommonCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     CommonCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform, OpenMM::ComputeContext& cc, const OpenMM::System& system) :
-            CalcLBMForceKernel(name, platform), cc(cc), system(system), stepPending(false), stepIndex(0), machWarningPrinted(false) {
+            CalcLBMForceKernel(name, platform), cc(cc), system(system), stepPending(false), stepIndex(0), machWarningPrinted(false),
+            hasAdvanced(false) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
@@ -54,8 +55,15 @@ private:
     long long stepIndex;
     /** True once the debug warning about the Mach number has been printed. */
     bool machWarningPrinted;
+    /** True once the fluid has advanced by a step: before that the force on the walls is zero. */
+    bool hasAdvanced;
     /** True if the mixed type is double. */
     bool useDouble;
+    /** 1 for fluid nodes and 0 for solid nodes, on the host. */
+    std::vector<int> isFluidHost;
+    /** Momentum (lattice units) given to the walls in every step by the part w of the populations, the static
+        pressure: it depends only on the geometry. */
+    OpenMM::Vec3 staticWallMomentum;
     /** Work group size and number of work groups of the reductions. */
     int blockSize, numGroups;
     /** Deviations of the populations from the rest equilibrium, f_q - w_q, at [q*numNodes + node]. */
@@ -65,8 +73,11 @@ private:
     OpenMM::ComputeArray densityDeviation, momentum, piNeq;
     /** Partial sums and maxima of the work groups, and the velocity of the centre of mass of the fluid. */
     OpenMM::ComputeArray partialSums, partialMax, centerVelocity;
+    /** 1 for fluid nodes and 0 for solid nodes; the list of the solid nodes; the momentum given to each solid
+        node by the deviations f - w in the last step (3 components of numSolidNodes each). */
+    OpenMM::ComputeArray isFluid, solidNodes, wallExchange;
     OpenMM::ComputeKernel computeMomentsKernel, sumMomentumKernel, centerVelocityKernel, removeMomentumKernel;
-    OpenMM::ComputeKernel collideKernel, maxSpeedKernel;
+    OpenMM::ComputeKernel collideKernel, bounceBackKernel, maxSpeedKernel;
 };
 
 } // namespace LBMPlugin

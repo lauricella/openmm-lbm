@@ -18,6 +18,7 @@ int main(int argc, char* argv[]) {
             platform.setPropertyDefaultValue("Precision", string(argv[1]));
         runPlatformTests(platform);
         runFluidTests(platform);
+        runWallTests(platform);
     }
     catch (const exception& e) {
         cout << "exception: " << e.what() << endl;

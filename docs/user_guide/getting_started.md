@@ -144,10 +144,9 @@ print(force.getFluidDensity())    # 602.214... Da/nm^3
 
 ## Platforms
 
-The fluid update runs on every platform. The solid nodes and the coupling of the particles are
-implemented on the Reference platform in this version: on the CUDA, OpenCL and HIP platforms solid nodes
-are rejected and no force acts on the particles (see the
-[status table](README.md#what-works-in-this-version)).
+The fluid update and the solid nodes run on every platform. The coupling of the particles is implemented
+on the Reference platform in this version: on the CUDA, OpenCL and HIP platforms no force acts on the
+particles (see the [status table](README.md#what-works-in-this-version)).
 On those platforms the fluid is stored in the "mixed" type of the platform:
 
 - single precision with `Precision` = `single`;

@@ -17,6 +17,10 @@
  * Defines: NUM_NODES, NX, NY, NZ, LBM_BLOCK_SIZE (the work group size of the reductions, a power of 2), the
  * weights W0, W1, W2 (1/3, 1/18, 1/36) and CS2 (1/3) in the mixed type.  No atomic operations are used: sums and
  * maxima are reduced by work group, then over the work groups in a fixed order, so that runs are reproducible.
+ *
+ * With solid nodes, HAS_SOLID_NODES and NUM_SOLID_NODES are defined, and isFluid[node] is 0 at the solid nodes.
+ * A solid node holds no fluid: its density is 0 (rho - 1 = -1, so that it does not enter the removal of the
+ * momentum), its momentum and stress are 0, and it neither collides nor enters the Mach number.
  */
 
 #define DECLARE_D3Q19_VELOCITIES \
@@ -32,10 +36,20 @@ DEVICE mixed latticeWeight(int q) {
  * Compute the moments of every node: rho - 1 = sum df, j = sum c df, and the non-equilibrium second moment
  * Pi_neq = sum H2(c) (df - dfeq), with the equilibrium at the velocity j/rho of the populations themselves.
  */
-KERNEL void computeFluidMoments(GLOBAL const mixed* RESTRICT f, GLOBAL mixed* RESTRICT densityDeviation,
-        GLOBAL mixed* RESTRICT momentum, GLOBAL mixed* RESTRICT piNeq) {
+KERNEL void computeFluidMoments(GLOBAL const mixed* RESTRICT f, GLOBAL const int* RESTRICT isFluid,
+        GLOBAL mixed* RESTRICT densityDeviation, GLOBAL mixed* RESTRICT momentum, GLOBAL mixed* RESTRICT piNeq) {
     DECLARE_D3Q19_VELOCITIES
     for (int node = GLOBAL_ID; node < NUM_NODES; node += GLOBAL_SIZE) {
+#ifdef HAS_SOLID_NODES
+        if (!isFluid[node]) {
+            densityDeviation[node] = -1;
+            for (int k = 0; k < 3; k++)
+                momentum[k*NUM_NODES+node] = 0;
+            for (int k = 0; k < 6; k++)
+                piNeq[k*NUM_NODES+node] = 0;
+            continue;
+        }
+#endif
         mixed df[19];
         mixed dr = 0, jx = 0, jy = 0, jz = 0;
         for (int q = 0; q < 19; q++) {
@@ -150,10 +164,14 @@ KERNEL void removeFluidMomentum(GLOBAL const mixed* RESTRICT densityDeviation, G
  * stored as the deviation f_q - w_q.  Each population is computed from the moments of its own node only, so the
  * populations can be overwritten in place: every (q, target node) is written by exactly one thread.
  */
-KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const mixed* RESTRICT densityDeviation,
+KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT isFluid, GLOBAL const mixed* RESTRICT densityDeviation,
         GLOBAL const mixed* RESTRICT momentum, GLOBAL const mixed* RESTRICT piNeq, mixed omega, mixed gx, mixed gy, mixed gz) {
     DECLARE_D3Q19_VELOCITIES
     for (int node = GLOBAL_ID; node < NUM_NODES; node += GLOBAL_SIZE) {
+#ifdef HAS_SOLID_NODES
+        if (!isFluid[node])
+            continue;
+#endif
         int i = node%NX, j = (node/NX)%NY, k = node/(NX*NY);
         mixed dr = densityDeviation[node];
         mixed rho = 1 + dr;
@@ -183,11 +201,15 @@ KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const mixed* RESTR
  * Maximum over the nodes of |j/rho|^2, computed from the populations: each work group writes the maximum over
  * its nodes to partialMax[group].
  */
-KERNEL void computeMaxFluidSpeed(GLOBAL const mixed* RESTRICT f, GLOBAL mixed* RESTRICT partialMax) {
+KERNEL void computeMaxFluidSpeed(GLOBAL const mixed* RESTRICT f, GLOBAL const int* RESTRICT isFluid, GLOBAL mixed* RESTRICT partialMax) {
     LOCAL mixed maxima[LBM_BLOCK_SIZE];
     DECLARE_D3Q19_VELOCITIES
     mixed maxSpeed2 = 0;
     for (int node = GLOBAL_ID; node < NUM_NODES; node += GLOBAL_SIZE) {
+#ifdef HAS_SOLID_NODES
+        if (!isFluid[node])
+            continue;
+#endif
         mixed dr = 0, jx = 0, jy = 0, jz = 0;
         for (int q = 0; q < 19; q++) {
             mixed df = f[q*NUM_NODES+node];
@@ -208,3 +230,42 @@ KERNEL void computeMaxFluidSpeed(GLOBAL const mixed* RESTRICT f, GLOBAL mixed* R
     if (LOCAL_ID == 0)
         partialMax[GROUP_ID] = maxima[0];
 }
+
+#ifdef HAS_SOLID_NODES
+/**
+ * Halfway bounce-back, one thread per solid node: the population that streamed from the fluid node s + c_q into
+ * the solid node s, moving along -c_q, returns to s + c_q moving along c_q.  Only links to fluid nodes are
+ * processed, so a thread reads populations of its own solid node and writes populations of fluid nodes, which
+ * no other thread touches.  The deviations f - w are copied as they are, since opposite directions have the
+ * same weight.
+ *
+ * Momentum exchange (Ladd 1994): the wall at rest receives -2 f c_q on each link, with the full population
+ * f = (f - w) + w.  Each thread writes the part of f - w, -2 sum c_q (f - w), to wallExchange[k*NUM_SOLID_NODES + i];
+ * the host sums it over the solid nodes in the order of the list and adds the part of w, the static pressure,
+ * which depends only on the geometry and is computed once in double precision.  Kept apart, the static
+ * pressure does not hide the hydrodynamic part in single precision.
+ */
+KERNEL void bounceBack(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT isFluid, GLOBAL const int* RESTRICT solidNodes,
+        GLOBAL mixed* RESTRICT wallExchange) {
+    DECLARE_D3Q19_VELOCITIES
+    for (int i = GLOBAL_ID; i < NUM_SOLID_NODES; i += GLOBAL_SIZE) {
+        int node = solidNodes[i];
+        int x = node%NX, y = (node/NX)%NY, z = node/(NX*NY);
+        mixed px = 0, py = 0, pz = 0;
+        for (int q = 1; q < 19; q++) {
+            int target = (x+cx[q]+NX)%NX + NX*((y+cy[q]+NY)%NY + NY*((z+cz[q]+NZ)%NZ));
+            if (!isFluid[target])
+                continue;
+            int opposite = (q%2 == 1 ? q+1 : q-1);
+            mixed df = f[opposite*NUM_NODES+node];
+            f[q*NUM_NODES+target] = df;
+            px += cx[q]*df;
+            py += cy[q]*df;
+            pz += cz[q]*df;
+        }
+        wallExchange[i] = -2*px;
+        wallExchange[NUM_SOLID_NODES+i] = -2*py;
+        wallExchange[2*NUM_SOLID_NODES+i] = -2*pz;
+    }
+}
+#endif

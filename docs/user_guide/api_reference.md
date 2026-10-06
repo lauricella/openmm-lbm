@@ -135,8 +135,8 @@ therefore lies halfway between a solid node and its fluid neighbours, and has no
   matter.
 - Solid nodes hold no fluid: `getFluidFields()` returns zero density and zero velocity there. They do
   not enter the removal of the fluid momentum or the Mach number.
-- Solid nodes are supported on the Reference platform only in this version. On the other platforms,
-  creating a Context raises an error.
+- Solid nodes are supported on every platform. Coupled particles are reflected at the walls only where
+  the coupling is implemented, on the Reference platform in this version.
 
 `getSolidNodes()` returns the list of indices.
 

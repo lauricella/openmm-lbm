@@ -9,12 +9,13 @@ Tests of openmm-lbm, what each one checks, its tolerance and the values measured
 The fluid tests use no coupled particles. The lattice spacing is 0.5 nm, the time step 0.01 ps and the
 density 602.2 Da/nm^3; the viscosity is chosen to give the relaxation time tau of each test. The momentum
 removal is off unless stated.
-- `runFluidTests()` runs on every platform, in the `single`, `mixed` and `double` precision modes. The
-  tolerances below hold on the Reference platform and in `mixed` and `double` precision; in `single`
-  precision the tolerances of 1e-12 and below become 2e-6, the resolution of the stored type
-  (`getFluidTolerance()`).
-- `runWallTests()` (`testSolidNodeChecks`, `testPoiseuille`, `testWallConservation`) runs on the Reference
-  platform, until the solid nodes are ported to the others.
+- `runFluidTests()` and `runWallTests()` (`testSolidNodeChecks`, `testPoiseuille`, `testWallConservation`)
+  run on every platform, in the `single`, `mixed` and `double` precision modes.
+- The tolerances below hold on the Reference platform and in `mixed` and `double` precision. In `single`
+  precision (`getFluidTolerance()`) the tolerances of 1e-12 and below become 2e-6, the resolution of the
+  stored type, and those of `testPoiseuille` become 5e-5: its steady state is the result of thousands of
+  steps rounded in single precision, and on an A100 the profile and the force on the walls differ from
+  the exact values by up to 1.1e-5 and 8e-6.
 
 | Test | Setup | Check | Tolerance |
 |---|---|---|---|
@@ -125,13 +126,14 @@ built in double precision.
   prefactor of 1 - omega/2 instead of 1/2 changes the momentum input by 4.6% at tau = 1.102, and
   shifting the velocity instead of the momentum by half a force changes it by 1% at rho0 = 0.98.
 
-## GPU platforms against the Reference platform: fluid
+## GPU platforms against the Reference platform: fluid and walls
 
 The Python test `test_fluid_agrees_with_reference` runs the same fluid on the Reference platform and on
 each available GPU platform: 6x5x4 nodes, tau = 0.8, populations perturbed by up to 1e-3, a body force and
-the removal of the fluid momentum every third step, 40 steps. The largest difference of the fluid states,
-relative to the largest deviation |f - w|, must be below 1e-12 in `mixed` and `double` precision.
-Measured on an NVIDIA A100 with OpenMM 8.6.1:
+the removal of the fluid momentum every third step, 40 steps, without solid nodes and with the solid plane
+j = 0 and a block of 8 solid nodes. The largest difference of the fluid states, relative to the largest
+deviation |f - w|, must be below 1e-12 in `mixed` and `double` precision, and the forces on the walls must
+agree to 1e-10. Measured on an NVIDIA A100 with OpenMM 8.6.1, without solid nodes:
 
 | Platform | Precision | 40 steps | 1000 steps |
 |---|---|---|---|
@@ -140,11 +142,16 @@ Measured on an NVIDIA A100 with OpenMM 8.6.1:
 | OpenCL | mixed, double | 1.8e-15 | 7.6e-15 |
 | OpenCL | single | 1.1e-6 | 2.7e-5 |
 
+With walls (6x7x5 nodes, the solid plane j = 0 and a block of 8 solid nodes, 300 steps), the fluid states
+differ by 6e-16 in `mixed` and `double` precision and by 1.9e-5 in `single` precision, and the forces on
+the walls by 1e-14 and 4e-8 (CUDA and OpenCL alike).
+
 The two platforms are not identical bit for bit: the GPU compilers contract multiplications and additions
 into fused multiply-adds. Each GPU platform is deterministic: the removal of the momentum and the Mach
-number use reductions in a fixed order, without atomic operations, so two runs give identical results.
+number use reductions in a fixed order, without atomic operations, and each population returned by the
+bounce-back is written by one thread, so two runs give identical results.
 
 ## Planned
 
-- The walls and the coupling of the particles on the CUDA, OpenCL and HIP platforms, with the same tests
-  as on the Reference platform and a comparison with it at T = 0.
+- The coupling of the particles on the CUDA, OpenCL and HIP platforms, with the same tests as on the
+  Reference platform and a comparison with it at T = 0.

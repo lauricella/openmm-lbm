@@ -20,7 +20,6 @@ the plugin converts the parameters to lattice units.
 | `all lattice nodes are solid` | At least one node must be fluid. |
 | `a coupled particle index is out of range`, `a particle is coupled more than once`, `coupled particles must have a positive mass` | Check the indices passed to `addParticle()` and the masses in the System. Massless particles (virtual sites) cannot be coupled. |
 | `LBMForce requires a VerletIntegrator: drag and random forces are part of the force` | Use `VerletIntegrator`. Langevin and other thermostatted integrators would add a second friction. |
-| `solid nodes are supported only on the Reference platform in this version` | Run walls on the Reference platform, or remove the solid nodes. |
 | `LBMForce does not support running on multiple devices` | Use a single GPU (`DeviceIndex` with one value). |
 | `the integrator step size changed after the Context was created; reinitialize the Context` | The step size is the lattice time step and cannot change. Create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()`. |
 | `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration or the forces on the fluid, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). |

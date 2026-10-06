@@ -56,7 +56,7 @@ reproducible. The kernels of these platforms (`platforms/common/src/kernels/lbmF
 arithmetic of the Reference platform; they differ from it only by rounding, since the GPU compilers
 contract multiplications and additions into fused multiply-adds.
 
-### Solid nodes (implemented on the Reference platform)
+### Solid nodes (implemented on all platforms)
 
 `setSolidNodes()` marks lattice nodes as solid walls at run time; an empty list (the default) is a fully
 periodic fluid.
@@ -66,6 +66,10 @@ periodic fluid.
   that node with the opposite velocity: f_q(s + c_q) = f_opp(q)(s). This halfway bounce-back places the
   wall halfway between the fluid and the solid node and conserves the mass of the fluid. It is the scheme
   of the reference implementation.
+- Only the links from a solid node to fluid nodes are processed. Nothing streams between two solid nodes,
+  and skipping those links makes the result independent of the order in which the solid nodes are
+  processed, so that the GPU platforms, which process them in parallel, give the same populations as the
+  Reference platform.
 
 **Exact Poiseuille flow.** With the regularized collision, the odd non-hydrodynamic moments relax with
 frequency 1 (tau_odd = 1), so the scheme behaves at the walls as a two-relaxation-time scheme with
@@ -86,9 +90,14 @@ measured with the momentum exchange method of Ladd [9, 10] ([11], section 5.4.3.
   streams into the wall along c comes back along -c. The wall at rest receives the momentum
   f c - f (-c) = 2 f c.
 - The sum over all boundary links, times m_c dx/dt, is the momentum given to the walls in one step.
+- On the CUDA, OpenCL and HIP platforms one thread per solid node computes the part of the deviations,
+  -2 sum c (f - w), and the host sums it over the solid nodes in the order of the list. The part of the
+  weights, -2 sum c w, is the static pressure: it depends only on the geometry and is computed once, in
+  double precision. Kept apart, it does not hide the hydrodynamic part in single precision.
 - The coupled particles also exchange momentum with the walls. The reaction -F of a particle whose
   nearest node is solid goes to the wall, and the reflection of a particle gives the wall the momentum
-  2 m v.
+  2 m v. These contributions exist only where the coupling is implemented, on the Reference platform in
+  this version.
 
 `getWallForce()` returns the sum of these contributions over the last lattice step, divided by dt. With
 it the total momentum of particles, fluid and walls is conserved, and in a steady channel flow the force

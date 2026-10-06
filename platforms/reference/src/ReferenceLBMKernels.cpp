@@ -359,6 +359,9 @@ void ReferenceCalcLBMForceKernel::bounceBack() {
     // Momentum exchange (Ladd 1994): on each such link the wall at rest receives the momentum f (-c_q) - f c_q.
     // The stored deviations f - w are copied as they are, since opposite directions have the same weight; the
     // momentum exchange uses the full population f = (f - w) + w, whose part w carries the static pressure.
+    // Only links to fluid nodes are processed: between two solid nodes nothing streams, and skipping those
+    // links makes the result independent of the order of the solid nodes, as on the GPU platforms, where
+    // the solid nodes are processed in parallel.
     int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
     int numNodes = lattice.getNumNodes();
     Vec3 exchanged;
@@ -369,10 +372,11 @@ void ReferenceCalcLBMForceKernel::bounceBack() {
             int dj = (j + D3Q19::cy[q] + ny)%ny;
             int dk = (k + D3Q19::cz[q] + nz)%nz;
             int target = di + nx*(dj + ny*dk);
+            if (!isFluid[target])
+                continue;
             double df = populations[D3Q19::opposite[q]*numNodes + node];
             populations[q*numNodes + target] = df;
-            if (isFluid[target])
-                exchanged -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*(df + D3Q19::w[q]));
+            exchanged -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*(df + D3Q19::w[q]));
         }
     }
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;

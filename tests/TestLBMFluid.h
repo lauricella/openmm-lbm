@@ -22,11 +22,14 @@ const double fluidDx = 0.5, fluidDt = 0.01, fluidDensity = 602.2;
 
 /**
  * Tolerance of a fluid test: the given tolerance in double and mixed precision, where the fluid is stored in
- * double precision, and the resolution of single precision (getStorageTolerance()) otherwise.
+ * double precision; in single precision the resolution of the type (getStorageTolerance()), or the tolerance
+ * singleTolerance of the test if it is given.
  */
-double getFluidTolerance(Platform& platform, double tolerance) {
+double getFluidTolerance(Platform& platform, double tolerance, double singleTolerance=0) {
     double storage = getStorageTolerance(platform);
-    return (storage > 1e-12 ? storage : tolerance);
+    if (storage <= 1e-12)
+        return tolerance;
+    return (singleTolerance > 0 ? singleTolerance : storage);
 }
 
 /**
@@ -503,6 +506,9 @@ void testPoiseuille(Platform& platform, double tau) {
     vector<Vec3> velocity;
     force->getFluidFields(context, density, velocity);
     double umax = g/(2*nu)*(0.5*h)*(0.5*h) + g*(16*lambda-3)/(24*nu);
+    // In single precision the steady state is the result of thousands of steps rounded in float: on an A100 the
+    // profile and the force on the walls differ from the exact values by up to 1.1e-5 and 8e-6.
+    double tol = getFluidTolerance(platform, 1e-9, 5e-5);
     for (int k = 0; k < nz; k++)
         for (int j = 0; j < ny; j++)
             for (int i = 0; i < nx; i++) {
@@ -514,7 +520,7 @@ void testPoiseuille(Platform& platform, double tau) {
                     continue;
                 }
                 double exact = g/(2*nu)*(j-0.5)*(ny-0.5-j) + g*(16*lambda-3)/(24*nu);
-                ASSERT_EQUAL_VEC(Vec3(exact/umax, 0, 0), u*(1.0/umax), 1e-9);
+                ASSERT_EQUAL_VEC(Vec3(exact/umax, 0, 0), u*(1.0/umax), tol);
             }
 
     // In the steady state the walls carry the whole body force: g times the mass of the fluid.
@@ -522,7 +528,7 @@ void testPoiseuille(Platform& platform, double tau) {
     for (double d : density)
         mass += d*fluidDx*fluidDx*fluidDx;
     Vec3 bodyForce(g*fluidDx/(fluidDt*fluidDt)*mass, 0, 0);
-    ASSERT_EQUAL_VEC(bodyForce, force->getWallForce(context), 1e-8);
+    ASSERT_EQUAL_VEC(bodyForce, force->getWallForce(context), getFluidTolerance(platform, 1e-8, 5e-5));
     delete system;
 }
 
@@ -555,15 +561,16 @@ void testWallConservation(Platform& platform) {
                 mass += d/fluidDensity;
             return mass;
         };
+        double tol = getFluidTolerance(platform, 1e-13);
         double mass0 = fluidMass();
-        ASSERT_EQUAL_TOL((double) (numNodes - block.size()), mass0, 1e-13);
+        ASSERT_EQUAL_TOL((double) (numNodes - block.size()), mass0, tol);
         integrator.step(removal == 0 ? 100 : 1);
-        ASSERT_EQUAL_TOL(mass0, fluidMass(), 1e-13);
+        ASSERT_EQUAL_TOL(mass0, fluidMass(), tol);
         if (removal == 1) {
             Vec3 p;
             for (int node = 0; node < numNodes; node++)
                 p += velocity[node]*(density[node]/fluidDensity*fluidDt/fluidDx);
-            ASSERT_EQUAL_VEC(Vec3(), p, 1e-13);
+            ASSERT_EQUAL_VEC(Vec3(), p, tol);
         }
         delete system;
     }
