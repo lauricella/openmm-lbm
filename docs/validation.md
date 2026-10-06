@@ -78,6 +78,8 @@ the platform runs in double precision (`docs/theory.md`, section 2).
 | Walls, direction | at a wall one node thick, a particle is reversed only if it moves into the wall, from either side | 1e-14 |
 | Momentum with walls | fluid flowing against two walls, a particle reflected, drag and random force, 100 steps: particles + fluid + the sum of `getWallForce()` dt is constant | 1e-12 relative |
 | Restart | checkpoint plus `setFluidState()` at step 13, removal every 5 steps, T = 0 | bitwise |
+| Checkpoint with random force | OpenMM checkpoint plus `createCheckpoint()` at step 9, 300 K, a wall, removal every 4 steps, a force evaluation just before (random numbers already drawn), 14 more steps (`testCheckpointWithRandomForce`) | bitwise, also the wall force |
+| Checkpoint refused | different number of coupled particles, or data that are not a checkpoint (`testCheckpointMismatch`) | exception |
 | Warning | friction*dt > 1 is reported at Context creation | |
 | Equipartition | 100 free particles, gamma dt = 0.1, T = 300 K: full-step temperature close to T, half-step temperature close to T/(1 - gamma dt/2) | 10% (measured 4% below, from the missing fluid fluctuations) |
 | Warning on tau | tau > 1.7 with coupled particles is reported at Context creation | |

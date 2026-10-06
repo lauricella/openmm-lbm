@@ -160,7 +160,10 @@ precision. `mixed` is recommended for production.
 
 ## Next steps
 
-- [The lattice](lattice.md): geometry, units, choice of the parameters, stability.
+- [Tutorial](tutorial.md): the examples of `examples/`, one by one, with exercises.
+- [The lattice](lattice.md): a quick recipe for the parameters, then geometry, units, stability.
+- [Saving and continuing a simulation](restart.md): checkpoints and long runs.
 - [Examples](examples.md): a channel between two walls, monitoring, restarts, serialization,
   `openmm.app.Simulation`.
 - [API reference](api_reference.md): every method of `LBMForce`.
+- [Glossary](glossary.md): the words used in this guide.

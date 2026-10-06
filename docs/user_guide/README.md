@@ -11,18 +11,39 @@ The model itself is described in [theory.md](../theory.md).
 New to OpenMM? Start from the [installation](installation.md), which installs everything step by
 step, and continue with the [tutorial](tutorial.md).
 
+## Limitations of the model
+
+Know these before using the plugin for a study:
+
+- **The fluid has no thermal fluctuations of its own.** The random force acts on the coupled particles
+  only, and the fluid receives its reaction. As a consequence the diffusion coefficient of a free particle,
+  or of the centre of mass of a protein, stays close to kT/(m friction), the value without hydrodynamics,
+  although the fluid does carry the hydrodynamic interactions (a kick or a drag shows them): the Einstein
+  relation with the hydrodynamic mobility is not satisfied. The temperature of the coupled particles is a
+  little below the set temperature: 1-2% with friction x dt = 0.1, about 13% with a very large friction
+  (100/ps). See [validation.md](../validation.md). A fluctuating lattice Boltzmann fluid, which removes
+  these limits, is planned.
+- **Nearest-node coupling.** Each particle is coupled to the nearest lattice node, so the forces jump when
+  a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
+  lattice spacing and on tau.
+- **Walls.** Solid nodes have a no-slip bounce-back; faces with an imposed density or velocity are not
+  available yet.
+
 ## Contents
 
+0. [Glossary](glossary.md): the words used in this guide, explained briefly.
 1. [Installation](installation.md): conda, OpenMM and the plugin, step by step from nothing, with the
    tests and a first run; computing clusters; installation problems.
-2. [Tutorial](tutorial.md): the pieces of an OpenMM simulation, what `LBMForce` adds, and five lessons
+2. [Tutorial](tutorial.md): the pieces of an OpenMM simulation, what `LBMForce` adds, and six lessons
    with the scripts of [`examples/`](../../examples/README.md).
 3. [Getting started](getting_started.md): checking the installation, a first simulation, units,
    platforms.
 4. [The lattice](lattice.md): geometry, node indexing and NumPy arrays, units, relaxation time, Mach
    number, removal of the fluid momentum, initial state.
 5. [API reference](api_reference.md): every method of `LBMForce`, with units, defaults and errors.
-6. [Examples](examples.md): short complete scripts on specific topics (the longer scripts are in
+6. [Saving and continuing a simulation](restart.md): checkpoints of a run with the fluid, a script for
+   long runs split into several jobs, moving a run to another platform.
+7. [Examples](examples.md): short complete scripts on specific topics (the longer scripts are in
    [`examples/`](../../examples/README.md)).
    - A channel flow between two walls.
    - A particle kicked in the fluid.
@@ -31,7 +52,7 @@ step, and continue with the [tutorial](tutorial.md).
    - Saving and restoring the fluid.
    - Serialization.
    - `openmm.app.Simulation` with a reporter for the fluid.
-7. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
+8. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
 
 ## What works in this version
 

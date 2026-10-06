@@ -11,6 +11,7 @@
 #include "internal/LBMForceImpl.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/internal/AssertionUtilities.h"
+#include <iostream>
 
 using namespace LBMPlugin;
 using namespace OpenMM;
@@ -154,6 +155,14 @@ void LBMForce::getFluidState(Context& context, vector<double>& state) const {
 
 void LBMForce::setFluidState(Context& context, const vector<double>& state) {
     dynamic_cast<LBMForceImpl&>(getImplInContext(context)).setFluidState(getContextImpl(context), state);
+}
+
+void LBMForce::createCheckpoint(Context& context, ostream& stream) const {
+    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).createCheckpoint(getContextImpl(context), stream);
+}
+
+void LBMForce::loadCheckpoint(Context& context, istream& stream) {
+    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).loadCheckpoint(getContextImpl(context), stream);
 }
 
 double LBMForce::getFluidMachNumber(Context& context) const {

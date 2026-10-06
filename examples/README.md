@@ -105,8 +105,14 @@ python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient
   of the DragOpenMM plugin. Its full-step temperature stays at about 260 K, 13% below 298 K: with this
   large friction the fluid, which has no thermal fluctuations of its own, takes a large part of the
   momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin gives the same value.
-- The script writes the trajectory (DCD), the energies, the full-step temperature and the centre of
-  mass of the protein, not wrapped into the box, which `msd.py` reads.
+- The script writes the trajectory (DCD), the energies and temperature (OpenMM's log), the full-step and
+  half-step temperature and the centre of mass of the protein, not wrapped into the box, which `msd.py`
+  reads.
+- **Long runs.** Every `--checkpoint` steps (default: every 100 reports) the script saves the whole run,
+  fluid included, in `<prefix>.chk`. If the run stops, for example at the time limit of a job, the same
+  command with `--restart` continues it from the last checkpoint up to `--steps`, exactly as an
+  uninterrupted run: the text files are cut at the checkpoint and continued, and the trajectory continues in
+  `<prefix>_<step>.dcd`. See [saving and continuing a simulation](../docs/user_guide/restart.md).
 - For SOD1, `--domain` and `--enm-domain` choose the folded domain (residues counted from 1, both
   included) for the exposure scaling and for the elastic network. The defaults, 1-108 and 2-109, are
   what the original scripts did with their option `-d 1 109`, because of an offset of one residue in

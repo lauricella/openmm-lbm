@@ -15,6 +15,7 @@
 #include "openmm/Platform.h"
 #include "openmm/System.h"
 #include "openmm/Vec3.h"
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -120,6 +121,16 @@ public:
      * Set the populations of all nodes, in lattice units.
      */
     virtual void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state) = 0;
+    /**
+     * Write the state of the kernel that OpenMM checkpoints do not contain: the populations, the random
+     * numbers already drawn for the next step, the momentum given to the walls in the last step and, where the
+     * kernel owns one, the state of its random number generator.
+     */
+    virtual void createCheckpoint(OpenMM::ContextImpl& context, std::ostream& stream) = 0;
+    /**
+     * Read a checkpoint written by createCheckpoint() of a kernel of the same platform, precision and System.
+     */
+    virtual void loadCheckpoint(OpenMM::ContextImpl& context, std::istream& stream) = 0;
 };
 
 } // namespace LBMPlugin

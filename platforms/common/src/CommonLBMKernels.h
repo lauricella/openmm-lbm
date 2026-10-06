@@ -43,6 +43,8 @@ public:
     OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context);
     void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
+    void createCheckpoint(OpenMM::ContextImpl& context, std::ostream& stream);
+    void loadCheckpoint(OpenMM::ContextImpl& context, std::istream& stream);
 private:
     void advanceFluid();
     void computeNextStepForces(OpenMM::ContextImpl& context);

@@ -4,6 +4,31 @@ This page explains how the lattice is built from the System and the integrator, 
 fields node by node, how to choose the parameters, and how the plugin keeps the fluid in the regime
 where the model is accurate. The model itself is described in [theory.md](../theory.md).
 
+## Quick recipe
+
+For coarse-grained proteins in water, with one bead per residue, these choices work and are those of the
+examples. The rest of this page explains each of them.
+
+| Parameter | Typical choice | Why, and the limits |
+|---|---|---|
+| Lattice spacing dx | 0.5 nm | about the size of a residue bead. Each bead is coupled to its nearest node |
+| Time step dt | 0.01 ps (10 fs) | the time step of the coarse-grained model; it is also the lattice time step |
+| Box | a whole number of dx along each side; at least 3 times the size of the protein and 2 times the cutoff of the nonbonded forces | the box is periodic: a protein feels its images through the fluid |
+| Kinematic viscosity | 1.0035 nm^2/ps (water, tau = 0.62 with the values above), or larger | tau = 3 nu dt/dx^2 + 1/2 must stay between about 0.505 and 1.7 ([relaxation time](#relaxation-time)) |
+| Friction | 5 to 10 /ps, so that friction x dt = 0.05 to 0.1 | friction x dt must be below 1 (warning) and below 2 (stability); at 0.1 or below the explicit scheme is accurate |
+| Temperature | that of the simulation, e.g. 298 K | the fluid is the thermostat of the coupled particles: no other thermostat |
+| Integrator | `VerletIntegrator(dt)` | friction and random force are part of `LBMForce` |
+| Removal of the fluid momentum | every step (the default) | keeps the system at rest; set 0 for flows driven by a body force |
+
+**Checking a new setup.** Create the Context, then:
+
+1. print `force.getLatticeParametersInContext(context)`: tau must be in the range above (the plugin also
+   prints a warning when it is not);
+2. run a few hundred steps and print `force.getFluidMachNumber(context)`: it should stay below 0.1
+   ([Mach number](#mach-number-and-stability));
+3. check the temperature in the log of `StateDataReporter`: a few percent below the set temperature is
+   normal ([limitations](README.md#limitations-of-the-model)), much more is not.
+
 ## Geometry
 
 The fluid fills the periodic box of the System, which must be rectangular. `setGridSize(nx, ny, nz)`
@@ -190,5 +215,6 @@ A new Context starts the fluid at equilibrium:
 - solid nodes hold no fluid.
 
 The fluid is not part of the State or of the checkpoints of OpenMM. `Context.reinitialize()` also
-restarts it from this initial state. To keep it, save it with `getFluidState()` and restore it with
-`setFluidState()` (see the [restart example](examples.md#saving-and-restoring-the-fluid)).
+restarts it from this initial state. To save and continue a run, fluid included, use
+`openmmlbm.saveCheckpoint()` and `openmmlbm.loadCheckpoint()` ([restart](restart.md)); to keep only the
+fluid, `getFluidState()` and `setFluidState()` ([example](examples.md#saving-and-restoring-the-fluid)).

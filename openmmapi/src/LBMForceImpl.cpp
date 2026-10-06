@@ -204,6 +204,54 @@ void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& sta
     kernel.getAs<CalcLBMForceKernel>().setFluidState(context, state);
 }
 
+/**
+ * A checkpoint starts with a header that identifies it: a tag, the format version, the platform, the grid size
+ * and the number of coupled particles.  The kernel writes the rest.
+ */
+static const char checkpointTag[8] = {'L', 'B', 'M', 'C', 'K', 'P', 'T', '1'};
+static const int checkpointVersion = 1;
+
+void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
+    stream.write(checkpointTag, sizeof(checkpointTag));
+    stream.write((const char*) &checkpointVersion, sizeof(int));
+    string platform = context.getPlatform().getName();
+    int length = platform.size();
+    stream.write((const char*) &length, sizeof(int));
+    stream.write(platform.c_str(), length);
+    int header[4] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size()};
+    stream.write((const char*) header, sizeof(header));
+    kernel.getAs<CalcLBMForceKernel>().createCheckpoint(context, stream);
+    if (!stream)
+        throw OpenMMException("LBMForce: error writing the checkpoint");
+}
+
+void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
+    char tag[sizeof(checkpointTag)];
+    stream.read(tag, sizeof(tag));
+    if (!stream || !equal(tag, tag+sizeof(tag), checkpointTag))
+        throw OpenMMException("LBMForce: the data are not a checkpoint written by LBMForce::createCheckpoint()");
+    int version, length;
+    stream.read((char*) &version, sizeof(int));
+    if (version != checkpointVersion)
+        throw OpenMMException("LBMForce: unsupported checkpoint version");
+    stream.read((char*) &length, sizeof(int));
+    if (!stream || length < 0 || length > 1000)
+        throw OpenMMException("LBMForce: the checkpoint is damaged");
+    string platform(length, ' ');
+    stream.read(&platform[0], length);
+    if (platform != context.getPlatform().getName())
+        throw OpenMMException("LBMForce: the checkpoint was written on the platform " + platform + ", not on " +
+                context.getPlatform().getName());
+    int header[4];
+    stream.read((char*) header, sizeof(header));
+    if (!stream || header[0] != lattice.nx || header[1] != lattice.ny || header[2] != lattice.nz ||
+            header[3] != (int) lattice.particles.size())
+        throw OpenMMException("LBMForce: the checkpoint was written for a different grid size or number of coupled particles");
+    kernel.getAs<CalcLBMForceKernel>().loadCheckpoint(context, stream);
+    if (!stream)
+        throw OpenMMException("LBMForce: the checkpoint is truncated");
+}
+
 double LBMForceImpl::getFluidMachNumber(ContextImpl& context) {
     return kernel.getAs<CalcLBMForceKernel>().getFluidMachNumber(context);
 }

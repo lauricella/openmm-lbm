@@ -196,7 +196,7 @@ force (SFMT, Box-Muller transform).
 - It is seeded with `setRandomNumberSeed()`, or with a unique seed when the seed is 0.
 - Its sequence does not depend on the other forces of the System, and the same seed reproduces a
   simulation.
-- Its state is not part of OpenMM checkpoints.
+- Its state is not part of OpenMM checkpoints; `LBMForce::createCheckpoint()` saves it.
 
 On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's generator, as in the reference
 library (`IntegrationUtilities`, Gaussian numbers in single precision), seeded with `setRandomNumberSeed()`.
@@ -394,6 +394,11 @@ so it is rejected.
     (`D3Q19::equilibriumDeviation`).
   - Bounce-back copies df unchanged, since opposite directions have the same weight. The momentum
     exchange uses the full f = df + w, whose part w carries the static pressure on the walls.
+- **Checkpoints.** A plugin cannot add data to OpenMM checkpoints. `LBMForce::createCheckpoint()` writes
+  what they miss: the populations, the random numbers already drawn for the next step, the momentum given
+  to the walls in the last step and, on the Reference platform, the random number generator of the force
+  (on the GPU platforms it is OpenMM's, which the OpenMM checkpoint contains). With both checkpoints a run
+  continues bit for bit (`testCheckpointWithRandomForce`).
 - **Fluid state.** `getFluidState()` returns the deviations df_q in this layout, in lattice units: a
   population is the value plus w_q. Saving and restoring them is exact, so a restarted run is identical
   to an uninterrupted one.

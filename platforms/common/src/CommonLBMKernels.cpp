@@ -467,3 +467,54 @@ void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
     populations.upload(state, true);
 }
+
+/** Write the content of an array, as it is on the device, if the array exists. */
+static void writeArray(ComputeArray& array, ostream& stream) {
+    if (!array.isInitialized())
+        return;
+    vector<char> buffer(array.getSize()*array.getElementSize());
+    array.download(buffer.data());
+    stream.write(buffer.data(), buffer.size());
+}
+
+/** Read the content of an array written by writeArray(). */
+static void readArray(ComputeArray& array, istream& stream) {
+    if (!array.isInitialized())
+        return;
+    vector<char> buffer(array.getSize()*array.getElementSize());
+    stream.read(buffer.data(), buffer.size());
+    if (stream)
+        array.upload(buffer.data());
+}
+
+void CommonCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& stream) {
+    // The populations, the random numbers drawn for the next step and the momentum given to the walls in the
+    // last step, as they are on the device, so that the checkpoint is exact in every precision.  The random
+    // number generator belongs to OpenMM and is part of OpenMM checkpoints.
+    ContextSelector selector(cc);
+    int elementSize = populations.getElementSize();
+    stream.write((const char*) &elementSize, sizeof(int));
+    int flags[2] = {noiseDrawn ? 1 : 0, hasAdvanced ? 1 : 0};
+    stream.write((const char*) flags, sizeof(flags));
+    writeArray(populations, stream);
+    writeArray(noise, stream);
+    writeArray(particleWallMomentum, stream);
+    writeArray(wallExchange, stream);
+}
+
+void CommonCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& stream) {
+    ContextSelector selector(cc);
+    int elementSize;
+    stream.read((char*) &elementSize, sizeof(int));
+    if (!stream || elementSize != populations.getElementSize())
+        throw OpenMMException("LBMForce: the checkpoint was written with a different precision");
+    int flags[2];
+    stream.read((char*) flags, sizeof(flags));
+    noiseDrawn = (flags[0] != 0);
+    hasAdvanced = (flags[1] != 0);
+    readArray(populations, stream);
+    readArray(noise, stream);
+    readArray(particleWallMomentum, stream);
+    readArray(wallExchange, stream);
+}
+

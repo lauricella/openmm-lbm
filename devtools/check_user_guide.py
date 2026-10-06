@@ -9,8 +9,8 @@
 Every ```python block of docs/user_guide/*.md is run in its own process, in a temporary directory, with
 the installed openmm and openmmlbm modules. When a block is followed by an "Output:" block, the standard
 output must match it exactly. The blocks of api_reference.md are fragments: they run after a prelude
-that defines system, force and context. A block that starts with simulation.loadCheckpoint continues
-the block before it.
+that defines system, force and context. A block that starts with simulation.loadCheckpoint, or whose first
+line contains "(continued)", continues the block before it: it runs after it, in the same directory.
 
 Usage: python devtools/check_user_guide.py
 """
@@ -51,11 +51,11 @@ def main():
             expected = output.group(1) if output else None
             if name == 'api_reference.md':
                 script = PRELUDE + code
-            elif code.startswith('simulation.loadCheckpoint'):
+            elif code.startswith('simulation.loadCheckpoint') or '(continued)' in code.split('\n', 1)[0]:
                 script = previous + code
             else:
                 script = code
-            previous = code
+            previous = script
             with tempfile.TemporaryDirectory() as directory:
                 result = subprocess.run([sys.executable, '-c', script], cwd=directory, capture_output=True, text=True)
             ok = result.returncode == 0 and (expected is None or result.stdout == expected)

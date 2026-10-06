@@ -13,6 +13,7 @@
 #include "openmm/Context.h"
 #include "openmm/Force.h"
 #include "openmm/Vec3.h"
+#include <iosfwd>
 #include <vector>
 #include "internal/windowsExportLBM.h"
 
@@ -249,6 +250,27 @@ public:
      * @param state      the state of the fluid
      */
     void setFluidState(OpenMM::Context& context, const std::vector<double>& state);
+    /**
+     * Write a checkpoint of the part of the state of a Context that belongs to this force and that OpenMM
+     * checkpoints (Context::createCheckpoint()) do not contain: the populations of the fluid, the random
+     * numbers already drawn for the next step, the force on the walls of the last step and, on the Reference
+     * platform, the state of the random number generator of the force.  Together with an OpenMM checkpoint of
+     * the same Context, taken at the same step, it continues a run exactly, bit for bit, in a new Context.
+     * Like an OpenMM checkpoint, it is specific to the platform, the precision and the System.
+     *
+     * @param context    the Context of which to write the checkpoint
+     * @param stream     the stream to write it to, in binary mode
+     */
+    void createCheckpoint(OpenMM::Context& context, std::ostream& stream) const;
+    /**
+     * Load a checkpoint written by createCheckpoint().  Load the OpenMM checkpoint of the same step first:
+     * it restores the positions, the velocities, the step count and, on the GPU platforms, the random number
+     * generator that the force uses.
+     *
+     * @param context    the Context in which to load the checkpoint
+     * @param stream     the stream to read it from, in binary mode
+     */
+    void loadCheckpoint(OpenMM::Context& context, std::istream& stream);
     /**
      * Get the largest Mach number of the fluid in a Context, Ma = max |u|/c_s over the lattice nodes,
      * with u = j/rho and c_s = 1/sqrt(3) in lattice units.

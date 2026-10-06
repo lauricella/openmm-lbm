@@ -206,9 +206,12 @@ make PythonInstall
 What each command does:
 
 1. `cmake` looks for OpenMM, the compiler and SWIG, decides which platforms to build and writes the
-   build instructions. It ends with `-- Build files have been written to: ...`. It stops with an error
-   if OpenMM is older than 8.3 or if the SWIG version is wrong (the message names the version to
-   install: `conda install -c conda-forge swig=<version>`, then run `cmake` again).
+   build instructions. Among its messages it prints the version of OpenMM it found, for example
+   `-- OpenMM 8.6.1 in /home/<you>/miniforge3/envs/lbm`, and it ends with
+   `-- Build files have been written to: ...`. It stops with an error if OpenMM is older than 8.3 (the
+   message gives the version found), and warns if it is newer than 8.6, the newest tested version. It
+   also stops if the SWIG version is wrong: the message names the version to install
+   (`conda install -c conda-forge swig=<version>`); then run `cmake` again.
 2. `make -j4` compiles, using 4 processor cores. It takes a few minutes and ends with
    `[100%] Built target ...`. Lines with `warning` are not errors; a line with `error` stops the build.
 3. `make install` copies the libraries into the environment.
@@ -246,7 +249,7 @@ cd ~/src/openmm-lbm/python/tests
 python -m pytest
 ```
 
-The last line counts the tests, for example `32 passed, 13 skipped` on a computer without a GPU. "Skipped" tests are those of
+The last line counts the tests, for example `36 passed, 13 skipped` on a computer without a GPU. "Skipped" tests are those of
 platforms that are not available on your computer: that is normal. "Failed" is not: see the next
 section.
 
@@ -331,7 +334,8 @@ The steps are the same, with a few differences.
 | `conda: command not found` | the terminal was not reopened after installing Miniforge, or the initialization was refused | open a new terminal; if it persists, run `~/miniforge3/bin/conda init` and open a new terminal |
 | `ModuleNotFoundError: No module named 'openmm'` or `'openmmlbm'` | the environment is not active, or `make PythonInstall` was not run | `conda activate lbm`; repeat step 7 |
 | `TypeError` in `system.addForce(force)` | the plugin's Python module was made with a different SWIG version from OpenMM's | install the SWIG version named by `cmake` and repeat step 7 from `cmake` |
-| `cmake` error about the OpenMM version | the environment has an OpenMM older than 8.3 | create the environment again with `openmm=8.6.1` |
+| `cmake` error `openmm-lbm requires OpenMM 8.3 or later, but the OpenMM in ... is version ...` | the environment has an OpenMM older than 8.3, or `OPENMM_DIR` points to another installation | create the environment again with `openmm=8.6.1`, and pass `-DOPENMM_DIR=$CONDA_PREFIX` with the environment active |
+| `cmake` error `OpenMM was not found in ...` | `OPENMM_DIR` is wrong, or the environment is not active | `conda activate lbm`, then `cmake` with `-DOPENMM_DIR=$CONDA_PREFIX` |
 | errors that mention NumPy and a folder `~/.local` | Python mixes in packages installed outside conda | `conda env config vars set PYTHONNOUSERSITE=1` and reactivate the environment |
 | CUDA: `Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)` | the driver supports an older CUDA than the OpenMM build | update the NVIDIA driver; on a cluster with data-centre GPUs use `cuda-compat` ([section 10](#10-on-a-computing-cluster)) |
 | `Segmentation fault` with the OpenCL platform on an NVIDIA GPU | `cuda-compat` in `LD_LIBRARY_PATH`, or the `pocl` package exposing a second OpenCL device | remove `cuda-compat` from `LD_LIBRARY_PATH` for OpenCL runs; set `export OCL_ICD_VENDORS=/etc/OpenCL/vendors` to use only NVIDIA's driver |

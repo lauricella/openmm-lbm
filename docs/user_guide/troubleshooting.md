@@ -24,6 +24,10 @@ the plugin converts the parameters to lattice units.
 | `the integrator step size changed after the Context was created; reinitialize the Context` | The step size is the lattice time step and cannot change. Create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()`. |
 | `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration or the forces on the fluid, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). |
 | `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have 19 nx ny nz values. |
+| `the checkpoint was written on the platform X, not on Y` | A checkpoint can only be loaded on the platform where it was written. | Use the same platform, or move the run with `saveState()` and `getFluidState()` ([restart](restart.md#moving-a-run-to-another-platform)). |
+| `the checkpoint was written with a different precision` | The precision (single, mixed, double) differs from that of the checkpoint. | Create the Context with the same `Precision` property. |
+| `the checkpoint was written for a different grid size or number of coupled particles` | The System built for the restart is not the same as the one of the checkpoint. | Build the System exactly as in the first run. |
+| `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by openmmlbm.saveCheckpoint()` | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). | Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
 | `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles and the solid nodes) | These parameters are fixed when the Context is created. Create a new Context. |
 | `IntegrationUtilities::initRandomNumberGenerator(): Requested two different values for the random number seed` | On the CUDA, OpenCL and HIP platforms the random force uses OpenMM's generator, which has one seed per Context. Another component of the System (an `AndersenThermostat`, for example) uses it with a different seed: give both the same seed. |
 
@@ -49,7 +53,9 @@ default. Call `setFluidMomentumRemovalFrequency(0)` for flows driven by `setBody
 density in g/cm^3 must be multiplied by `unit.AVOGADRO_CONSTANT_NA`; see [units](getting_started.md#units).
 
 **The fluid restarts from rest after a restart.** OpenMM checkpoints and `Context.reinitialize()` do
-not keep the fluid. Save it with `getFluidState()` and restore it with `setFluidState()`; see
+not keep the fluid. Save the run with `openmmlbm.saveCheckpoint()` or `openmmlbm.LBMCheckpointReporter` and
+continue it with `openmmlbm.loadCheckpoint()` ([restart](restart.md)), or save only the fluid with
+`getFluidState()` and restore it with `setFluidState()`; see
 [saving and restoring the fluid](examples.md#saving-and-restoring-the-fluid).
 
 **The OpenCL platform crashes on an NVIDIA GPU while the CUDA platform works.** If the CUDA

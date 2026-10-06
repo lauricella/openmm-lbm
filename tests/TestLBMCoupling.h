@@ -374,6 +374,101 @@ void testWallMomentumBalance(Platform& platform) {
 }
 
 /**
+ * A run restarted from an OpenMM checkpoint and a checkpoint of the force (LBMForce::createCheckpoint()) is
+ * identical, bit for bit, to an uninterrupted run, with the random force, a wall and the momentum removal.
+ * A force evaluation just before the checkpoints has already drawn the random numbers of the next step: the
+ * checkpoint of the force keeps them.  The force on the walls of the last step is restored too.
+ */
+void testCheckpointWithRandomForce(Platform& platform) {
+    int numSteps = 23, split = 9;
+    vector<Vec3> uninterrupted, restarted;
+    vector<double> uninterruptedFluid, restartedFluid;
+    Vec3 savedWallForce, restoredWallForce;
+    stringstream openmmCheckpoint, forceCheckpoint;
+    for (int run = 0; run < 2; run++) {
+        LBMForce* force;
+        System* system = createCoupledSystem(force, 4, 10.0, 300.0);
+        force->setRandomNumberSeed(3);
+        force->setFluidMomentumRemovalFrequency(4);
+        vector<int> wall;
+        for (int k = 0; k < 8; k++)
+            for (int i = 0; i < 8; i++)
+                wall.push_back(i+8*8*k);           // the plane j = 0
+        force->setSolidNodes(wall);
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        if (run == 0) {
+            context.setPositions({Vec3(0.3, 0.8, 0.5), Vec3(1.3, 1.4, 1.5), Vec3(2.3, 2.4, 2.5), Vec3(3.1, 0.9, 0.2)});
+            context.setVelocities({Vec3(0.1, -0.2, 0.3), Vec3(-0.3, 0.2, 0.1), Vec3(0.2, 0.2, -0.2), Vec3(0.0, -0.4, 0.1)});
+            integrator.step(split);
+            context.getState(State::Forces | State::Energy);
+            context.createCheckpoint(openmmCheckpoint);
+            force->createCheckpoint(context, forceCheckpoint);
+            savedWallForce = force->getWallForce(context);
+        }
+        else {
+            context.loadCheckpoint(openmmCheckpoint);
+            force->loadCheckpoint(context, forceCheckpoint);
+            restoredWallForce = force->getWallForce(context);
+        }
+        for (int step = split; step < numSteps; step++) {
+            integrator.step(1);
+            if (step%3 == 0)
+                context.getState(State::Forces | State::Energy);
+        }
+        State state = context.getState(State::Positions | State::Velocities);
+        vector<Vec3>& out = (run == 0 ? uninterrupted : restarted);
+        out = state.getPositions();
+        out.insert(out.end(), state.getVelocities().begin(), state.getVelocities().end());
+        force->getFluidState(context, run == 0 ? uninterruptedFluid : restartedFluid);
+        delete system;
+    }
+    ASSERT(savedWallForce.dot(savedWallForce) > 0);
+    ASSERT_EQUAL_VEC(savedWallForce, restoredWallForce, 0.0);
+    for (int i = 0; i < (int) uninterrupted.size(); i++)
+        ASSERT_EQUAL_VEC(uninterrupted[i], restarted[i], 0.0);
+    for (int i = 0; i < (int) uninterruptedFluid.size(); i++)
+        ASSERT_EQUAL(uninterruptedFluid[i], restartedFluid[i]);
+}
+
+/**
+ * A checkpoint of the force is refused by a Context with a different number of coupled particles, and data
+ * that are not a checkpoint are refused.
+ */
+void testCheckpointMismatch(Platform& platform) {
+    LBMForce* force;
+    System* system = createCoupledSystem(force, 2, 5.0, 0.0);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions({Vec3(0.3, 0.4, 0.5), Vec3(1.3, 1.4, 1.5)});
+    stringstream checkpoint;
+    force->createCheckpoint(context, checkpoint);
+    LBMForce* force3;
+    System* system3 = createCoupledSystem(force3, 3, 5.0, 0.0);
+    VerletIntegrator integrator3(fluidDt);
+    Context context3(*system3, integrator3, platform);
+    bool thrown = false;
+    try {
+        force3->loadCheckpoint(context3, checkpoint);
+    }
+    catch (OpenMMException& e) {
+        thrown = true;
+    }
+    ASSERT(thrown);
+    stringstream notACheckpoint("this is not a checkpoint");
+    thrown = false;
+    try {
+        force->loadCheckpoint(context, notACheckpoint);
+    }
+    catch (OpenMMException& e) {
+        thrown = true;
+    }
+    ASSERT(thrown);
+    delete system;
+    delete system3;
+}
+
+/**
  * A run with coupled particles restarted from a checkpoint, with the fluid restored by setFluidState(), is
  * identical to an uninterrupted run.  The temperature is zero, since the state of the random generator is not
  * part of the checkpoint.
@@ -528,6 +623,8 @@ void runCouplingTests(Platform& platform) {
     testWallReflectionDirection(platform);
     testWallMomentumBalance(platform);
     testRestartWithParticles(platform);
+    testCheckpointWithRandomForce(platform);
+    testCheckpointMismatch(platform);
     testEquipartition(platform);
     testFrictionWarning(platform);
     testSelfMobilityWarning(platform);

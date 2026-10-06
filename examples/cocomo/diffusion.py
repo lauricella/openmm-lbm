@@ -31,6 +31,13 @@ T, production.  Files written, with the prefix given by --output:
   <prefix>_com.txt           time (ps) and centre of mass x y z (nm), not wrapped into the box: the
                              input of msd.py, which computes the diffusion coefficient
   <prefix>_final.xml, <prefix>_fluid.npz   final state of the particles and of the fluid
+  <prefix>.chk               checkpoint of the whole run, fluid included, every --checkpoint steps
+
+A long run can be split into several jobs: if it stops (the time limit of a job, for example), run the same
+command with --restart.  The run continues from the last checkpoint and stops at --steps, exactly as an
+uninterrupted run would (docs/user_guide/restart.md).  The text files are cut at the step of the checkpoint
+and continued, so that the reports written after the checkpoint by the interrupted job are not repeated; the
+trajectory continues in a new file, <prefix>_<step>.dcd, where <step> is the step of the checkpoint.
 """
 
 import argparse
@@ -40,6 +47,7 @@ import numpy as np
 import openmm as mm
 import openmm.app as app
 import openmm.unit as unit
+import openmmlbm
 from openmmlbm import LBMForce
 
 import cocomo2
@@ -78,6 +86,10 @@ def parse_arguments():
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA and OpenCL (default mixed)')
     parser.add_argument('--output', help='prefix of the output files (default <preset>_lb_on or _lb_off)')
+    parser.add_argument('--checkpoint', type=int,
+                        help='steps between checkpoints in <prefix>.chk (default 100 reports, 0 = none)')
+    parser.add_argument('--restart', action='store_true',
+                        help='continue from <prefix>.chk, appending to the output files, up to --steps')
     args = parser.parse_args()
     for key, value in PRESETS[args.preset].items():
         if getattr(args, key) is None:
@@ -88,6 +100,8 @@ def parse_arguments():
             setattr(args, key, os.path.join(DATA, value))
     if args.output is None:
         args.output = '%s_lb_%s' % (args.preset, 'off' if args.no_lb else 'on')
+    if args.checkpoint is None:
+        args.checkpoint = 100*args.report
     return args
 
 
@@ -108,12 +122,13 @@ def select_platform(name, precision):
 class FullStepTemperatureReporter:
     """Temperature of the beads from full-step velocities, the mean of two consecutive steps."""
 
-    def __init__(self, file, reportInterval, masses):
-        self._out = open(file, 'w')
+    def __init__(self, file, reportInterval, masses, append=False):
+        self._out = open(file, 'a' if append else 'w')
         self._reportInterval = reportInterval
         self._masses = np.asarray(masses)
         self._previous = None
-        print('# step, full-step temperature (K), half-step temperature (K)', file=self._out)
+        if not append:
+            print('# step, full-step temperature (K), half-step temperature (K)', file=self._out)
 
     def describeNextReport(self, simulation):
         steps = self._reportInterval - simulation.currentStep%self._reportInterval
@@ -136,11 +151,12 @@ class FullStepTemperatureReporter:
 class CentreOfMassReporter:
     """Time and centre of mass of all the particles, from positions that are not wrapped into the box."""
 
-    def __init__(self, file, reportInterval, masses):
-        self._out = open(file, 'w')
+    def __init__(self, file, reportInterval, masses, append=False):
+        self._out = open(file, 'a' if append else 'w')
         self._reportInterval = reportInterval
         self._weights = np.asarray(masses)/np.sum(masses)
-        print('# time (ps), centre of mass x y z (nm)', file=self._out)
+        if not append:
+            print('# time (ps), centre of mass x y z (nm)', file=self._out)
 
     def describeNextReport(self, simulation):
         steps = self._reportInterval - simulation.currentStep%self._reportInterval
@@ -151,6 +167,17 @@ class CentreOfMassReporter:
         com = self._weights @ x
         print('%.3f %.6f %.6f %.6f' % (state.getTime().value_in_unit(unit.picosecond), *com), file=self._out,
               flush=True)
+
+
+def truncate(file, lastValue, column=0):
+    """Remove from a text file of reports the lines whose first column is beyond lastValue."""
+    if not os.path.exists(file):
+        return
+    with open(file) as lines:
+        kept = [line for line in lines if line.startswith('#') or not line.strip() or
+                float(line.split()[column]) <= lastValue + 1e-6]
+    with open(file, 'w') as out:
+        out.writelines(kept)
 
 
 def main():
@@ -200,19 +227,44 @@ def main():
     print('Friction %g 1/ps, viscosity %g nm^2/ps, %g K, dt %g ps, %d steps (%g ns)' % (
         args.friction, args.viscosity, args.temperature, args.dt, args.steps, args.steps*args.dt/1000))
 
-    simulation.context.setVelocitiesToTemperature(args.temperature, args.seed)
-    simulation.minimizeEnergy(tolerance=100*unit.kilojoule_per_mole/unit.nanometer, maxIterations=500000)
-    energy = simulation.context.getState(getEnergy=True).getPotentialEnergy()
-    print('Potential energy after minimization: %.1f kJ/mol' % energy.value_in_unit(unit.kilojoule_per_mole))
-    simulation.context.setVelocitiesToTemperature(args.temperature, args.seed + 1)
+    checkpointFile = args.output + '.chk'
+    if args.restart:
+        # Positions, velocities, time, step count and random numbers come from the checkpoint; for a System
+        # without LBMForce an OpenMM checkpoint is enough.
+        if args.no_lb:
+            simulation.loadCheckpoint(checkpointFile)
+        else:
+            openmmlbm.loadCheckpoint(checkpointFile, simulation.context, force)
+        print('Restarted from %s at step %d' % (checkpointFile, simulation.currentStep))
+    else:
+        simulation.context.setVelocitiesToTemperature(args.temperature, args.seed)
+        simulation.minimizeEnergy(tolerance=100*unit.kilojoule_per_mole/unit.nanometer, maxIterations=500000)
+        energy = simulation.context.getState(getEnergy=True).getPotentialEnergy()
+        print('Potential energy after minimization: %.1f kJ/mol' % energy.value_in_unit(unit.kilojoule_per_mole))
+        simulation.context.setVelocitiesToTemperature(args.temperature, args.seed + 1)
 
-    simulation.reporters.append(app.DCDReporter(args.output + '.dcd', args.report))
+    append = args.restart
+    dcdFile = args.output + '.dcd'
+    if args.restart:
+        step = simulation.currentStep
+        time = simulation.context.getTime().value_in_unit(unit.picosecond)
+        truncate(args.output + '.log', step)
+        truncate(args.output + '_temperature.txt', step)
+        truncate(args.output + '_com.txt', time)
+        dcdFile = '%s_%d.dcd' % (args.output, step)
+    simulation.reporters.append(app.DCDReporter(dcdFile, args.report))
     simulation.reporters.append(app.StateDataReporter(args.output + '.log', args.report, step=True, time=True,
                                                       potentialEnergy=True, temperature=True, speed=True,
-                                                      separator='\t'))
-    simulation.reporters.append(FullStepTemperatureReporter(args.output + '_temperature.txt', args.report, masses))
-    simulation.reporters.append(CentreOfMassReporter(args.output + '_com.txt', args.report, masses))
-    simulation.step(args.steps)
+                                                      separator='\t', append=append))
+    simulation.reporters.append(FullStepTemperatureReporter(args.output + '_temperature.txt', args.report, masses,
+                                                            append))
+    simulation.reporters.append(CentreOfMassReporter(args.output + '_com.txt', args.report, masses, append))
+    if args.checkpoint > 0:
+        if args.no_lb:
+            simulation.reporters.append(app.CheckpointReporter(checkpointFile, args.checkpoint))
+        else:
+            simulation.reporters.append(openmmlbm.LBMCheckpointReporter(checkpointFile, args.checkpoint, force))
+    simulation.step(max(0, args.steps - simulation.currentStep))
 
     simulation.saveState(args.output + '_final.xml')
     if not args.no_lb:

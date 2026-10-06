@@ -78,7 +78,13 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    by `computeFluidMoments`, the momentum removal if due and `coupleParticles` without the reaction on the
    fluid. The random numbers of a step are copied from OpenMM's generator into the array `noise` once, by the
    first `coupleParticles` that needs them (`drawNoise`), and reused by the step.
-4. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
+4. **Checkpoints.** `LBMForce::createCheckpoint()` and `loadCheckpoint()` go through `LBMForceImpl`, which
+   writes and checks a header (tag, version, platform, grid size, number of coupled particles), to the
+   kernel, which writes its arrays as they are: populations, random numbers drawn for the next step, wall
+   momentum and, on the Reference platform, its SFMT generator. The Python module adds
+   `openmmlbm.saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter` (in `python/openmmlbm.i`),
+   which store an OpenMM checkpoint and the checkpoint of the force in one file.
+5. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
    through `LBMForceImpl`, to the kernel. The common implementation computes density and momentum on
    the device (`computeFluidMoments`), then converts them to OpenMM units on the host.
 

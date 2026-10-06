@@ -481,3 +481,41 @@ void ReferenceCalcLBMForceKernel::setFluidState(ContextImpl& context, const vect
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
     populations = state;
 }
+
+void ReferenceCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& stream) {
+    // The populations, the random numbers drawn for the next step, the state of the generator of the force
+    // (not part of OpenMM checkpoints on this platform) and the momentum given to the walls in the last step.
+    stream.write((const char*) populations.data(), sizeof(double)*populations.size());
+    int drawn = noiseDrawn;
+    stream.write((const char*) &drawn, sizeof(int));
+    for (const Vec3& xi : noise)
+        for (int k = 0; k < 3; k++) {
+            double value = xi[k];
+            stream.write((const char*) &value, sizeof(double));
+        }
+    sfmt.createCheckpoint(stream);
+    int stored = hasStoredGaussian;
+    stream.write((const char*) &stored, sizeof(int));
+    stream.write((const char*) &storedGaussian, sizeof(double));
+    for (int k = 0; k < 3; k++) {
+        double value = wallMomentum[k];
+        stream.write((const char*) &value, sizeof(double));
+    }
+}
+
+void ReferenceCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& stream) {
+    stream.read((char*) populations.data(), sizeof(double)*populations.size());
+    int drawn;
+    stream.read((char*) &drawn, sizeof(int));
+    noiseDrawn = (drawn != 0);
+    for (Vec3& xi : noise)
+        for (int k = 0; k < 3; k++)
+            stream.read((char*) &xi[k], sizeof(double));
+    sfmt.loadCheckpoint(stream);
+    int stored;
+    stream.read((char*) &stored, sizeof(int));
+    hasStoredGaussian = (stored != 0);
+    stream.read((char*) &storedGaussian, sizeof(double));
+    for (int k = 0; k < 3; k++)
+        stream.read((char*) &wallMomentum[k], sizeof(double));
+}

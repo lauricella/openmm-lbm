@@ -48,6 +48,8 @@ public:
     void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity);
     void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
+    void createCheckpoint(OpenMM::ContextImpl& context, std::ostream& stream);
+    void loadCheckpoint(OpenMM::ContextImpl& context, std::istream& stream);
     double getFluidMachNumber(OpenMM::ContextImpl& context);
     OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context);
     void getLatticeParameters(double& dx, double& dt, double& tau) const;

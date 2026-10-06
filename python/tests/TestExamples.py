@@ -90,3 +90,19 @@ def test_cocomo2_parameters():
     assert xi[108] == xi[109] == 1 and 0 <= xi.min() and xi.max() <= 1
     system = cocomo2.create_system(names, chains, 15.0, xi, pairs)
     assert abs(sum(system.getParticleMass(i)._value for i in range(110)) - sum(cocomo2.RESIDUES[n][0] for n in names)) < 1e-9
+
+
+def test_diffusion_restart(tmp_path):
+    """A run split in two with --checkpoint and --restart gives the same output as an uninterrupted run."""
+    script = os.path.join(EXAMPLES, 'cocomo', 'diffusion.py')
+    common = [sys.executable, script, '--platform', 'Reference', '--preset', 'smoke', '--box', '10', '--report', '10',
+              '--checkpoint', '20']
+    def run(arguments):
+        result = subprocess.run(common + arguments, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+        assert result.returncode == 0, result.stdout + result.stderr
+    run(['--steps', '60', '--output', 'whole'])
+    run(['--steps', '30', '--output', 'split'])          # stops 10 steps after the checkpoint at step 20
+    run(['--steps', '60', '--output', 'split', '--restart'])
+    for suffix in ('_com.txt', '_temperature.txt'):
+        assert (tmp_path/('whole' + suffix)).read_text() == (tmp_path/('split' + suffix)).read_text()
+    assert (tmp_path/'split_20.dcd').exists()

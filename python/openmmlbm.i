@@ -39,6 +39,7 @@ int isNumpyAvailable() {
 
 %{
 #include "LBMForce.h"
+#include <sstream>
 #include "OpenMM.h"
 #include "OpenMMAmoeba.h"
 #include "OpenMMDrude.h"
@@ -241,6 +242,29 @@ public:
             return fields;
         }
 
+        /*
+         * Write a checkpoint of the fluid and of the coupling (see the C++ documentation of
+         * createCheckpoint()) and return it as bytes.
+         */
+        PyObject* createCheckpoint(OpenMM::Context& context) {
+            std::stringstream stream(std::ios_base::out | std::ios_base::binary);
+            self->createCheckpoint(context, stream);
+            std::string data = stream.str();
+            return PyBytes_FromStringAndSize(data.c_str(), data.size());
+        }
+
+        /*
+         * Load a checkpoint returned by createCheckpoint(), given as bytes.
+         */
+        void loadCheckpoint(OpenMM::Context& context, PyObject* checkpoint) {
+            char* data;
+            Py_ssize_t length;
+            if (!PyBytes_Check(checkpoint) || PyBytes_AsStringAndSize(checkpoint, &data, &length) != 0)
+                throw OpenMM::OpenMMException("LBMForce.loadCheckpoint: the checkpoint must be bytes");
+            std::stringstream stream(std::string(data, length), std::ios_base::in | std::ios_base::binary);
+            self->loadCheckpoint(context, stream);
+        }
+
         static LBMPlugin::LBMForce& cast(OpenMM::Force& force) {
             return dynamic_cast<LBMPlugin::LBMForce&>(force);
         }
@@ -252,3 +276,102 @@ public:
 };
 
 }
+
+%pythoncode %{
+import os as _os
+import struct as _struct
+
+_CHECKPOINT_TAG = b'OPENMMLBM-CHECKPOINT-1\n'
+
+
+def saveCheckpoint(file, context, force):
+    """Save the complete state of a Context with an LBMForce to a file.
+
+    The file holds an OpenMM checkpoint (Context.createCheckpoint(): positions, velocities, periodic box,
+    time, step count, state of the integrator and of OpenMM's random number generators) and the checkpoint
+    of the force (LBMForce.createCheckpoint(): fluid, random numbers already drawn for the next step, force on
+    the walls of the last step).  Loading it with loadCheckpoint() continues the run exactly, bit for bit.
+    The data are written to file + '.tmp' and then renamed, so an interrupted write never replaces a valid
+    checkpoint with a damaged one.  Like OpenMM checkpoints, the file is specific to the platform, the
+    precision and the System.
+
+    Parameters
+    ----------
+    file : str
+        path of the file to write
+    context : openmm.Context
+        the Context to save, for example simulation.context
+    force : LBMForce
+        the LBMForce of the System of the Context
+    """
+    openmmData = context.createCheckpoint()
+    forceData = force.createCheckpoint(context)
+    temporary = file + '.tmp'
+    with open(temporary, 'wb') as out:
+        out.write(_CHECKPOINT_TAG)
+        out.write(_struct.pack('<qq', len(openmmData), len(forceData)))
+        out.write(openmmData)
+        out.write(forceData)
+    _os.replace(temporary, file)
+
+
+def loadCheckpoint(file, context, force):
+    """Load a file written by saveCheckpoint() into a Context.
+
+    The Context must be built from the same System (same particles, forces and LBMForce parameters) on the
+    same platform and precision.  It restores positions, velocities, box, time and step count as
+    Context.loadCheckpoint() does, and the fluid and the random numbers of the force.
+
+    Parameters
+    ----------
+    file : str
+        path of the file to read
+    context : openmm.Context
+        the Context to restore, for example simulation.context
+    force : LBMForce
+        the LBMForce of the System of the Context
+    """
+    with open(file, 'rb') as stream:
+        data = stream.read()
+    if not data.startswith(_CHECKPOINT_TAG):
+        raise ValueError('%s is not a checkpoint written by openmmlbm.saveCheckpoint()' % file)
+    start = len(_CHECKPOINT_TAG) + 16
+    openmmLength, forceLength = _struct.unpack_from('<qq', data, len(_CHECKPOINT_TAG))
+    if len(data) != start + openmmLength + forceLength:
+        raise ValueError('%s is truncated or damaged' % file)
+    context.loadCheckpoint(data[start:start+openmmLength])
+    force.loadCheckpoint(context, data[start+openmmLength:])
+
+
+class LBMCheckpointReporter(object):
+    """A reporter for openmm.app.Simulation that saves a checkpoint of the run, fluid included, at regular
+    intervals: the counterpart of openmm.app.CheckpointReporter for Systems with an LBMForce.
+
+    Every reportInterval steps it calls saveCheckpoint(file, simulation.context, force), overwriting the
+    same file.  To continue the run, build the Simulation again and call
+    loadCheckpoint(file, simulation.context, force).
+    """
+
+    def __init__(self, file, reportInterval, force):
+        """
+        Parameters
+        ----------
+        file : str
+            path of the checkpoint file
+        reportInterval : int
+            steps between checkpoints
+        force : LBMForce
+            the LBMForce of the System of the Simulation
+        """
+        self._file = file
+        self._reportInterval = reportInterval
+        self._force = force
+
+    def describeNextReport(self, simulation):
+        steps = self._reportInterval - simulation.currentStep%self._reportInterval
+        return {'steps': steps, 'periodic': None, 'include': []}
+
+    def report(self, simulation, state):
+        saveCheckpoint(self._file, simulation.context, self._force)
+%}
+

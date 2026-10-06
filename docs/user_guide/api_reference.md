@@ -234,7 +234,8 @@ simulations with different seeds have different random forces. On the Reference 
 force has its own generator, so the same seed reproduces a simulation. On the CUDA, OpenCL and HIP
 platforms it uses OpenMM's generator, which has a single seed per Context: a component that uses it with a
 different seed, such as an `AndersenThermostat`, makes OpenMM stop with an error, and the two seeds must be
-set equal. The state of the generator is not part of OpenMM checkpoints.
+set equal. On a restart the seed does not matter: OpenMM checkpoints contain OpenMM's generator, and
+`createCheckpoint()` the generator of the Reference platform ([checkpoints](#checkpoints)).
 
 ## Reading and writing the fluid of a Context
 
@@ -260,8 +261,10 @@ u = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))   # shape (
 
 `getFluidState()` returns the complete state of the fluid as a list of 19 x numNodes numbers.
 `setFluidState()` sets it in a Context with the same grid size; it accepts a list or a NumPy array.
-Together they save and restore the fluid, which is not part of OpenMM checkpoints (see the
-[restart example](examples.md#saving-and-restoring-the-fluid)).
+Together they save and restore the fluid, which is not part of OpenMM checkpoints. To save and continue a
+whole run use the [checkpoints](#checkpoints) instead: they also keep the random numbers. Unlike checkpoints,
+the fluid state does not depend on the platform: it can move a fluid from one platform to another
+([restart](restart.md#moving-a-run-to-another-platform)).
 
 The state holds, for the 19 lattice populations of each node, their deviations from the rest
 equilibrium, f_q - w_q, in lattice units, stored as [q*numNodes + node]. A population is the value plus
@@ -283,6 +286,51 @@ Returns the tuple `(dx, dt, tau)`: the lattice spacing (a `Quantity` in nm), the
 ```python
 dx, dt, tau = force.getLatticeParametersInContext(context)
 ```
+
+## Checkpoints
+
+OpenMM checkpoints (`Context.createCheckpoint()`) do not contain the fluid. These methods and functions save
+it, with the rest of what the force needs, so that a run continues exactly. The page
+[saving and continuing a simulation](restart.md) explains how to use them, step by step.
+
+### `createCheckpoint(context)`, `loadCheckpoint(context, data)`
+
+`createCheckpoint()` returns, as `bytes`, the part of the state of the Context that belongs to the force and
+that OpenMM checkpoints miss: the populations of the fluid, the random numbers already drawn for the next
+step, the force on the walls of the last step and, on the Reference platform, the state of the random number
+generator of the force. `loadCheckpoint()` restores it in a Context built from the same System, on the same
+platform and with the same precision. Load the OpenMM checkpoint of the same step first. In C++ they take a
+`std::ostream` and a `std::istream` opened in binary mode.
+
+```python
+data = force.createCheckpoint(context)
+force.loadCheckpoint(context, data)
+print(type(data).__name__, data[:8])
+```
+
+Output:
+
+```
+bytes b'LBMCKPT1'
+```
+
+Errors: a checkpoint written on another platform, with another precision, or for a different grid size or
+number of coupled particles, or data that are not a checkpoint, make `loadCheckpoint()` raise an exception
+([troubleshooting](troubleshooting.md)).
+
+### `openmmlbm.saveCheckpoint(file, context, force)`, `openmmlbm.loadCheckpoint(file, context, force)`
+
+Functions of the module `openmmlbm` that write and read one file with both checkpoints: OpenMM's
+(`context.createCheckpoint()`) and the force's (`force.createCheckpoint(context)`). `saveCheckpoint()` writes
+to `file + '.tmp'` and then renames it, so an interrupted write never damages an existing checkpoint.
+`loadCheckpoint()` restores positions, velocities, box, time, step count and random numbers, and the fluid;
+it raises `ValueError` if the file is not a checkpoint written by `saveCheckpoint()`.
+
+### `openmmlbm.LBMCheckpointReporter(file, reportInterval, force)`
+
+A reporter for `openmm.app.Simulation`: every `reportInterval` steps it calls
+`saveCheckpoint(file, simulation.context, force)`, replacing the previous checkpoint. It is the counterpart of
+OpenMM's `CheckpointReporter` for a System with an `LBMForce`.
 
 ## Changing parameters in a Context
 

@@ -4,7 +4,7 @@ This tutorial is for someone who has installed OpenMM and the plugin ([installat
 and has never used OpenMM. It explains the pieces of an OpenMM simulation, what the plugin adds, and
 then goes through the scripts of the [`examples/`](../../examples/README.md) folder one by one, with
 what to look at and a few exercises: a kicked bead, momentum and energy, temperature, the fluid alone,
-and a protein.
+a protein, and a long run split into several pieces.
 
 Each lesson takes from a few minutes to half an hour. You need a terminal with the environment active
 (`conda activate lbm`) and a working folder:
@@ -231,7 +231,33 @@ Exercises:
 2. Run the same with `--no-lb` (no fluid, Langevin integrator) and compare the diffusion coefficients.
    A run of 1 ns gives only a rough value; the presets run for 50 to 200 ns.
 
-## 8. Where to go next
+## 8. Lesson 6: a long run in several pieces
+
+A run of 200 ns of SOD1 takes about 30 minutes on a GPU, but larger systems or longer runs take days, and
+on a cluster a job stops at its time limit. The run must then be saved regularly and continued. Try it with
+a short run that you stop by hand:
+
+```bash
+python $EX/cocomo/diffusion.py --preset sod1 --steps 200000 --report 1000 --checkpoint 10000 --output long
+```
+
+Stop it with Ctrl+C after at least one checkpoint has been written: the script writes one every 10000
+steps, about every 1.5 minutes on a GPU, and the file `long.chk` appears. It holds the last checkpoint:
+positions, velocities, fluid and random numbers. Now continue:
+
+```bash
+python $EX/cocomo/diffusion.py --preset sod1 --steps 200000 --report 1000 --checkpoint 10000 --output long --restart
+```
+
+The script prints the step it starts from and runs up to step 200000. The result is the same, bit for bit,
+as a run that had never stopped. Look at the end of `long_com.txt` before and after the restart: the lines
+written after the last checkpoint by the interrupted run have been removed and written again.
+
+The page [saving and continuing a simulation](restart.md) explains how to do the same in your own scripts,
+with `openmmlbm.LBMCheckpointReporter` and `openmmlbm.loadCheckpoint()`, and shows a script that you can
+submit again and again on a cluster until the run is finished.
+
+## 9. Where to go next
 
 - The [examples page](examples.md) of this guide has shorter scripts on specific topics: a channel
   between two walls, monitoring the Mach number, saving and restoring the fluid, serialization, and a

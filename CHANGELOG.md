@@ -108,6 +108,14 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   SOD1 and of a disordered protein with and without the fluid (`diffusion.py`, with the parameter sets
   of the DragOpenMM runs), kicks of a peptide and of ubiquitin (`kick.py`), and the diffusion
   coefficient of the centre of mass (`msd.py`).
+- CMake reads the version of OpenMM from its library and stops with an error that names it below 8.3, or
+  warns above 8.6, the newest tested version (before, only the presence of `ComputeSort.h` was checked).
+- Checkpoints of the fluid and of the coupling: `LBMForce::createCheckpoint()` and `loadCheckpoint()` (bytes
+  in Python) write what OpenMM checkpoints miss (populations, random numbers already drawn, wall force,
+  the generator of the Reference platform), and `openmmlbm.saveCheckpoint()`, `loadCheckpoint()` and
+  `LBMCheckpointReporter` keep them with an OpenMM checkpoint in one file. A restarted run is identical, bit
+  for bit, to an uninterrupted one, also with the random force. `examples/cocomo/diffusion.py` has the
+  options `--checkpoint` and `--restart`. New page of the user guide: `docs/user_guide/restart.md`.
 - Between integration steps the coupling force is that of the next step, as OpenMM does for every force,
   instead of that of the last step. With `VerletIntegrator` the kinetic energy of a State, and so the
   temperature of `StateDataReporter`, is then that of the full step also for coupled particles (before,

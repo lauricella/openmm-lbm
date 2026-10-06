@@ -11,7 +11,7 @@ file and run as it is. The outputs shown were obtained with OpenMM 8.6.1.
 4. [Monitoring a run and the Mach number check](#monitoring-a-run-and-the-mach-number-check).
 5. [Saving and restoring the fluid](#saving-and-restoring-the-fluid).
 6. [Serialization](#serialization).
-7. [Using openmm.app.Simulation](#using-openmmappsimulation): a reporter for the fluid, checkpoints.
+7. [Using openmm.app.Simulation](#using-openmmappsimulation): a reporter for the fluid, checkpoints (more in [restart](restart.md)).
 
 The page on [the lattice](lattice.md#node-indexing-and-numpy-arrays) shows how to turn the fluid
 fields into NumPy arrays indexed by node.
@@ -358,9 +358,12 @@ Notes:
 
 ## Saving and restoring the fluid
 
-OpenMM checkpoints and `State` objects do not contain the fluid. To restart a run, save the
-checkpoint and the fluid state together, and restore both in the new Context. This script checks that
-the restarted run is identical to an uninterrupted one.
+OpenMM checkpoints and `State` objects do not contain the fluid. The complete way to save and continue a
+run is `openmmlbm.saveCheckpoint()` and `openmmlbm.loadCheckpoint()`, described in
+[saving and continuing a simulation](restart.md): they save the OpenMM checkpoint together with the fluid and
+the random numbers of the force. This example shows the mechanism underneath with the fluid alone, saved
+with `getFluidState()` and restored with `setFluidState()`: for a run without random force, like this one,
+it is enough, and the restarted run is identical to an uninterrupted one.
 
 ```python
 import numpy as np
@@ -420,6 +423,9 @@ Notes:
   around it: `getFluidState()` before and `setFluidState()` after.
 - **Positions and velocities.** `context.loadCheckpoint()` restores the particles, the time and the
   step count; `setFluidState()` restores the fluid. Both are needed.
+- **With a random force** (temperature above zero) this is not enough for an exact restart: the random
+  numbers already drawn for the next step are kept by the force, and on the Reference platform also its
+  random number generator. `openmmlbm.saveCheckpoint()` saves them ([restart](restart.md)).
 
 ## Serialization
 
@@ -477,6 +483,7 @@ import numpy as np
 import openmm as mm
 import openmm.app as app
 import openmm.unit as unit
+import openmmlbm
 from openmmlbm import LBMForce
 
 
@@ -539,9 +546,8 @@ simulation.reporters.append(FluidReporter('fluid.txt', 100, force))
 simulation.reporters.append(app.StateDataReporter('state.txt', 100, step=True, time=True, potentialEnergy=True))
 simulation.step(500)
 
-# Save the run: the OpenMM checkpoint and, separately, the fluid.
-simulation.saveCheckpoint('run.chk')
-np.save('run_fluid.npy', np.array(force.getFluidState(simulation.context)))
+# Save the run: the OpenMM checkpoint and the fluid, in one file.
+openmmlbm.saveCheckpoint('run.chk', simulation.context, force)
 
 print(open('fluid.txt').read(), end='')
 ```
@@ -557,11 +563,12 @@ Output:
 5 0.492879 0.00146615 0.000630083 0.0186065
 ```
 
-To continue the run later, create the Simulation in the same way and restore both files:
+To continue the run later, create the Simulation in the same way and load the checkpoint
+([saving and continuing a simulation](restart.md) explains the details and shows a script for long runs):
 
 ```python
-simulation.loadCheckpoint('run.chk')
-force.setFluidState(simulation.context, np.load('run_fluid.npy'))
+# (continued) Later, after building the same Simulation: continue the run.
+openmmlbm.loadCheckpoint('run.chk', simulation.context, force)
 simulation.step(500)
 ```
 
