@@ -121,10 +121,15 @@ On the GPU platforms the random numbers will come from OpenMM's generator, as in
 
 **Walls.** A coupled particle whose nearest node is solid has entered a wall.
 - At the start of the step (`updateContextState()`, where OpenMM's `AndersenThermostat` also changes
-  velocities) every component of its velocity is reversed, as for a no-slip wall.
-- In that step it feels the drag of the wall at rest (u = 0) and the random force.
+  velocities) every component of its velocity is reversed, as for a no-slip wall, if the particle moves
+  into the wall: v.n > 0.
+- n is the gradient of the solid indicator (1 at solid nodes, 0 at fluid nodes), interpolated
+  trilinearly between the eight nodes of the lattice cell that contains the particle. It points from the
+  fluid into the wall. For a wall one node thick, the cell of the particle tells from which side it came.
+- A particle at a solid node that already moves out of the wall keeps its velocity, so it is not sent
+  back into the wall by a second reversal.
+- In the step the particle feels the drag of the wall at rest (u = 0) and the random force.
 - The reaction on the solid node leaves the fluid, since solid nodes do not collide.
-- A particle that is still at a solid node in the next step is reversed again.
 - Uncoupled particles do not see the walls.
 
 **Stability of the explicit drag.** In one step the drag multiplies the velocity of a particle

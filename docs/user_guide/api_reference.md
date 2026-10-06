@@ -160,8 +160,9 @@ implemented on the Reference platform; on the other platforms no force acts on t
 - **Once per step.** The coupling forces are computed once per integration step. Every other force
   evaluation, for example `getState(getForces=True)`, returns the forces of the last step, without new
   random numbers. Before the first step they are zero. The energy of the coupling is zero.
-- **Walls.** A coupled particle whose nearest node is solid has every component of its velocity
-  reversed at the start of the step, as for a no-slip wall. Uncoupled particles do not see the walls.
+- **Walls.** A coupled particle whose nearest node is solid and that moves into the wall has every
+  component of its velocity reversed at the start of the step, as for a no-slip wall. A particle that
+  already moves out of the wall keeps its velocity. Uncoupled particles do not see the walls.
 - **Stability.** In one step the drag multiplies the velocity of a particle relative to the fluid by
   1 - friction*dt. A warning is printed when friction*dt > 1, and the motion is unstable for
   friction*dt >= 2.

@@ -63,6 +63,7 @@ the fluid momentum.
 | Partial coupling | uncoupled particles keep their velocity and feel no force | rounding of OpenMM's Verlet |
 | Force evaluations and seeds | `getState()` before and after every step does not change the trajectory; two runs with seed 0 differ | bitwise |
 | Walls | a coupled particle reaching a solid node: v2 = -v0 (1 - gamma dt)^2; an uncoupled one passes | 1e-14 |
+| Walls, direction | at a wall one node thick, a particle is reversed only if it moves into the wall, from either side | 1e-14 |
 | Restart | checkpoint plus `setFluidState()` at step 13, removal every 5 steps, T = 0 | bitwise |
 | Warning | friction*dt > 1 is reported at Context creation | |
 

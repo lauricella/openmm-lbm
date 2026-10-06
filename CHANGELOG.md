@@ -45,7 +45,8 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
 
 - Particle-fluid coupling on the Reference platform: explicit Euler-Maruyama drag and random force at
   the nearest node, the opposite force on the fluid (summed per node in particle order), only for the
-  particles added to the force; coupled particles reaching a solid node have their velocity reversed;
+  particles added to the force; coupled particles reaching a solid node while moving into the wall have
+  their velocity reversed;
   forces computed once per step and reused by other force evaluations; a random generator owned by the
   force; warning for friction*dt > 1. Tests in `tests/TestLBMCoupling.h`. Documentation:
   `docs/theory.md` section 2, the user guide (two new examples, including a reporter of the full-step

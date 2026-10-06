@@ -51,6 +51,7 @@ private:
     void removeFluidMomentum();
     void coupleParticles(OpenMM::ContextImpl& context);
     int nearestNode(const OpenMM::Vec3& position) const;
+    OpenMM::Vec3 wallNormal(const OpenMM::Vec3& position) const;
     double getGaussianRandom();
     void collideAndStream();
     void bounceBack();

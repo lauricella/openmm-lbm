@@ -190,8 +190,8 @@ void testForceEvaluationsAndSeeds(Platform& platform) {
 }
 
 /**
- * A coupled particle that reaches a solid node has every component of its velocity reversed and feels the drag
- * of a fluid at rest; an uncoupled particle does not see the wall.
+ * A coupled particle that reaches a solid node moving into the wall has every component of its velocity
+ * reversed and feels the drag of a fluid at rest; an uncoupled particle does not see the wall.
  */
 void testWallReflection(Platform& platform) {
     LBMForce* force;
@@ -213,6 +213,31 @@ void testWallReflection(Platform& platform) {
     ASSERT_EQUAL_VEC(-v0*decay*decay, state.getVelocities()[0], 1e-14);
     ASSERT(state.getPositions()[0][1] > 0.25);
     ASSERT_EQUAL_VEC(v0, state.getVelocities()[1], 1e-12);
+    delete system;
+}
+
+/**
+ * A coupled particle at a solid node is reversed only if it moves into the wall: v.n > 0, with n the normal
+ * pointing into the wall.  The wall is the single plane j = 0, so it has fluid on both sides: on the side of
+ * j = 1 its normal is -y, on the side of j = 7 (y < 0 before wrapping) it is +y.
+ */
+void testWallReflectionDirection(Platform& platform) {
+    LBMForce* force;
+    double friction = 1.0;
+    System* system = createCoupledSystem(force, 3, friction, 0.0);
+    force->setSolidNodes(wallPlane(8, 8, 8));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    // All three particles have the plane j = 0 as nearest node.
+    context.setPositions({Vec3(1.1, 0.20, 1.7), Vec3(2.1, -0.10, 1.7), Vec3(3.1, -0.10, 1.7)});
+    vector<Vec3> v0 = {Vec3(0.3, 5.0, 0.1), Vec3(0.3, 5.0, 0.1), Vec3(0.3, -5.0, 0.1)};
+    context.setVelocities(v0);
+    integrator.step(1);
+    vector<Vec3> v1 = context.getState(State::Velocities).getVelocities();
+    double decay = 1.0-friction*fluidDt;
+    ASSERT_EQUAL_VEC(v0[0]*decay, v1[0], 1e-14);      // side j = 1, moving out: kept
+    ASSERT_EQUAL_VEC(-v0[1]*decay, v1[1], 1e-14);     // side j = 7, moving in: reversed
+    ASSERT_EQUAL_VEC(v0[2]*decay, v1[2], 1e-14);      // side j = 7, moving out: kept
     delete system;
 }
 
@@ -293,6 +318,7 @@ void runCouplingTests(Platform& platform) {
     testPartialCoupling(platform);
     testForceEvaluationsAndSeeds(platform);
     testWallReflection(platform);
+    testWallReflectionDirection(platform);
     testRestartWithParticles(platform);
     testFrictionWarning(platform);
 }

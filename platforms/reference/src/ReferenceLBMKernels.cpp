@@ -88,14 +88,16 @@ void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
     stepIndex = context.getStepCount();
     stepPending = true;
 
-    // A coupled particle whose nearest node is solid has entered a wall: every component of its velocity is
-    // reversed, as for a no-slip wall.  This is done here, at the start of the step, where OpenMM's
-    // AndersenThermostat also changes velocities, so that the coupling and the integrator see the new values.
+    // A coupled particle whose nearest node is solid and that moves into the wall, v.n > 0 with n the normal
+    // pointing into the wall, has every component of its velocity reversed, as for a no-slip wall.  A particle
+    // that already moves out of the wall keeps its velocity.  This is done here, at the start of the step,
+    // where OpenMM's AndersenThermostat also changes velocities, so that the coupling and the integrator see
+    // the new values.
     if (!isFluid.empty()) {
         vector<Vec3>& positions = extractPositions(context);
         vector<Vec3>& velocities = extractVelocities(context);
         for (int particle : lattice.particles)
-            if (!isFluid[nearestNode(positions[particle])])
+            if (!isFluid[nearestNode(positions[particle])] && velocities[particle].dot(wallNormal(positions[particle])) > 0)
                 velocities[particle] = -velocities[particle];
     }
 }
@@ -251,6 +253,38 @@ int ReferenceCalcLBMForceKernel::nearestNode(const Vec3& position) const {
         index[k] = ((int) floor(s + 0.5))%size[k];
     }
     return index[0] + lattice.nx*(index[1] + lattice.ny*index[2]);
+}
+
+Vec3 ReferenceCalcLBMForceKernel::wallNormal(const Vec3& position) const {
+    // Gradient of the solid indicator (1 at solid nodes, 0 at fluid nodes), interpolated trilinearly between
+    // the eight nodes of the lattice cell that contains the position.  It points from the fluid into the wall,
+    // also for a wall one node thick, whose side is given by the cell of the position.  It is zero if the
+    // eight nodes are all solid or all fluid.
+    int size[3] = {lattice.nx, lattice.ny, lattice.nz};
+    int index[3][2];
+    double weight[3][2];
+    for (int k = 0; k < 3; k++) {
+        double s = position[k]/lattice.dx;
+        s -= floor(s/size[k])*size[k];
+        double lower = floor(s);
+        index[k][0] = ((int) lower)%size[k];
+        index[k][1] = (index[k][0]+1)%size[k];
+        weight[k][1] = s-lower;
+        weight[k][0] = 1.0-weight[k][1];
+    }
+    double solid[2][2][2];
+    for (int a = 0; a < 2; a++)
+        for (int b = 0; b < 2; b++)
+            for (int c = 0; c < 2; c++)
+                solid[a][b][c] = (isFluid[index[0][a] + lattice.nx*(index[1][b] + lattice.ny*index[2][c])] ? 0.0 : 1.0);
+    Vec3 gradient;
+    for (int a = 0; a < 2; a++)
+        for (int b = 0; b < 2; b++) {
+            gradient[0] += weight[1][a]*weight[2][b]*(solid[1][a][b]-solid[0][a][b]);
+            gradient[1] += weight[0][a]*weight[2][b]*(solid[a][1][b]-solid[a][0][b]);
+            gradient[2] += weight[0][a]*weight[1][b]*(solid[a][b][1]-solid[a][b][0]);
+        }
+    return gradient;
 }
 
 double ReferenceCalcLBMForceKernel::getGaussianRandom() {
