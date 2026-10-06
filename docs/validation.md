@@ -197,6 +197,9 @@ A100) give the same trajectories:
   both plugins draw the same numbers from OpenMM's generator ([theory.md](theory.md), section 2);
   2e-6 in single precision and 5e-6 with OpenCL, whose generator rounds differently.
 - **Bead in a uniform flow** (`particle/uniform_flow.py`, NVE, 400 steps): equal to the 6 printed digits.
+- **Kick of the peptide GRGDSPYS** (`cocomo/kick.py --preset peptide`, COCOMO2 forces, 2000 steps,
+  T = 0, the density of the original script): velocity of the centre of mass within 1e-13 of v0, with
+  CUDA in double precision.
 
 The reference outputs of the old examples (`*.LBLatticeOn.dat`) came from the Langevin scheme of the old
 plugin, in which OpenMM's `LangevinIntegrator` supplies friction and noise (first step v1/v0 =

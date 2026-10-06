@@ -159,6 +159,7 @@ the same parameters, the DragOpenMM plugin in double precision gives the same tr
 | thermal, 300 K, 20000 steps, same seed | CUDA double and mixed | 3e-11 of the largest velocity, including the random force |
 | thermal, 300 K, 20000 steps, same seed | CUDA single, OpenCL | 2e-6 and 5e-6 |
 | uniform flow, 400 steps | CUDA double | equal to the 6 digits printed |
+| protein kick, peptide (COCOMO2), 2000 steps | CUDA double | velocity of the centre of mass 1e-13 of v0; positions equal to the printed digits |
 
 The thermal run can be compared step by step because both plugins draw their random numbers from
 OpenMM's generator in the same order. OpenCL generates them with slightly different rounding from
