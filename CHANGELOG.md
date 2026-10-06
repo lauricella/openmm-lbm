@@ -97,6 +97,15 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   Reference platform to 2e-11 (`test_coupling_agrees_with_reference`). 61 us per step for 110 particles on
   a 30^3 lattice on an NVIDIA A100, against 517 us for the reference library. The warning of the GPU
   platforms is removed.
+- On the GPU platforms the generator of OpenMM is consumed as in the reference library (one float4 per
+  padded atom per step), so that runs with the random force can be compared with it step by step.
+- `examples/`: kick of a bead with and without the fluid, thermalization of beads, a bead in a uniform
+  flow (NVE), a fluid started from a shear wave with saving and loading of the state, and a plotting
+  script. They are ports of the examples of the DragOpenMM plugin with the Euler-Maruyama coupling, and
+  reproduce its trajectories (`examples/README.md`). A Python test runs each of them for a few steps.
+- User guide: step-by-step installation of conda, OpenMM and the plugin for beginners
+  (`docs/user_guide/installation.md`), and a tutorial that teaches OpenMM and the plugin through the
+  examples (`docs/user_guide/tutorial.md`).
 
 ### Not yet implemented
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

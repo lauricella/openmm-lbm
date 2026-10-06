@@ -180,3 +180,26 @@ OpenCL in double precision, 1e-8 with OpenCL in mixed precision and 3e-7 to 6e-7
 every step, a step takes 61 us with CUDA in mixed precision (51 us in single, 55 us in double) and 64 us
 with OpenCL in mixed precision, on an NVIDIA A100 with OpenMM 8.6.1. The CUDA library of the DragOpenMM
 project takes 517 us for the same system.
+
+## Examples compared with the DragOpenMM plugin
+
+The scripts of `examples/` are ports of the examples of the DragOpenMM plugin, with the Euler-Maruyama
+coupling and `VerletIntegrator`. Run with the same parameters, the DragOpenMM plugin (reference library
+in double precision, CUDA platform in double precision, OpenMM 8.2) and openmm-lbm (OpenMM 8.6.1, NVIDIA
+A100) give the same trajectories:
+
+- **Kick of a bead** (`particle/kick.py`, 100^3 nodes, 2000 steps, T = 0): velocities within 1e-13 of
+  v0 and positions within 1e-11 of the distance travelled, with CUDA in double and mixed precision;
+  5e-8 in single precision. With the parameters of the alanine bead (30^3 nodes, 100 steps) the
+  Reference platform agrees within 7e-14.
+- **Thermalization of a bead** (`particle/thermal.py`, 300 K, 20000 steps, same seed): velocities within
+  3e-11 of their largest value with CUDA in double and mixed precision, random force included, because
+  both plugins draw the same numbers from OpenMM's generator ([theory.md](theory.md), section 2);
+  2e-6 in single precision and 5e-6 with OpenCL, whose generator rounds differently.
+- **Bead in a uniform flow** (`particle/uniform_flow.py`, NVE, 400 steps): equal to the 6 printed digits.
+
+The reference outputs of the old examples (`*.LBLatticeOn.dat`) came from the Langevin scheme of the old
+plugin, in which OpenMM's `LangevinIntegrator` supplies friction and noise (first step v1/v0 =
+exp(-gamma dt)); they were regenerated with the Euler-Maruyama scheme for this comparison
+(v1/v0 = 1 - gamma dt).
+

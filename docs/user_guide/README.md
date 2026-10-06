@@ -8,14 +8,22 @@ This guide explains how to use openmm-lbm from Python with OpenMM:
 
 The model itself is described in [theory.md](../theory.md).
 
+New to OpenMM? Start from the [installation](installation.md), which installs everything step by
+step, and continue with the [tutorial](tutorial.md).
+
 ## Contents
 
-1. [Getting started](getting_started.md): checking the installation, a first simulation, units,
+1. [Installation](installation.md): conda, OpenMM and the plugin, step by step from nothing, with the
+   tests and a first run; computing clusters; installation problems.
+2. [Tutorial](tutorial.md): the pieces of an OpenMM simulation, what `LBMForce` adds, and four lessons
+   with the scripts of [`examples/`](../../examples/README.md).
+3. [Getting started](getting_started.md): checking the installation, a first simulation, units,
    platforms.
-2. [The lattice](lattice.md): geometry, node indexing and NumPy arrays, units, relaxation time, Mach
+4. [The lattice](lattice.md): geometry, node indexing and NumPy arrays, units, relaxation time, Mach
    number, removal of the fluid momentum, initial state.
-3. [API reference](api_reference.md): every method of `LBMForce`, with units, defaults and errors.
-4. [Examples](examples.md): complete scripts.
+5. [API reference](api_reference.md): every method of `LBMForce`, with units, defaults and errors.
+6. [Examples](examples.md): short complete scripts on specific topics (the longer scripts are in
+   [`examples/`](../../examples/README.md)).
    - A channel flow between two walls.
    - A particle kicked in the fluid.
    - The temperature of coupled particles.
@@ -23,7 +31,7 @@ The model itself is described in [theory.md](../theory.md).
    - Saving and restoring the fluid.
    - Serialization.
    - `openmm.app.Simulation` with a reporter for the fluid.
-5. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
+7. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
 
 ## What works in this version
 

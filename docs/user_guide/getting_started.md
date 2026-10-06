@@ -6,7 +6,8 @@ each step. The [lattice](lattice.md) page explains how to choose the parameters,
 
 ## Checking the installation
 
-Build and install the plugin as described in the [README](../../README.md#building). The module
+Build and install the plugin as described in the [installation guide](installation.md) (step by step)
+or in the [README](../../README.md#building) (short version). The module
 `openmmlbm` must then import in the same Python environment as OpenMM:
 
 ```python
