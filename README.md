@@ -14,7 +14,9 @@ project and with each other (see the
 ## Building
 
 The plugin is built like other OpenMM plugins, against an existing OpenMM installation, and is
-usually installed into that same installation. With OpenMM from conda-forge:
+usually installed into that same installation. The [installation guide](docs/user_guide/installation.md)
+does it step by step from nothing, for users new to conda and OpenMM. In short, with OpenMM from
+conda-forge:
 
 ```bash
 conda create -n lbm -c conda-forge openmm=8.6 cmake make swig numpy cxx-compiler pytest
@@ -78,13 +80,18 @@ The state of the fluid is not part of OpenMM checkpoints: save and restore it wi
 
 ## Documentation
 
-- [docs/user_guide/](docs/user_guide/README.md): user guide. How to use the plugin from Python with
-  OpenMM: every method of `LBMForce` explained, how to choose the lattice parameters, and complete
-  examples (channel flow between walls, monitoring, restarts, serialization, `openmm.app.Simulation`).
+- [docs/user_guide/](docs/user_guide/README.md): user guide. Installation step by step, a tutorial
+  for newcomers to OpenMM, every method of `LBMForce` explained, how to choose the lattice parameters,
+  and complete examples (channel flow between walls, monitoring, restarts, serialization,
+  `openmm.app.Simulation`).
+- [examples/](examples/README.md): example scripts (a kicked bead, thermalization, a bead in a uniform
+  flow, a fluid started from a shear wave), compared with the DragOpenMM plugin.
 - [docs/theory.md](docs/theory.md): model, units and conventions.
 - [docs/architecture.md](docs/architecture.md): structure of the code.
 - [docs/validation.md](docs/validation.md): tests, tolerances and measured values.
 - [CONTRIBUTING.md](CONTRIBUTING.md): rules for contributors.
+
+An artificial intelligence agent was used to produce the documentation.
 
 ## Authors
 
