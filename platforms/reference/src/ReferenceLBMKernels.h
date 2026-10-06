@@ -59,8 +59,12 @@ private:
     void checkMachNumber();
     double computeMachNumber() const;
     LBMLatticeParameters lattice;
-    /** Populations, stored as f[q*numNodes + node]. */
+    /** Deviations of the populations from the rest equilibrium at lattice density 1, f_q - w_q, stored as
+        [q*numNodes + node].  They keep the precision of small signals, and they are the fluid state of
+        getFluidState() and setFluidState(), so that saving and restoring the fluid is exact. */
     std::vector<double> populations;
+    /** Deviation of the density from 1, rho - 1, at every node, from the moments of the current step. */
+    std::vector<double> densityDeviation;
     /** Moments of the current step: density, momentum j = rho*u (3 per node), non-equilibrium second moment
         (xx, yy, zz, xy, xz, yz per node) and force density (3 per node), all in lattice units. */
     std::vector<double> rho, momentum, piNeq, forceDensity;

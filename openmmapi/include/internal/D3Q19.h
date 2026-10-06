@@ -45,6 +45,20 @@ public:
         }
     }
     /**
+     * Compute the deviation of the equilibrium from the rest equilibrium at lattice density 1,
+     *   feq_q - w_q = w_q [drho + rho (c.u/cs^2 + (c.u)^2/(2 cs^4) - u.u/(2 cs^2))],
+     * for the density rho = 1 + drho and the velocity (ux, uy, uz).  The plugin stores the populations as
+     * deviations f_q - w_q from the rest equilibrium, so that small signals keep their full precision.
+     */
+    static void equilibriumDeviation(double drho, double ux, double uy, double uz, double dfeq[19]) {
+        double rho = 1.0 + drho;
+        double uu = ux*ux + uy*uy + uz*uz;
+        for (int q = 0; q < 19; q++) {
+            double cu = cx[q]*ux + cy[q]*uy + cz[q]*uz;
+            dfeq[q] = w[q]*(drho + rho*(3.0*cu + 4.5*cu*cu - 1.5*uu));
+        }
+    }
+    /**
      * Second-order Hermite polynomial H2(c_q) = c_q c_q - cs^2 I, as the six components xx, yy, zz, xy,
      * xz, yz.
      */
@@ -70,6 +84,24 @@ public:
         for (int q = 0; q < 19; q++) {
             hermite2(q, h);
             double fneq = f[q]-feq[q];
+            for (int k = 0; k < 6; k++)
+                pi[k] += h[k]*fneq;
+        }
+    }
+    /**
+     * The same moment computed from the deviations df_q = f_q - w_q of the populations from the rest
+     * equilibrium, with drho = sum_q df_q and j = sum_q c_q df_q.  The rest equilibrium cancels in f - feq, so
+     * the difference is taken between small numbers.
+     */
+    static void nonEquilibriumMomentFromDeviation(const double df[19], double drho, double jx, double jy, double jz, double pi[6]) {
+        double rho = 1.0 + drho;
+        double dfeq[19], h[6];
+        equilibriumDeviation(drho, jx/rho, jy/rho, jz/rho, dfeq);
+        for (int k = 0; k < 6; k++)
+            pi[k] = 0.0;
+        for (int q = 0; q < 19; q++) {
+            hermite2(q, h);
+            double fneq = df[q]-dfeq[q];
             for (int k = 0; k < 6; k++)
                 pi[k] += h[k]*fneq;
         }

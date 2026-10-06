@@ -10,7 +10,7 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `openmmapi/include/LBMForce.h`, `openmmapi/src/LBMForce.cpp` | public API: parameters, coupled particles, access to the fluid |
 | `openmmapi/include/LBMKernels.h` | `CalcLBMForceKernel`, the interface every platform implements, and `LBMLatticeParameters` |
 | `openmmapi/include/internal/LBMForceImpl.h`, `openmmapi/src/LBMForceImpl.cpp` | checks the setup and converts all parameters to lattice units once, for all platforms |
-| `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing (host code) |
+| `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium and its deviation from the rest equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing (host code) |
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform, and the tests |
@@ -58,7 +58,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
 - **Unit conversion in one place.** It happens only in `LBMForceImpl::computeLatticeParameters()`;
   kernels receive lattice units.
 - **Same conventions everywhere.** Every platform uses the population ordering and the node index of
-  `D3Q19.h`, so `getFluidState()` is portable across platforms.
+  `D3Q19.h`, and stores the populations as deviations f_q - w_q from the rest equilibrium, so
+  `getFluidState()` is portable across platforms.
 - **Precision.** The fluid is stored in the "mixed" type of the platform (float in single precision,
   double otherwise); Reference uses double.
 - **No atomic operations in the plugin kernels**, and the fluid is advanced once per step (see

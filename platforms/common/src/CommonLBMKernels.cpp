@@ -61,14 +61,15 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     density.initialize(cc, numNodes, elementSize, "lbmDensity");
     momentum.initialize(cc, 3*numNodes, elementSize, "lbmMomentum");
 
-    // The fluid starts at equilibrium, with lattice density 1 and the initial velocity.
+    // The fluid starts at equilibrium, with lattice density 1 and the initial velocity.  As on the Reference
+    // platform, the populations are stored as deviations from the rest equilibrium, f_q - w_q.
 
     vector<double> f(D3Q19::numVelocities*numNodes);
-    double feq[D3Q19::numVelocities];
-    D3Q19::equilibrium(1.0, lattice.initialVelocity[0], lattice.initialVelocity[1], lattice.initialVelocity[2], feq);
+    double dfeq[D3Q19::numVelocities];
+    D3Q19::equilibriumDeviation(0.0, lattice.initialVelocity[0], lattice.initialVelocity[1], lattice.initialVelocity[2], dfeq);
     for (int q = 0; q < D3Q19::numVelocities; q++)
         for (int node = 0; node < numNodes; node++)
-            f[q*numNodes+node] = feq[q];
+            f[q*numNodes+node] = dfeq[q];
     populations.upload(f, true);
 
     // Compile the kernels.

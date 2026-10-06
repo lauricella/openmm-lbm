@@ -167,13 +167,11 @@ void testFluidStateRoundTrip(Platform& platform) {
     ASSERT_EQUAL(19*numNodes, state.size());
     double tol = getStorageTolerance(platform);
 
-    // At rest with lattice density 1, the populations are the lattice weights.
+    // At rest with lattice density 1, the populations are the lattice weights: the state, made of the
+    // deviations f - w from the rest equilibrium, is zero.
 
-    for (int node = 0; node < numNodes; node++) {
-        ASSERT_EQUAL_TOL(1.0/3.0, state[node], tol);
-        ASSERT_EQUAL_TOL(1.0/18.0, state[numNodes+node], tol);
-        ASSERT_EQUAL_TOL(1.0/36.0, state[18*numNodes+node], tol);
-    }
+    for (int i = 0; i < (int) state.size(); i++)
+        ASSERT_EQUAL_TOL(0.0, state[i], tol);
 
     // Move some mass from the rest population to population 1 (+x) at node 5: the density stays the
     // same and the fluid at that node moves along +x.

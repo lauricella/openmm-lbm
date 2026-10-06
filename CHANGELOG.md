@@ -64,6 +64,11 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   5e-13, derived quantities within 2e-5. Measured self-mobility as a function of tau
   (`docs/theory.md`, section 2), and a warning for coupled particles when tau > 1.7. Equipartition test.
 
+- The populations are stored as deviations from the rest equilibrium, f_q - w_q, on all platforms, so
+  that small hydrodynamic signals keep the full precision of the type. The fluid state of
+  `getFluidState()`/`setFluidState()` is made of these deviations (a population is the value plus w_q);
+  saving and restoring it remains exact.
+
 ### Not yet implemented
 - Fluid update, solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

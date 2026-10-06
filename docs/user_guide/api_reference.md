@@ -243,9 +243,11 @@ u = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))   # shape (
 Together they save and restore the fluid, which is not part of OpenMM checkpoints (see the
 [restart example](examples.md#saving-and-restoring-the-fluid)).
 
-The state holds the 19 lattice populations of each node in lattice units, stored as f[q*numNodes +
-node] (see [theory.md](../theory.md#4-storage-and-ordering-implemented)). Treat it as opaque unless you
-know the model. For large lattices the list is long: convert it at once to a NumPy array, for example
+The state holds, for the 19 lattice populations of each node, their deviations from the rest
+equilibrium, f_q - w_q, in lattice units, stored as [q*numNodes + node]. A population is the value plus
+the weight w_q: 1/3 for q = 0, 1/18 for q = 1 to 6, 1/36 for q = 7 to 18 (see
+[theory.md](../theory.md#4-storage-and-ordering-implemented)). At rest the state is zero. Treat it as
+opaque unless you know the model. Saving and restoring it is exact. For large lattices the list is long: convert it at once to a NumPy array, for example
 `np.array(force.getFluidState(context))`; with 64^3 nodes it takes 40 MB.
 
 ### `getFluidMachNumber(context)`

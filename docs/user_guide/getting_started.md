@@ -61,7 +61,7 @@ density, velocity = force.getFluidFields(context)
 rho = np.array(density.value_in_unit(unit.dalton/unit.nanometer**3))     # shape (512,)
 u = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))     # shape (512, 3)
 print('mean density  %.3f Da/nm^3' % rho.mean())
-print('mean velocity', u.mean(axis=0), 'nm/ps')
+print('mean velocity', np.round(u.mean(axis=0), 6) + 0.0, 'nm/ps')   # rounded: y and z are 0 to 1e-18
 print('Mach number   %.5f' % force.getFluidMachNumber(context))
 ```
 

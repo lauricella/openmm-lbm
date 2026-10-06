@@ -37,7 +37,10 @@ System* createFluidSystem(LBMForce*& force, int nx, int ny, int nz, double tau) 
     return system;
 }
 
-/** Equilibrium state with the given lattice density and velocity at every node. */
+/**
+ * Equilibrium state with the given lattice density and velocity at every node, in the form of the fluid state:
+ * the deviations f_q - w_q of the populations from the rest equilibrium.
+ */
 vector<double> uniformState(int numNodes, double rho, Vec3 u) {
     vector<double> state(19*numNodes);
     double w[19] = {1.0/3.0, 1.0/18.0, 1.0/18.0, 1.0/18.0, 1.0/18.0, 1.0/18.0, 1.0/18.0, 1.0/36.0, 1.0/36.0, 1.0/36.0,
@@ -47,20 +50,20 @@ vector<double> uniformState(int numNodes, double rho, Vec3 u) {
     int cz[19] = {0, 0,  0, 0,  0, 1, -1, 0,  0,  0,  0, 1, -1, -1,  1, 1, -1,  1, -1};
     for (int q = 0; q < 19; q++) {
         double cu = cx[q]*u[0] + cy[q]*u[1] + cz[q]*u[2];
-        double feq = w[q]*rho*(1.0 + 3.0*cu + 4.5*cu*cu - 1.5*u.dot(u));
+        double dfeq = w[q]*((rho-1.0) + rho*(3.0*cu + 4.5*cu*cu - 1.5*u.dot(u)));
         for (int node = 0; node < numNodes; node++)
-            state[q*numNodes+node] = feq;
+            state[q*numNodes+node] = dfeq;
     }
     return state;
 }
 
-/** Total mass and momentum of a state, in lattice units. */
+/** Total mass and momentum of a fluid state (deviations f - w), in lattice units: mass = numNodes + sum (f - w). */
 void totalMoments(const vector<double>& state, double& mass, Vec3& momentum) {
     int cx[19] = {0, 1, -1, 0,  0, 0,  0, 1, -1,  1, -1, 0,  0,  0,  0, 1, -1, -1,  1};
     int cy[19] = {0, 0,  0, 1, -1, 0,  0, 1, -1, -1,  1, 1, -1,  1, -1, 0,  0,  0,  0};
     int cz[19] = {0, 0,  0, 0,  0, 1, -1, 0,  0,  0,  0, 1, -1, -1,  1, 1, -1,  1, -1};
     int numNodes = state.size()/19;
-    mass = 0;
+    mass = numNodes;
     momentum = Vec3();
     for (int q = 0; q < 19; q++)
         for (int node = 0; node < numNodes; node++) {
@@ -101,7 +104,7 @@ void testFluidConservation(Platform& platform) {
     vector<double> state;
     force->getFluidState(context, state);
     for (int i = 0; i < (int) state.size(); i++)
-        state[i] *= 1.0 + 0.01*sin(1.3*i + 0.7*(i%11));
+        state[i] += 1e-3*sin(1.3*i + 0.7*(i%11));
     force->setFluidState(context, state);
     double mass0, mass1;
     Vec3 p0, p1;

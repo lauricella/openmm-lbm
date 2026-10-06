@@ -277,7 +277,8 @@ so it is rejected.
 ## 4. Storage and ordering (implemented)
 
 - **Node index.** Node (i, j, k) has index i + nx (j + ny k).
-- **Populations.** Stored as f[q numNodes + node], with the velocity set of
+- **Populations.** Stored as deviations from the rest equilibrium, df_q = f_q - w_q, at [q numNodes + node],
+  with the velocity set of
   `openmmapi/include/internal/D3Q19.h`:
 
 | q | c_q | weight |
@@ -293,7 +294,21 @@ so it is rejected.
 | 15, 16 | (1, 0, 1), (-1, 0, -1) | 1/36 |
 | 17, 18 | (-1, 0, 1), (1, 0, -1) | 1/36 |
 
-- **Fluid state.** `getFluidState()` returns the populations in this layout, in lattice units.
+- **Deviations from the rest equilibrium.** The rest equilibrium at lattice density 1 is f_q = w_q, so the
+  populations are close to the weights, and the hydrodynamic signal is a small difference
+  df_q = f_q - w_q.
+  - Storing f_q itself would keep that signal only in the last digits of numbers of order 0.05. With a
+    slow flow on a large lattice the total momentum then drifts by rounding: 3e-5 of the momentum with
+    64^3 nodes, 20000 steps and a fluid velocity of 5e-7 nm/ps, in double precision.
+  - Storing df_q keeps the full precision of the type for the signal.
+  - The moments follow from the sums of the weights: rho = 1 + sum df, j = sum c df (sum w = 1,
+    sum w c = 0). The non-equilibrium part df - dfeq is unchanged, with dfeq = feq - w computed directly
+    (`D3Q19::equilibriumDeviation`).
+  - Bounce-back copies df unchanged, since opposite directions have the same weight. The momentum
+    exchange uses the full f = df + w, whose part w carries the static pressure on the walls.
+- **Fluid state.** `getFluidState()` returns the deviations df_q in this layout, in lattice units: a
+  population is the value plus w_q. Saving and restoring them is exact, so a restarted run is identical
+  to an uninterrupted one.
 - **Initial state.** A new Context starts from the equilibrium at lattice density 1 and the initial
   velocity.
 
@@ -306,8 +321,9 @@ The fluid (populations and moments) uses the "mixed" type of the platform:
 
 The Reference platform always uses double precision.
 
-Weak uniform forces and the conservation of momentum are limited by single precision (relative
-resolution about 1e-7 on populations of order 0.05), so `mixed` is recommended for production.
+With the deviations df_q the resolution of single precision applies to the signal itself rather than to
+the populations of order 0.05, which matters most for weak forces and slow flows. `mixed` is still
+recommended for production.
 
 ## 6. Stability checks (implemented)
 

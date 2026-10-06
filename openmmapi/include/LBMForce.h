@@ -209,7 +209,9 @@ public:
     /**
      * Get the complete state of the fluid, so that it can be saved and restored with setFluidState().
      * The state of the fluid is not part of OpenMM checkpoints.  The content of the vector is internal
-     * to the plugin (lattice populations in lattice units) and should be treated as opaque.
+     * to the plugin and should be treated as opaque: it holds the deviations f_q - w_q of the lattice
+     * populations from the rest equilibrium (lattice density 1, at rest), in lattice units, stored as
+     * [q*numNodes + node].  Saving and restoring them is exact.
      *
      * @param context     the Context from which to get the state
      * @param[out] state  the state of the fluid

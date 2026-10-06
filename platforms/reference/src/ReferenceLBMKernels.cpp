@@ -38,21 +38,23 @@ static vector<Vec3>& extractForces(ContextImpl& context) {
 void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForce& force, const LBMLatticeParameters& lattice) {
     this->lattice = lattice;
 
-    // The fluid starts at equilibrium, with lattice density 1 and the initial velocity.
+    // The fluid starts at equilibrium, with lattice density 1 and the initial velocity.  The populations are
+    // stored as deviations from the rest equilibrium, f_q - w_q.
 
     int numNodes = lattice.getNumNodes();
     populations.resize(D3Q19::numVelocities*numNodes);
-    double feq[D3Q19::numVelocities];
-    D3Q19::equilibrium(1.0, lattice.initialVelocity[0], lattice.initialVelocity[1], lattice.initialVelocity[2], feq);
+    double dfeq[D3Q19::numVelocities];
+    D3Q19::equilibriumDeviation(0.0, lattice.initialVelocity[0], lattice.initialVelocity[1], lattice.initialVelocity[2], dfeq);
     for (int q = 0; q < D3Q19::numVelocities; q++)
         for (int node = 0; node < numNodes; node++)
-            populations[q*numNodes+node] = feq[q];
+            populations[q*numNodes+node] = dfeq[q];
     rho.resize(numNodes);
+    densityDeviation.resize(numNodes);
     momentum.resize(3*numNodes);
     piNeq.resize(6*numNodes);
     forceDensity.resize(3*numNodes);
 
-    // Solid nodes hold no fluid: their populations start at zero.
+    // Solid nodes hold no fluid: their populations start at zero, that is at the deviation -w_q.
 
     isFluid.clear();
     if (!lattice.solidNodes.empty()) {
@@ -60,7 +62,7 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
         for (int node : lattice.solidNodes) {
             isFluid[node] = 0;
             for (int q = 0; q < D3Q19::numVelocities; q++)
-                populations[q*numNodes+node] = 0.0;
+                populations[q*numNodes+node] = -D3Q19::w[q];
         }
     }
 
@@ -165,26 +167,30 @@ void ReferenceCalcLBMForceKernel::computeMoments() {
     for (int node = 0; node < numNodes; node++) {
         if (!isFluid.empty() && !isFluid[node]) {
             // No fluid: zero density and momentum, so the node does not enter the momentum removal.
-            rho[node] = 0;
+            rho[node] = densityDeviation[node] = 0;
             for (int k = 0; k < 3; k++)
                 momentum[3*node+k] = forceDensity[3*node+k] = 0;
             for (int k = 0; k < 6; k++)
                 piNeq[6*node+k] = 0;
             continue;
         }
-        double r = 0, jx = 0, jy = 0, jz = 0;
+        // From the deviations df_q = f_q - w_q: rho = 1 + sum df_q and j = sum c_q df_q, since sum w_q = 1 and
+        // sum w_q c_q = 0.
+        double dr = 0, jx = 0, jy = 0, jz = 0;
         for (int q = 0; q < D3Q19::numVelocities; q++) {
             f[q] = populations[q*numNodes+node];
-            r += f[q];
+            dr += f[q];
             jx += D3Q19::cx[q]*f[q];
             jy += D3Q19::cy[q]*f[q];
             jz += D3Q19::cz[q]*f[q];
         }
+        double r = 1.0 + dr;
         rho[node] = r;
+        densityDeviation[node] = dr;
         momentum[3*node] = jx;
         momentum[3*node+1] = jy;
         momentum[3*node+2] = jz;
-        D3Q19::nonEquilibriumMoment(f, r, jx, jy, jz, &piNeq[6*node]);
+        D3Q19::nonEquilibriumMomentFromDeviation(f, dr, jx, jy, jz, &piNeq[6*node]);
 
         // A body acceleration g acts on the fluid as the force density rho*g.
 
@@ -318,11 +324,12 @@ double ReferenceCalcLBMForceKernel::getGaussianRandom() {
 void ReferenceCalcLBMForceKernel::collideAndStream() {
     // Regularized collision with Guo forcing,
     //   f_q(x + c_q) = feq_q(rho, u) + (1 - omega) fneq_q(Pi_neq) + S_q(u, F)/2,  u = (j + F/2)/rho,
-    // written in push form: each population is computed from the moments of its own node only.
+    // written in push form: each population is computed from the moments of its own node only.  The stored
+    // deviation f_q - w_q uses the deviation of the equilibrium, feq_q - w_q.
     int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
     int numNodes = lattice.getNumNodes();
     double omega = lattice.omega;
-    double feq[D3Q19::numVelocities], fneq[D3Q19::numVelocities], s[D3Q19::numVelocities];
+    double dfeq[D3Q19::numVelocities], fneq[D3Q19::numVelocities], s[D3Q19::numVelocities];
     for (int k = 0; k < nz; k++)
         for (int j = 0; j < ny; j++)
             for (int i = 0; i < nx; i++) {
@@ -334,14 +341,14 @@ void ReferenceCalcLBMForceKernel::collideAndStream() {
                 double ux = (momentum[3*node] + 0.5*F[0])/r;
                 double uy = (momentum[3*node+1] + 0.5*F[1])/r;
                 double uz = (momentum[3*node+2] + 0.5*F[2])/r;
-                D3Q19::equilibrium(r, ux, uy, uz, feq);
+                D3Q19::equilibriumDeviation(densityDeviation[node], ux, uy, uz, dfeq);
                 D3Q19::regularizedNonEquilibrium(&piNeq[6*node], fneq);
                 D3Q19::guoForcing(ux, uy, uz, F[0], F[1], F[2], s);
                 for (int q = 0; q < D3Q19::numVelocities; q++) {
                     int di = (i + D3Q19::cx[q] + nx)%nx;
                     int dj = (j + D3Q19::cy[q] + ny)%ny;
                     int dk = (k + D3Q19::cz[q] + nz)%nz;
-                    populations[q*numNodes + di + nx*(dj + ny*dk)] = feq[q] + (1.0-omega)*fneq[q] + 0.5*s[q];
+                    populations[q*numNodes + di + nx*(dj + ny*dk)] = dfeq[q] + (1.0-omega)*fneq[q] + 0.5*s[q];
                 }
             }
 }
@@ -350,6 +357,8 @@ void ReferenceCalcLBMForceKernel::bounceBack() {
     // Halfway bounce-back: the population that streamed from the fluid node s + c_q into the solid node s,
     // moving along -c_q, returns to s + c_q moving along c_q.  The wall lies halfway between the two nodes.
     // Momentum exchange (Ladd 1994): on each such link the wall at rest receives the momentum f (-c_q) - f c_q.
+    // The stored deviations f - w are copied as they are, since opposite directions have the same weight; the
+    // momentum exchange uses the full population f = (f - w) + w, whose part w carries the static pressure.
     int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
     int numNodes = lattice.getNumNodes();
     Vec3 exchanged;
@@ -360,10 +369,10 @@ void ReferenceCalcLBMForceKernel::bounceBack() {
             int dj = (j + D3Q19::cy[q] + ny)%ny;
             int dk = (k + D3Q19::cz[q] + nz)%nz;
             int target = di + nx*(dj + ny*dk);
-            double f = populations[D3Q19::opposite[q]*numNodes + node];
-            populations[q*numNodes + target] = f;
+            double df = populations[D3Q19::opposite[q]*numNodes + node];
+            populations[q*numNodes + target] = df;
             if (isFluid[target])
-                exchanged -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*f);
+                exchanged -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*(df + D3Q19::w[q]));
         }
     }
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
@@ -386,7 +395,7 @@ void ReferenceCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<do
             velocity[node] = Vec3();
             continue;
         }
-        double r = 0, jx = 0, jy = 0, jz = 0;
+        double r = 1.0, jx = 0, jy = 0, jz = 0;            // from the deviations f - w
         for (int q = 0; q < D3Q19::numVelocities; q++) {
             double f = populations[q*numNodes+node];
             r += f;
@@ -414,7 +423,7 @@ double ReferenceCalcLBMForceKernel::computeMachNumber() const {
     for (int node = 0; node < numNodes; node++) {
         if (!isFluid.empty() && !isFluid[node])
             continue;
-        double r = 0, jx = 0, jy = 0, jz = 0;
+        double r = 1.0, jx = 0, jy = 0, jz = 0;            // from the deviations f - w
         for (int q = 0; q < D3Q19::numVelocities; q++) {
             double f = populations[q*numNodes+node];
             r += f;
@@ -428,6 +437,7 @@ double ReferenceCalcLBMForceKernel::computeMachNumber() const {
 }
 
 void ReferenceCalcLBMForceKernel::getFluidState(ContextImpl& context, vector<double>& state) {
+    // The state is the stored deviations f_q - w_q: saving and restoring them is exact.
     state = populations;
 }
 
