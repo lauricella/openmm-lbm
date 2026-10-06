@@ -4,11 +4,17 @@ Tests of openmm-lbm, what each one checks, its tolerance and the values measured
 `ctest` (one executable per platform, in `platforms/*/tests`); the Python tests run with `pytest` in
 `python/tests`.
 
-## Fluid on its own (`tests/TestLBMFluid.h`, Reference platform)
+## Fluid on its own (`tests/TestLBMFluid.h`, all platforms)
 
 The fluid tests use no coupled particles. The lattice spacing is 0.5 nm, the time step 0.01 ps and the
 density 602.2 Da/nm^3; the viscosity is chosen to give the relaxation time tau of each test. The momentum
 removal is off unless stated.
+- `runFluidTests()` runs on every platform, in the `single`, `mixed` and `double` precision modes. The
+  tolerances below hold on the Reference platform and in `mixed` and `double` precision; in `single`
+  precision the tolerances of 1e-12 and below become 2e-6, the resolution of the stored type
+  (`getFluidTolerance()`).
+- `runWallTests()` (`testSolidNodeChecks`, `testPoiseuille`, `testWallConservation`) runs on the Reference
+  platform, until the solid nodes are ported to the others.
 
 | Test | Setup | Check | Tolerance |
 |---|---|---|---|
@@ -119,10 +125,26 @@ built in double precision.
   prefactor of 1 - omega/2 instead of 1/2 changes the momentum input by 4.6% at tau = 1.102, and
   shifting the velocity instead of the momentum by half a force changes it by 1% at rho0 = 0.98.
 
+## GPU platforms against the Reference platform: fluid
+
+The Python test `test_fluid_agrees_with_reference` runs the same fluid on the Reference platform and on
+each available GPU platform: 6x5x4 nodes, tau = 0.8, populations perturbed by up to 1e-3, a body force and
+the removal of the fluid momentum every third step, 40 steps. The largest difference of the fluid states,
+relative to the largest deviation |f - w|, must be below 1e-12 in `mixed` and `double` precision.
+Measured on an NVIDIA A100 with OpenMM 8.6.1:
+
+| Platform | Precision | 40 steps | 1000 steps |
+|---|---|---|---|
+| CUDA | mixed, double | 1.8e-15 | 2.8e-15 |
+| CUDA | single | 9.1e-7 | 1.3e-5 |
+| OpenCL | mixed, double | 1.8e-15 | 7.6e-15 |
+| OpenCL | single | 1.1e-6 | 2.7e-5 |
+
+The two platforms are not identical bit for bit: the GPU compilers contract multiplications and additions
+into fused multiply-adds. Each GPU platform is deterministic: the removal of the momentum and the Mach
+number use reductions in a fixed order, without atomic operations, so two runs give identical results.
+
 ## Planned
 
-- The same fluid tests on the CUDA, OpenCL and HIP platforms, in single, mixed and double precision.
-- Equivalence with the reference library for the coupling, at T = 0 in double precision: the
-  deterministic tests of its validation campaign (first step and reaction, co-moving particle,
-  nearest-node artefacts, kick, pair mobility, composite sphere) and the mobility of a dragged particle
-  as a function of tau and box size.
+- The walls and the coupling of the particles on the CUDA, OpenCL and HIP platforms, with the same tests
+  as on the Reference platform and a comparison with it at T = 0.

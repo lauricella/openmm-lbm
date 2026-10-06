@@ -5,7 +5,7 @@ lattice units, and the conventions every platform must follow. Each section says
 already implemented (version 0.1.0) or still to be implemented; the target scheme is the one of the
 CUDA lattice Boltzmann library of the DragOpenMM project, which this plugin reproduces.
 
-## 1. Fluid model (implemented on the Reference platform)
+## 1. Fluid model (implemented on all platforms)
 
 The fluid is a D3Q19 lattice Boltzmann model, weakly compressible:
 
@@ -49,7 +49,12 @@ The update is thread-safe and uses a single copy of the populations:
 2. A second kernel reads only these moments at a node and writes the 19 post-collision populations
    to the neighbouring nodes (push streaming).
 
-Each population of the destination is written by exactly one thread.
+Each population of the destination is written by exactly one thread. The removal of the fluid momentum
+sits between the two kernels; on the CUDA, OpenCL and HIP platforms its sums are reduced in two stages
+(by work group, then over the work groups in a fixed order), without atomic operations, so that runs are
+reproducible. The kernels of these platforms (`platforms/common/src/kernels/lbmFluid.cc`) repeat the
+arithmetic of the Reference platform; they differ from it only by rounding, since the GPU compilers
+contract multiplications and additions into fused multiply-adds.
 
 ### Solid nodes (implemented on the Reference platform)
 
@@ -357,8 +362,8 @@ range. The plugin checks both.
 - `getFluidMachNumber(context)` returns the current value, for monitoring.
 - The check runs after the lattice steps whose number is a multiple of N, with the steps numbered by
   the step count of the Context, as for the momentum removal. On the CUDA, OpenCL and HIP
-  platforms it will run when the fluid update is ported there, with a two-stage reduction and no atomic
-  operations, like the removal of the fluid momentum; `getFluidMachNumber()` already works there.
+  platforms the maximum is taken by work group on the device and then over the work groups on the host,
+  without atomic operations.
 
 **Why 0.3.** It is the usual limit of the incompressible approximation: density fluctuations scale
 as Ma^2, about 9% at Ma = 0.3. In addition, the second-order equilibrium of D3Q19 lacks the u^3

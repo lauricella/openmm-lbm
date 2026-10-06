@@ -6,6 +6,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "TestLBMForce.h"
+#include "TestLBMFluid.h"
 
 extern "C" OPENMM_EXPORT void registerLBMHipKernelFactories();
 
@@ -16,6 +17,7 @@ int main(int argc, char* argv[]) {
         if (argc > 1)
             platform.setPropertyDefaultValue("Precision", string(argv[1]));
         runPlatformTests(platform);
+        runFluidTests(platform);
     }
     catch (const exception& e) {
         cout << "exception: " << e.what() << endl;

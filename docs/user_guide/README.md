@@ -31,13 +31,13 @@ The model itself is described in [theory.md](../theory.md).
 |---|---|---|
 | Parameters, checks at Context creation, serialization | yes | yes |
 | Reading and writing the fluid: `getFluidFields()`, `getFluidState()`, `setFluidState()`, `getFluidMachNumber()` | yes | yes |
-| Fluid update: collision, streaming, body force, removal of the fluid momentum, Mach number check | yes | not yet: the fluid keeps its initial state |
+| Fluid update: collision, streaming, body force, removal of the fluid momentum, Mach number check | yes | yes |
 | Solid nodes (`setSolidNodes()`) | yes | not yet: Context creation fails |
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | not yet: no force on the particles |
 
 On the CUDA, OpenCL and HIP platforms `LBMForce` does not yet apply any force to the particles, and a
-warning says so on stderr whenever a Context is created there. The coupling is dissipative: on every
-platform it adds no energy.
+warning says so on stderr whenever a Context with coupled particles is created there. The coupling is
+dissipative: on every platform it adds no energy.
 
 ## Conventions
 

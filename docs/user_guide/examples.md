@@ -575,6 +575,6 @@ Notes:
   Context; none of them advances the fluid.
 - **Which particles to couple.** Only the particles passed to `addParticle()` interact with the fluid.
 - **GPU platforms.** To run on CUDA, replace the platform with `mm.Platform.getPlatformByName('CUDA')`
-  and pass `{'Precision': 'mixed'}`. In this version the fluid does not advance on the GPU platforms
-  yet, no force acts on the particles, and solid nodes are not accepted there (see the
+  and pass `{'Precision': 'mixed'}`. In this version the fluid advances on the GPU platforms, but no
+  force acts on the particles there yet, and solid nodes are not accepted (see the
   [status table](README.md#what-works-in-this-version)).

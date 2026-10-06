@@ -27,10 +27,10 @@ the plugin converts the parameters to lattice units.
 | `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have 19 nx ny nz values. |
 | `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles and the solid nodes) | These parameters are fixed when the Context is created. Create a new Context. |
 
-The warning `the fluid update and the particle-fluid coupling are implemented only on the Reference
-platform in this version` is printed on stderr when a Context is created on the CUDA, OpenCL or HIP
-platform: there the fluid keeps its initial state and no force acts on the particles. Use the Reference
-platform until the port is complete.
+The warning `the particle-fluid coupling is implemented only on the Reference platform in this version`
+is printed on stderr when a Context with coupled particles is created on the CUDA, OpenCL or HIP
+platform: there the fluid advances, but no force acts on the particles and the fluid feels no reaction.
+Use the Reference platform for coupled particles until the port is complete.
 
 The warning `tau = ... > 1.7: with the explicit drag at the nearest node the hydrodynamic self-mobility of
 a coupled particle is small` is printed when particles are coupled and the relaxation time is large:
@@ -57,8 +57,11 @@ density in g/cm^3 must be multiplied by `unit.AVOGADRO_CONSTANT_NA`; see [units]
 not keep the fluid. Save it with `getFluidState()` and restore it with `setFluidState()`; see
 [saving and restoring the fluid](examples.md#saving-and-restoring-the-fluid).
 
-**The fluid does not change on the CUDA, OpenCL or HIP platform.** The fluid update runs only on the
-Reference platform in this version; see the [status table](README.md#what-works-in-this-version).
+**The OpenCL platform crashes on an NVIDIA GPU while the CUDA platform works.** If the CUDA
+forward-compatibility libraries (`cuda-compat`, needed when the driver is older than the CUDA version of
+OpenMM) are on `LD_LIBRARY_PATH`, the OpenCL driver can crash with a segmentation fault while it
+compiles kernels, also without this plugin. Run OpenCL simulations without those libraries on the
+library path.
 
 **The particles do not feel the fluid on a GPU platform.** The coupling runs only on the Reference
 platform in this version; on CUDA, OpenCL and HIP `LBMForce` applies no force to the particles yet.

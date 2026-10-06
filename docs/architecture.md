@@ -17,7 +17,7 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `serialization/` | XML proxy of `LBMForce` (parameters only) |
 | `python/` | SWIG wrapper `openmmlbm` and its tests |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
-| `tests/TestLBMFluid.h` | tests of the fluid on its own (`docs/validation.md`); run on the Reference platform until the fluid update is ported to the others |
+| `tests/TestLBMFluid.h` | tests of the fluid on its own, `runFluidTests()`, on every platform; tests of the solid nodes, `runWallTests()`, on the Reference platform until the walls are ported to the others (`docs/validation.md`) |
 
 ## Libraries
 
@@ -47,11 +47,25 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    solid nodes; see `docs/theory.md` sections 1 and 2) and computes the coupling forces; every
    `execute()` adds those forces to the particles, so other force evaluations neither advance the fluid
    nor draw new random numbers. On the Reference platform `beginStep()` also reverses the velocity of a
-   coupled particle that has entered a solid node. The Reference platform advances the fluid and couples
-   the particles; the common implementation (CUDA, OpenCL, HIP) does neither yet.
-3. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
+   coupled particle that has entered a solid node. Every platform advances the fluid; only the
+   Reference platform couples the particles and has solid nodes in this version.
+3. **Lattice step on the CUDA, OpenCL and HIP platforms** (`CommonCalcLBMForceKernel::advanceFluid()`,
+   kernels in `platforms/common/src/kernels/lbmFluid.cc`):
+
+   | Kernel | Threads | Reads | Writes |
+   |---|---|---|---|
+   | `computeFluidMoments` | one per node | populations | rho - 1, j, Pi^neq of the node |
+   | `sumFluidMomentum` (when the removal is due) | work groups of 64 | rho - 1, j | one partial sum per group |
+   | `computeFluidCenterVelocity` | one work group | partial sums | u_cm |
+   | `removeFluidMomentum` | one per node | rho - 1, u_cm | j |
+   | `collideAndStream` | one per node | moments of the node | the 19 populations it sends to the neighbours |
+   | `computeMaxFluidSpeed` (when the Mach check is due) | work groups of 64 | populations | one maximum per group, reduced on the host |
+
+   The moments are stored component by component, [k numNodes + node], so that consecutive threads read
+   consecutive addresses; the Reference platform stores them node by node.
+4. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
    through `LBMForceImpl`, to the kernel. The common implementation computes density and momentum on
-   the device (`computeFluidMoments` in `lbmFluid.cc`), then converts them to OpenMM units on the host.
+   the device (`computeFluidMoments`), then converts them to OpenMM units on the host.
 
 ## Invariants
 
@@ -72,5 +86,6 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
 2. At build time CMake turns every `.cc` file into a string `CommonLBMKernelSources::<file>`.
 3. Compile it at runtime with `cc.compileProgram(CommonLBMKernelSources::<file>, defines)` in
    `CommonCalcLBMForceKernel`.
-4. Add the same algorithm to `ReferenceCalcLBMForceKernel`, and a test in `tests/TestLBMForce.h`
-   that compares the two.
+4. Add the same algorithm to `ReferenceCalcLBMForceKernel`, and a test that compares the two: the shared
+   C++ tests run on every platform, and the Python test `test_fluid_agrees_with_reference` compares the
+   fluid of each GPU platform with the Reference platform directly.

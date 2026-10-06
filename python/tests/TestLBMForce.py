@@ -135,6 +135,45 @@ def test_serialization():
     assert force2.getNumParticles() == 10
 
 
+@pytest.mark.parametrize('name,precision', [(name, precision) for name in ('CUDA', 'OpenCL', 'HIP')
+                                            for precision in ('mixed', 'double')],
+                         ids=lambda value: value)
+def test_fluid_agrees_with_reference(name, precision):
+    # The fluid update of the GPU platforms has the arithmetic of the Reference platform: in double and mixed
+    # precision the two agree to rounding (not bitwise, because of fused multiply-adds), here with a perturbed
+    # fluid, a body force and the removal of the fluid momentum every third step.
+    import numpy as np
+    try:
+        platform = mm.Platform.getPlatformByName(name)
+    except Exception:
+        pytest.skip('the %s platform is not available' % name)
+    states = []
+    for plat, properties in ((mm.Platform.getPlatformByName('Reference'), {}), (platform, {'Precision': precision})):
+        system = mm.System()
+        system.setDefaultPeriodicBoxVectors(mm.Vec3(3, 0, 0), mm.Vec3(0, 2.5, 0), mm.Vec3(0, 0, 2))
+        system.addParticle(1.0)
+        force = LBMForce()
+        force.setGridSize(6, 5, 4)
+        force.setKinematicViscosity((0.8 - 0.5)/3*0.25/0.01)
+        force.setBodyAcceleration(mm.Vec3(0.5, -0.2, 0.1))
+        force.setInitialFluidVelocity(mm.Vec3(0.5, 0.2, -0.3))
+        force.setFluidMomentumRemovalFrequency(3)
+        system.addForce(force)
+        integrator = mm.VerletIntegrator(0.01)
+        try:
+            context = mm.Context(system, integrator, plat, properties)
+        except Exception as e:
+            pytest.skip('no Context on the %s platform: %s' % (name, e))
+        context.setPositions([mm.Vec3(0.1, 0.2, 0.3)])
+        state = np.array(force.getFluidState(context))
+        state += 1e-3*np.sin(1.3*np.arange(len(state)))
+        force.setFluidState(context, state)
+        integrator.step(40)
+        states.append(np.array(force.getFluidState(context)))
+    scale = abs(states[0]).max()
+    assert abs(states[1] - states[0]).max() <= 1e-12*scale
+
+
 def test_requires_verlet():
     system, force, positions = create_system()
     integrator = mm.LangevinMiddleIntegrator(300, 1, 0.01)

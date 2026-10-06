@@ -17,8 +17,9 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
 - Fluid storage in the "mixed" type of the platform; equilibrium initial state; device kernel for
   the density and momentum of the fluid.
 - CMake check for OpenMM 8.3 or later; supported range 8.3 to 8.6. Tested on NVIDIA A100 against
-  8.3.1 and 8.6.1 (Reference, CUDA, Python; OpenCL on 8.6.1, because the OpenCL platform of
-  OpenMM 8.3.1 itself crashes intermittently on that machine), and in CI against every minor version.
+  8.3.1 and 8.6.1 (Reference, CUDA, OpenCL, Python), and in CI against every minor version. With the
+  CUDA forward-compatibility libraries on the library path, the NVIDIA OpenCL driver crashes
+  intermittently while compiling kernels, also without the plugin: the OpenCL tests run without them.
 - CMake check that SWIG has the version used for the OpenMM Python module.
 - HIP platform compiled and linked against ROCm 6.3 (no AMD GPU available for tests yet).
 - Fluid update on the Reference platform: moments, removal of the fluid momentum, regularized collision
@@ -57,8 +58,8 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
   reflections), divided by dt. Tests: momentum of particles, fluid and walls conserved; in steady
   Poiseuille flow the force on the walls equals the body force on the fluid.
 
-- Warning at Context creation on the CUDA, OpenCL and HIP platforms: the fluid update and the coupling
-  are implemented only on the Reference platform in this version.
+- Warning at Context creation on the CUDA, OpenCL and HIP platforms when particles are coupled: the
+  coupling is implemented only on the Reference platform in this version.
 
 - Equivalence of the coupling with the reference library (E0, 80 cases at T = 0): trajectories within
   5e-13, derived quantities within 2e-5. Measured self-mobility as a function of tau
@@ -73,6 +74,12 @@ versions precede equivalence with the reference CUDA lattice Boltzmann library.
 - Coupling schemes, `setCouplingScheme()`: `EulerMaruyama` (default) or `NVE`, friction only without random
   force. Saved by the serialization (version 3, which still reads versions 1 and 2).
 
+- Fluid update on the CUDA, OpenCL and HIP platforms, with the arithmetic of the Reference platform:
+  moments, removal of the fluid momentum (two-stage reduction without atomic operations), regularized
+  collision with Guo forcing and push streaming, and the Mach number check. The fluid tests run on every
+  platform and precision mode, with tolerances that follow the precision; in mixed and double precision
+  the fluid agrees with the Reference platform to 1e-14 (`test_fluid_agrees_with_reference`).
+
 ### Not yet implemented
-- Fluid update, solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
+- Solid nodes and particle-fluid coupling on the CUDA, OpenCL and HIP platforms.
 - Open faces with imposed density or velocity (`docs/theory.md`, solid nodes).

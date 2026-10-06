@@ -248,7 +248,7 @@ void testInvalidSetup(Platform& platform) {
 }
 
 /**
- * Creating a Context on a platform where the fluid update and the coupling are not implemented yet prints a
+ * Creating a Context with coupled particles on a platform where the coupling is not implemented yet prints a
  * warning; on the Reference platform it does not.
  */
 void testPlatformWarning(Platform& platform) {

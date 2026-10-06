@@ -46,6 +46,7 @@ reproducible and understandable by someone who arrives without any prior context
 - **Every new feature comes with a test**, and every fixed defect with a regression test.
 - **Reference values** (smoke tests, single-particle drag and finite-size mobility, …) live in a versioned file, with tolerances and provenance.
 - **Continuous integration.** GitHub CI runs Reference and OpenCL on CPU. GPU tests are run on a GPU machine, and their outcome is recorded (machine, date, version).
+- **OpenCL on NVIDIA GPUs with an older driver.** When the CUDA forward-compatibility libraries (`cuda-compat`) are on `LD_LIBRARY_PATH`, which the CUDA platform needs if the driver is older than the CUDA version of OpenMM, the NVIDIA OpenCL driver crashes intermittently while compiling kernels, also without this plugin. Run the CUDA tests with those libraries and the OpenCL tests (`ctest -R OpenCL`, `pytest -k OpenCL`) without them.
 
 ## Supported OpenMM versions
 
