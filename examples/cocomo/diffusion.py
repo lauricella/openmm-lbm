@@ -7,7 +7,8 @@
 """Diffusion of a protein, coarse grained with COCOMO2, in a lattice Boltzmann fluid.
 
 Every bead is coupled to the fluid with the Euler-Maruyama scheme of LBMForce, which is also the
-thermostat.  With --no-lb there is no fluid: OpenMM's LangevinMiddleIntegrator, at the same friction and
+thermostat, with the explicit drag (the default) or the centred one (--drag Centered, docs/theory.md,
+section 2).  With --no-lb there is no fluid: OpenMM's LangevinMiddleIntegrator, at the same friction and
 temperature, moves the beads without hydrodynamic interactions.
 
 Parameter sets (--preset):
@@ -27,7 +28,9 @@ T, production.  Files written, with the prefix given by --output:
   <prefix>.dcd               trajectory (DCD), every --report steps
   <prefix>.log               step, time, potential energy, temperature, speed (OpenMM's StateDataReporter;
                              its temperature is that of the full step, docs/theory.md, section 2)
-  <prefix>_temperature.txt   temperature of the beads from full-step and from half-step velocities
+  <prefix>_temperature.txt   temperature of the beads from full-step and from half-step velocities (the
+                             full-step one is right for the explicit drag, the half-step one for the
+                             centred drag)
   <prefix>_com.txt           time (ps) and centre of mass x y z (nm), not wrapped into the box: the
                              input of msd.py, which computes the diffusion coefficient
   <prefix>_final.xml, <prefix>_fluid.npz   final state of the particles and of the fluid
@@ -68,6 +71,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--preset', choices=sorted(PRESETS), default='sod1', help='parameter set (default sod1)')
     parser.add_argument('--no-lb', action='store_true', help='no fluid: LangevinMiddleIntegrator')
+    parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
+                        help='drag scheme of LBMForce (default Explicit)')
     parser.add_argument('--box', type=float, help='side of the cubic box (nm)')
     parser.add_argument('--spacing', type=float, default=0.5, help='lattice spacing (nm, default 0.5)')
     parser.add_argument('--friction', type=float, help='friction (1/ps)')
@@ -100,6 +105,8 @@ def parse_arguments():
             setattr(args, key, os.path.join(DATA, value))
     if args.output is None:
         args.output = '%s_lb_%s' % (args.preset, 'off' if args.no_lb else 'on')
+        if not args.no_lb and args.drag == 'Centered':
+            args.output += '_centered'
     if args.checkpoint is None:
         args.checkpoint = 100*args.report
     return args
@@ -205,9 +212,10 @@ def main():
         force.setTemperature(args.temperature)
         force.setRandomNumberSeed(args.seed)
         force.setFluidMomentumRemovalFrequency(1)
+        force.setDragScheme(getattr(LBMForce, args.drag))
         for i in range(system.getNumParticles()):
             force.addParticle(i)
-        system.addForce(force)
+        system.addForce(force)          # the last force of the System, as the centred drag requires
         integrator = mm.VerletIntegrator(args.dt)
 
     topology = app.Topology()
@@ -224,8 +232,9 @@ def main():
     print('Platform %s; %d beads, %d elastic bonds, box %g nm, %s' % (
         platform.getName(), len(names), len(pairs), args.box,
         'no fluid (Langevin)' if args.no_lb else '%d^3 lattice nodes' % round(args.box/args.spacing)))
-    print('Friction %g 1/ps, viscosity %g nm^2/ps, %g K, dt %g ps, %d steps (%g ns)' % (
-        args.friction, args.viscosity, args.temperature, args.dt, args.steps, args.steps*args.dt/1000))
+    print('Friction %g 1/ps, viscosity %g nm^2/ps, %g K, dt %g ps, %d steps (%g ns)%s' % (
+        args.friction, args.viscosity, args.temperature, args.dt, args.steps, args.steps*args.dt/1000,
+        '' if args.no_lb else ', %s drag' % args.drag.lower()))
 
     checkpointFile = args.output + '.chk'
     if args.restart:

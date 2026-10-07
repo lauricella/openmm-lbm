@@ -143,7 +143,9 @@ steps; centred: T at half steps, T/(1 + gamma dt/2) at full steps), mean of the 
 | 1.5 | 1.0000 | 0.9999 | 0.9999 | 0.9999 |
 
 The statistical error of each mean is about 4e-4 at gamma dt = 0.1 and 1.5e-4 at 1.5. The kinetic energy that
-OpenMM reports gives the full-step values.
+OpenMM reports gives the full-step values. The same runs on CUDA in double precision (one seed, NVIDIA A100)
+give ratios between 1.0000 and 1.0003 for both drags, all three values of gamma dt and the four temperatures,
+within their statistical error of 2e-4 to 7e-4.
 
 **Temperature with the fluid** and **self-mobility y(tau)** of the two drags: `docs/theory.md`, section 2.
 
@@ -316,6 +318,38 @@ exp(-gamma dt)); they were regenerated with the Euler-Maruyama scheme for this c
   18 ns. Both stay close to kT/(M gamma) = 2.26 A^2/ns, as expected without thermal fluctuations of
   the fluid. At the longest lags the two sets differ by about 1.5 standard errors. The full-step
   temperature is 293-294 K at 298 K.
+- **Diffusion of SOD1 with the centred drag** (`--drag Centered`, same three seeds, CUDA in mixed precision,
+  NVIDIA A100): 2.34, 2.41, 2.42, 2.49, 2.64, 2.87 and 2.95 A^2/ns at the same lag times (standard error 0.01
+  to 0.07 up to 5 ns, 0.04 to 0.17 at longer lags), against 2.34, 2.41, 2.42, 2.49, 2.64, 2.83 and 2.86 with
+  the explicit drag: the same random numbers give the same diffusion of the centre of mass to the second
+  decimal up to 5 ns, and within the statistical error at longer lags. The temperature of the centred drag,
+  at half steps, is 277.5 K (half step 310.3 K and full step 294.0 K with the explicit drag; full step
+  264.4 K with the centred drag): 6.9% below T, against 1.3% for the explicit drag
+  ([theory.md](theory.md), section 2, temperature with a fluid without fluctuations).
+- **Friction 30/ps** (`--preset fabio-g30`, 50 ns, seed 1): both drags are stable; the apparent diffusion
+  coefficient is 0.89, 0.98, 1.00, 1.00, 1.04, 1.24 and 1.25 A^2/ns with the explicit drag and 0.86, 0.93,
+  0.96, 0.99, 1.02, 1.28 and 1.35 with the centred drag, within the statistics of one run
+  (kT/(M gamma) = 0.75 A^2/ns); the temperature is 294.6 K at full steps with the explicit drag and 250.2 K
+  at half steps with the centred drag, 16% below T.
+
+## Many proteins: 64 copies of SOD1 (CUDA, NVIDIA A100)
+
+64 copies of SOD1 (COCOMO2, 7040 beads, well above the size at which the GPU platforms may repeat a force
+evaluation to enlarge the neighbor list) on a 4 x 4 x 4 grid in a box of 20 nm (40^3 nodes), friction 10/ps,
+298 K, dt = 0.01 ps, every bead coupled, removal of the fluid momentum switched off so that the total momentum
+can be checked; 2 ns in mixed precision and 0.2 ns in double precision, OpenMM 8.6.1. Mean temperatures after
+the first quarter of the run, and drift of the total momentum of particles and fluid relative to sum m|v|:
+
+| drag | full step (K) | half step (K) | OpenMM, `StateDataReporter` (K) | drift, mixed, 2 ns | drift, double, 0.2 ns |
+|---|---|---|---|---|---|
+| explicit | 294.4 | 310.7 | 294.4 | 1.4e-8 | 4.0e-10 |
+| centred | 264.7 | 277.8 | 264.7 | 1.0e-8 | 4.0e-10 |
+
+Both drags are stable, at about 0.4 ms per step. In double precision the drift grows linearly, 2e-14 per step,
+and is the same with the coupling switched off (friction 0, 3.8e-11 after 2000 steps against 4.2e-11): it
+comes from the fixed point sum of the COCOMO2 forces in OpenMM, not from the coupling. The temperatures are
+those of the right velocity for each drag (half step for the centred one): 1.2% and 6.8% below T, as for one
+protein (next sections).
 
 ## Kinetic energy budget (`python/tests/TestEnergyBudget.py`, Reference)
 
@@ -328,6 +362,10 @@ constant only to O(Ma^2, Kn^2). The test checks the size and scaling of the resi
 | shear wave, 32 nodes per wavelength, tau = 1.1 | -0.77% (ratio 3.97: O(k^2)) |
 | bead kicked at Mach 0.035, 12^3 nodes, NVE | -4.448% |
 | bead kicked at Mach 0.10, same system | -4.445% (independent of the Mach number) |
+| bead kicked at Mach 0.035 and 0.10, centred drag | -3.981% and -3.979% |
+
+The dissipation of the drag is computed from the coupling force of each step, F = m (v' - v), and so holds
+for both drags.
 
 Tolerances: below 1% for the finer shear wave and a ratio between 3 and 5; below 6% for the kick and a
 difference below 1e-3 between the two Mach numbers.
@@ -368,4 +406,31 @@ temperatures in K, openmm-lbm / reference; statistical error about 0.5 K.
 normalized VACF at half steps to the kick response minus its plateau is 0.93, 0.90, 0.85, 0.81, 0.69 and
 0.50 at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps (reference: 0.93, 0.90, 0.85, 0.81, 0.70, 0.47). With thermal
 fluctuations of the fluid the two curves would coincide (fluctuation-dissipation theorem).
+
+**With the centred drag** (same cases and seeds; `LBM_DRAG=centered` in the scripts of the campaign). The
+temperature that is right for the centred drag is that of the half step (`docs/theory.md`, section 2).
+
+T2, mean temperatures in K, half step / full step (statistical error about 0.5 K):
+
+| dt (ps) | tau | gamma = 1/ps | gamma = 5/ps | gamma = 10/ps |
+|---|---|---|---|---|
+| 0.005 | 0.80 | 297.9 / 297.2 | 290.6 / 287.1 | 283.8 / 277.0 |
+| 0.01 | 1.10 | 300.2 / 298.6 | 289.4 / 282.6 | 277.1 / 264.5 |
+| 0.02 | 1.70 | 295.9 / 293.0 | 281.3 / 268.9 | 264.7 / 243.1 |
+
+T6, particles of 1000 Da (m/m_c = 13.3): the diffusion coefficient is that of the explicit drag
+(D/(kT/m gamma) from the MSD 1.038, 0.984, 1.010 and 0.980 for the four cases), while the half-step
+temperature is 274.7, 207.7, 161.1 and 204.2 K: the deficit of a fluid without fluctuations grows with
+gamma dt m/m_c, as predicted (`docs/theory.md`, section 2, Temperature with a fluid without fluctuations).
+
+T7, with the kick response T5_m1000_g10_L16 computed with the same drag on CUDA (with the explicit drag it
+reproduces the kick of the reference campaign): ratio of the normalized VACF to the kick response minus its
+plateau at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps:
+
+| drag | 0.05 | 0.1 | 0.2 | 0.3 | 0.5 | 1 ps |
+|---|---|---|---|---|---|---|
+| explicit | 0.93 | 0.90 | 0.85 | 0.81 | 0.69 | 0.50 |
+| centred | 0.97 | 0.96 | 0.94 | 0.93 | 0.89 | 0.79 |
+
+The centred drag is closer to the fluctuation-dissipation relation for the dynamics.
 

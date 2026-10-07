@@ -19,9 +19,10 @@ Know these before using the plugin for a study:
   only, and the fluid receives its reaction. As a consequence the diffusion coefficient of a free particle,
   or of the centre of mass of a protein, stays close to kT/(m friction), the value without hydrodynamics,
   although the fluid does carry the hydrodynamic interactions (a kick or a drag shows them): the Einstein
-  relation with the hydrodynamic mobility is not satisfied. The temperature of the coupled particles is a
-  little below the set temperature: 1-2% with friction x dt = 0.1, about 13% with a very large friction
-  (100/ps). See [validation.md](../validation.md). A fluctuating lattice Boltzmann fluid, which removes
+  relation with the hydrodynamic mobility is not satisfied. The temperature of the coupled particles is
+  below the set temperature: with the explicit drag (the default) 1-2% with friction x dt = 0.1, about 13%
+  with a very large friction (100/ps); with the centred drag more, 7% for SOD1 at friction x dt = 0.1
+  ([choosing the drag](lattice.md#choosing-the-drag)). See [validation.md](../validation.md). A fluctuating lattice Boltzmann fluid, which removes
   these limits, is planned.
 - **Nearest-node coupling.** Each particle is coupled to the nearest lattice node, so the forces jump when
   a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the

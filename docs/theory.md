@@ -378,6 +378,28 @@ denser) both drags give the exact values of their discretization, at gamma dt = 
 1e-4 (`docs/validation.md`). A fluid with thermal fluctuations is needed for the right temperature with either
 scheme; it would make y appear in the diffusion coefficient, D = kT (1/zeta + y), instead.
 
+The extra deficit of the centred drag grows with gamma dt m/m_c, so it is large for heavy particles or large
+friction, while the diffusion coefficient does not change. Measured on CUDA (mixed precision; stochastic
+tests T2, T6, T7 and examples, `docs/validation.md`), with the temperature that is right for each drag:
+
+| System | m/m_c | gamma dt | `Explicit`, full step | `Centered`, half step | centred predicted from the explicit value |
+|---|---|---|---|---|---|
+| 64 free particles of 1000 Da (T6), 300 K | 13.3 | 0.05 | 270.4 K | 207.7 K | 208 K |
+| same, gamma = 10/ps | 13.3 | 0.1 | 254.0 K | 161.1 K | 163 K |
+| SOD1, COCOMO2 (110 beads), 298 K, three runs of 200 ns | 1.32 (mean) | 0.1 | 294.0 K | 277.5 K | 276 K |
+| SOD1 with friction 30/ps, 50 ns | 1.32 (mean) | 0.3 | 294.6 K | 250.2 K | 246 K |
+
+The prediction is 1/T_centred = 1/T_explicit + gamma dt m/(2 m_c T), for the protein with the mean bead
+mass. In T6 the diffusion coefficient of the particles is the same
+with both drags (D/(kT/(m gamma)) = 0.984 and 1.010 at gamma = 5 and 10/ps, for both), and so is the
+diffusion of the centre of mass of SOD1 (`docs/validation.md`),
+and the normalized velocity autocorrelation of the centred drag is closer to the response to a kick computed
+with the same drag (fluctuation-dissipation for the dynamics: ratio 0.97 to 0.79 between 0.05 and 1 ps,
+against 0.93 to 0.50 with the explicit drag). So, without thermal fluctuations of the fluid, the centred drag
+keeps the diffusion and is stable for any friction, but its kinetic temperature is lower; with a fluctuating
+fluid both drags would give T, and the local fluctuation-dissipation balance of the centred drag (Which
+velocity has the right temperature, above) would hold for particles and cells together.
+
 **Per-cell reaction on the GPU platforms.** The reaction forces of the particles in the same cell are
 summed without atomic operations (`platforms/common/src/kernels/lbmCoupling.cc`), by sorting keys and
 reducing segments with one writer per cell, as in the parallel spreading of the immersed boundary method of

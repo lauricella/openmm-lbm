@@ -52,6 +52,8 @@ def parse_arguments():
     parser.add_argument('--steps', type=int, default=2000, help='number of steps (default 2000)')
     parser.add_argument('--lam', type=float, default=cocomo2.LAMBDA, help='exposure threshold lambda (default 0.7)')
     parser.add_argument('--no-lb', action='store_true', help='no fluid: LangevinMiddleIntegrator at zero temperature')
+    parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
+                        help='drag scheme of LBMForce (default Explicit)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA and OpenCL (default mixed)')
     parser.add_argument('--output', help='output file (default kick_<preset>_lb_on.txt or _lb_off.txt)')
@@ -102,9 +104,10 @@ def main():
         force.setFriction(args.friction)
         force.setCouplingScheme(LBMForce.NVE)
         force.setFluidMomentumRemovalFrequency(0)
+        force.setDragScheme(getattr(LBMForce, args.drag))
         for i in range(system.getNumParticles()):
             force.addParticle(i)
-        system.addForce(force)
+        system.addForce(force)          # the last force of the System, as the centred drag requires
         integrator = mm.VerletIntegrator(args.dt)
     platform, properties = select_platform(args.platform, args.precision)
     context = mm.Context(system, integrator, platform, properties)

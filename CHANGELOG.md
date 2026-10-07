@@ -10,13 +10,22 @@ versions the API may still change.
   (`LBMForce.Explicit`, the default, unchanged bit for bit). The drag compares the velocities of particle
   and fluid at the time of the force, the fluid velocity being the one that the collision puts in the
   equilibrium; the implicit system is solved in closed form for all the particles of a node, and conserves
-  the total momentum exactly. It is stable for any friction, and the velocities of the State (half steps)
-  have the right temperature of the drag (`docs/theory.md`, section 2). It requires `LBMForce` to be the
-  last force of the System and no virtual sites. All platforms: on CUDA, OpenCL and HIP it runs in a
+  the total momentum exactly. It is stable for any friction, and its right temperature is that of the
+  velocities of the State (half steps; `docs/theory.md`, section 2). It requires `LBMForce` to be the last
+  force of the System and no virtual sites. All platforms: on CUDA, OpenCL and HIP it runs in a
   `ForcePostComputation`, which reads the other forces at the end of the force evaluation; it costs 0 to 6%
-  more than the explicit drag on an A100.
+  more than the explicit drag on an A100. With the fluid of this version, which has no thermal fluctuations,
+  its particles are colder than with the explicit drag, the more so the larger friction x dt and the bead
+  mass in cell masses (SOD1 with COCOMO2: 7% below T at 10/ps and 16% at 30/ps, against 1 to 2%), while the
+  diffusion coefficient is the same: the explicit drag stays the default, and the centred one is for the
+  cases where the explicit drag is unstable (`docs/user_guide/lattice.md`, choosing the drag).
 - `openmmlbm.LBMTemperatureReporter`: temperature of the coupled particles with the velocity that has the
   right temperature for the drag scheme.
+- Option `--drag Explicit|Centered` in the examples with particles; section "Choosing the drag" of the user
+  guide.
+- Validation of the centred drag (`docs/validation.md`): stochastic tests T2, T6 and T7 (with the kick response
+  of the same drag), SOD1 and the friction of 30/ps, 64 copies of SOD1 (7040 beads), energy budget, GPU
+  platforms against the Reference platform.
 - Serialization version 4 (the drag scheme; versions 1 to 3 are read with the explicit drag) and version 2
   of the checkpoint header of `LBMForce::createCheckpoint()` (the drag scheme; version 1 is read with the
   explicit drag, and a checkpoint is refused by a Context with the other drag scheme).
@@ -35,6 +44,8 @@ versions the API may still change.
   `CITATION.cff` and the examples.
 - `docs/theory.md` and `CONTRIBUTING.md` cite Kassen, Shankar and Fogelson (2022) for the sorting of keys
   and the segmented reduction of the per-cell reaction.
+- `python/tests/TestEnergyBudget.py` takes the coupling force from the change of velocity of the bead, so
+  that the budget holds for both drags.
 
 ## 0.1.0 (2026-10-07)
 

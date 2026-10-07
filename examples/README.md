@@ -35,6 +35,9 @@ The output files are written in the current directory. Options common to all scr
 - `--platform NAME`: `Reference`, `CUDA`, `OpenCL` or `HIP`. Without it the script takes CUDA, then
   OpenCL, then Reference, the first that is available.
 - `--precision single|mixed|double`: precision on CUDA, OpenCL and HIP (default `mixed`).
+- `--drag Explicit|Centered`: drag scheme of the coupling (default `Explicit`; see
+  [choosing the drag](../docs/user_guide/lattice.md#choosing-the-drag)); not in `fluid/initial_state.py`,
+  which has no particles.
 - `--steps N`: number of steps. Every other parameter has an option too: see `--help`.
 
 ## The examples

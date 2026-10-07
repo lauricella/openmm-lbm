@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: MIT
 # --------------------------------------------------------------------------
 
-"""Kinetic energy budget with the NVE coupling scheme, on the Reference platform (docs/theory.md, section 2).
+"""Kinetic energy budget with the NVE coupling scheme, on the Reference platform (docs/theory.md, section 2), with
+both drag schemes.
 
 The kinetic energy of fluid and particles plus the energy dissipated by the viscosity and by the drag stays
 constant only approximately: the viscous dissipation computed from Pi_neq is the hydrodynamic limit, valid to
@@ -13,6 +14,7 @@ O(Ma^2, Kn^2).  The tests check the size and the scaling of the residual, in lat
 
 import numpy as np
 import openmm as mm
+import pytest
 from openmmlbm import LBMForce
 
 C = np.array([[0, 1, -1, 0, 0, 0, 0, 1, -1, 1, -1, 0, 0, 0, 0, 1, -1, -1, 1],
@@ -69,7 +71,7 @@ def shear_wave_residual(n, tau, steps):
     return (0.5*(rho*(u**2).sum(0)).sum() + dissipated)/E0 - 1
 
 
-def kick_residual(v0, steps=200, n=12, tau=1.1, gamma=10.0, mass=100.0):
+def kick_residual(v0, steps=200, n=12, tau=1.1, gamma=10.0, mass=100.0, drag='Explicit'):
     """(E + dissipated)/E0 - 1 for a bead kicked in a fluid at rest, NVE scheme."""
     L, cellMass, velocityScale = n*DX, 602.214*DX**3, DX/DT
     system = mm.System()
@@ -81,13 +83,14 @@ def kick_residual(v0, steps=200, n=12, tau=1.1, gamma=10.0, mass=100.0):
     force.setFriction(gamma)
     force.setCouplingScheme(LBMForce.NVE)
     force.setFluidMomentumRemovalFrequency(0)
+    force.setDragScheme(getattr(LBMForce, drag))
     force.addParticle(0)
     system.addForce(force)
     integrator = mm.VerletIntegrator(DT)
     context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
     context.setPositions([mm.Vec3(L/2 + 0.1, L/2, L/2)])
     context.setVelocities([mm.Vec3(v0, 0.3*v0, 0)])
-    m, g = mass/cellMass, gamma*DT
+    m = mass/cellMass
     rho, u, Pi = fluid(force, context)
     state = context.getState(getPositions=True, getVelocities=True)
     v = np.array(state.getVelocities(asNumpy=True)._value[0])/velocityScale
@@ -97,12 +100,13 @@ def kick_residual(v0, steps=200, n=12, tau=1.1, gamma=10.0, mass=100.0):
         s = np.mod(np.array(state.getPositions(asNumpy=True)._value[0])/DX, n)
         i = np.floor(s + 0.5).astype(int) % n
         node = i[0] + n*(i[1] + n*i[2])
-        F = -g*m*(v - u[:, node])
         rhoNode, uNode = rho[node], u[:, node].copy()
         dissipated += viscous_dissipation(rho, Pi, tau)
         integrator.step(1)
         state = context.getState(getPositions=True, getVelocities=True)
         vNew = np.array(state.getVelocities(asNumpy=True)._value[0])/velocityScale
+        # The coupling force of the step, for either drag: the only force on the bead (lattice units, dt = 1).
+        F = m*(vNew - v)
         # The bead loses -F.(v + v')/2; the fluid, with Guo's forcing, receives -F at the velocity u - F/(2 rho).
         dissipated -= (F*((v + vNew)/2 - (uNode - F/(2*rhoNode)))).sum()
         v = vNew
@@ -119,10 +123,11 @@ def test_shear_wave_budget():
     assert 3 < coarse/fine < 5
 
 
-def test_kick_budget():
+@pytest.mark.parametrize('drag', ['Explicit', 'Centered'])
+def test_kick_budget(drag):
     """A bead kicked in the fluid: the force on a single node is far from the hydrodynamic limit (Kn ~ 1), and
-    the budget closes to about 5%, independently of the Mach number."""
-    slow = kick_residual(1.0)
-    fast = kick_residual(3.0)
+    the budget closes to about 5%, independently of the Mach number, with both drags."""
+    slow = kick_residual(1.0, drag=drag)
+    fast = kick_residual(3.0, drag=drag)
     assert abs(slow) < 0.06
     assert abs(fast - slow) < 1e-3

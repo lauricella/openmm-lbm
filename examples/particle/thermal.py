@@ -15,8 +15,9 @@ are placed at random in the box.
 OpenMM's leapfrog stores the velocities half a step behind the positions.  The script writes, for every
 step, the time (ps), the velocity vx vy vz (nm/ps) and the position x y z (nm) of the first bead, and at
 the end it prints the temperature of the beads computed from the half-step velocities and from the
-full-step velocities, the mean of two consecutive steps (docs/theory.md, section 2).  The kinetic
-temperature of one bead fluctuates strongly: its mean converges slowly, with a correlation time of
+full-step velocities, the mean of two consecutive steps (docs/theory.md, section 2): with the explicit
+drag (the default) the full-step one is right, with the centred drag (--drag Centered) the half-step one.
+The kinetic temperature of one bead fluctuates strongly: its mean converges slowly, with a correlation time of
 about 1/gamma.
 """
 
@@ -47,6 +48,8 @@ def parse_arguments():
     parser.add_argument('--removal', type=int, default=0,
                         help='steps between removals of the fluid momentum, 0 = never (default, as the old example)')
     parser.add_argument('--seed', type=int, default=0, help='random number seed, 0 = chosen at random (default)')
+    parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
+                        help='drag scheme of LBMForce (default Explicit)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA and OpenCL (default mixed)')
     parser.add_argument('--output', default='thermal.txt', help='output file (default thermal.txt)')
@@ -87,6 +90,7 @@ def main():
     force.setTemperature(args.temperature)
     force.setRandomNumberSeed(args.seed)
     force.setFluidMomentumRemovalFrequency(args.removal)
+    force.setDragScheme(getattr(LBMForce, args.drag))
     for i in range(args.beads):
         system.addParticle(mass)
         force.addParticle(i)
@@ -129,8 +133,12 @@ def main():
     a = args.friction*args.dt
     print('Mean temperature over %d steps: full step %.1f K, half step %.1f K' % (count, fullSum/(dof*kB),
                                                                                 halfSum/(dof*kB)))
-    print('Free bead in a fluid at rest: full step %.1f K, half step T/(1 - gamma dt/2) = %.1f K' % (
-        args.temperature, args.temperature/(1 - a/2)))
+    if args.drag == 'Explicit':
+        print('Free bead in a fluid at rest, explicit drag: full step %.1f K, half step T/(1 - gamma dt/2) = %.1f K' % (
+            args.temperature, args.temperature/(1 - a/2)))
+    else:
+        print('Free bead in a fluid at rest, centred drag: full step T/(1 + gamma dt/2) = %.1f K, half step %.1f K' % (
+            args.temperature/(1 + a/2), args.temperature))
     print('Trajectory written to', args.output)
 
 

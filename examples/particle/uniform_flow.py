@@ -39,6 +39,8 @@ def parse_arguments():
     parser.add_argument('--flow', type=float, default=0.09, help='initial fluid velocity along x in nm/ps (default 0.09)')
     parser.add_argument('--steps', type=int, default=1000, help='number of steps (default 1000)')
     parser.add_argument('--interval', type=int, default=50, help='steps between lines of output (default 50)')
+    parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
+                        help='drag scheme of LBMForce (default Explicit)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA and OpenCL (default mixed)')
     return parser.parse_args()
@@ -77,6 +79,7 @@ def main():
     force.setCouplingScheme(LBMForce.NVE)
     force.setInitialFluidVelocity(mm.Vec3(args.flow, 0, 0))
     force.setFluidMomentumRemovalFrequency(0)
+    force.setDragScheme(getattr(LBMForce, args.drag))
     force.addParticle(0)
     system.addForce(force)
     integrator = mm.VerletIntegrator(args.dt)

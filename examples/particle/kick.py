@@ -49,6 +49,8 @@ def parse_arguments():
     parser.add_argument('--velocity', type=float, help='initial velocity along x (nm/ps)')
     parser.add_argument('--steps', type=int, help='number of steps')
     parser.add_argument('--no-lb', action='store_true', help='no fluid: LangevinMiddleIntegrator at zero temperature')
+    parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
+                        help='drag scheme of LBMForce (default Explicit)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA and OpenCL (default mixed)')
     parser.add_argument('--output', help='output file (default kick_<preset>_lb_on.txt or _lb_off.txt)')
@@ -95,6 +97,7 @@ def main():
         force.setFriction(args.friction)
         force.setCouplingScheme(LBMForce.NVE)        # zero temperature: drag only, no random force
         force.setFluidMomentumRemovalFrequency(0)    # keep the momentum given to the fluid
+        force.setDragScheme(getattr(LBMForce, args.drag))
         force.addParticle(0)
         system.addForce(force)
         integrator = mm.VerletIntegrator(args.dt)

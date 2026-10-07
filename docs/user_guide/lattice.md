@@ -15,7 +15,7 @@ examples. The rest of this page explains each of them.
 | Time step dt | 0.01 ps (10 fs) | the time step of the coarse-grained model; it is also the lattice time step |
 | Box | a whole number of dx along each side; at least 3 times the size of the protein and 2 times the cutoff of the nonbonded forces | the box is periodic: a protein feels its images through the fluid |
 | Kinematic viscosity | 1.0035 nm^2/ps (water, tau = 0.62 with the values above), or larger | tau = 3 nu dt/dx^2 + 1/2 must stay between about 0.505 and 1.7 ([relaxation time](#relaxation-time)) |
-| Friction | 5 to 10 /ps, so that friction x dt = 0.05 to 0.1 | friction x dt must be below 1 (warning) and below 2 (stability); at 0.1 or below the explicit scheme is accurate |
+| Friction | 5 to 10 /ps, so that friction x dt = 0.05 to 0.1 | with the explicit drag (the default) friction x dt must be below 1 (warning) and below 2 (stability), at 0.1 or below it is accurate; for larger values use the centred drag ([choosing the drag](#choosing-the-drag)) |
 | Temperature | that of the simulation, e.g. 298 K | the fluid is the thermostat of the coupled particles: no other thermostat |
 | Integrator | `VerletIntegrator(dt)` | friction and random force are part of `LBMForce` |
 | Removal of the fluid momentum | every step (the default) | keeps the system at rest; set 0 for flows driven by a body force |
@@ -159,11 +159,62 @@ If tau is too close to 1/2, increase dt or the viscosity, or decrease dx. If tau
 opposite. Coarse-grained models often use a viscosity larger than that of water, which also moves tau
 up. Inside a Context, `getLatticeParametersInContext(context)` returns dx, dt and tau.
 
-**Coupled particles need tau below about 1.7.** With the explicit drag at the nearest node, the
-hydrodynamic part of the mobility of a particle decreases as tau grows. At tau = 1.7 it is about 15% of
-its value at tau = 1.1, and above tau = 1.79 it is negative: particles then move less than a Langevin
-particle with the same friction. A warning is printed when a Context with coupled particles has
-tau > 1.7 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)).
+**With the explicit drag, coupled particles need tau below about 1.7.** With the explicit drag at the
+nearest node, the hydrodynamic part of the mobility of a particle decreases as tau grows. At tau = 1.7 it
+is about 15% of its value at tau = 1.1, and above tau = 1.79 it is negative: particles then move less than
+a Langevin particle with the same friction. A warning is printed when a Context with coupled particles and
+the explicit drag has tau > 1.7. With the centred drag this part stays positive at every tau, but it grows
+with tau ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), self-mobility).
+
+## Choosing the drag
+
+`setDragScheme()` chooses between two time discretizations of the drag, with the same friction and the
+same random force ([API](api_reference.md#setdragschemescheme-getdragscheme)). The choice is made when the
+Context is created.
+
+| | `LBMForce.Explicit` (default) | `LBMForce.Centered` |
+|---|---|---|
+| Velocities compared | particle half a step before the force, fluid before the force | particle and fluid at the time of the force |
+| Stability | friction x dt < 2 for one particle; with M the mass of the particles at a node and m_c that of the fluid in a cell, friction x dt (1 + M/m_c)/2 < 1 | any friction |
+| Velocity with the right temperature | full step: the temperature of `StateDataReporter` | half step: the velocities of the State; `StateDataReporter` reports less |
+| Requirements | none | `LBMForce` is the last force of the System; no virtual sites |
+| Cost on a GPU | | 0 to 6% more |
+| Same results as | version 0.1.0 and the DragOpenMM library | |
+
+**Use the explicit drag** (the default) in most cases: it is accurate for friction x dt up to about 0.1, it
+reproduces the previous results, the temperature that OpenMM reports is right, and with the fluid of this
+version (without thermal fluctuations) its particles are the closest to T (next paragraph).
+
+**Use the centred drag** when the explicit drag is unstable: large friction, or several heavy beads at a
+node. With beads of 130 Da, dx = 0.5 nm and dt = 0.01 ps, three or four beads at a node make the explicit
+drag unstable already for friction above 26 to 32/ps. The centred drag is stable for any friction.
+
+With the centred drag measure the temperature with `openmmlbm.LBMTemperatureReporter`, which uses the
+velocity that has the right temperature for each drag
+([API](api_reference.md#openmmlbmlbmtemperaturereporterfile-reportinterval-force)):
+
+```python
+import openmmlbm
+# simulation.reporters.append(openmmlbm.LBMTemperatureReporter('temperature.txt', 1000, force))
+```
+
+**Both drags give particles colder than T** at the density of water, because the fluid has no thermal
+fluctuations of its own ([limitations](README.md#limitations-of-the-model)). The centred drag couples a
+particle to its own cell within the step, and is colder, the more so the larger friction x dt and the
+mass of the bead in units of the mass of fluid in a cell, m/m_c (m_c = 75 Da with dx = 0.5 nm), while the
+diffusion coefficient is the same with both drags. Measured at 298 to 300 K, each drag with its right
+velocity ([validation](../validation.md)):
+
+| System | friction x dt | m/m_c | explicit | centred |
+|---|---|---|---|---|
+| free beads of 100 Da | 0.1 | 1.3 | 2 to 5% below T | 8 to 10% below T |
+| SOD1, COCOMO2 | 0.1 | 1.3 (mean) | 1.3% below T | 7% below T |
+| SOD1, COCOMO2 | 0.3 | 1.3 (mean) | 1% below T | 16% below T |
+| free beads of 1000 Da | 0.1 | 13 | 15% below T | 46% below T |
+
+With a fluid much heavier than the particles both give T
+([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), temperature with a fluid
+without fluctuations). A fluid with thermal fluctuations (not implemented yet) would give T with both.
 
 ## Velocity of the fluid
 
