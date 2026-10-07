@@ -42,6 +42,8 @@ reproducible and understandable by someone who arrives without any prior context
 
 ## Tests and acceptance
 
+- **All platforms aligned.** Every feature, physical or not, is implemented and tested on every platform: Reference, CUDA, OpenCL and HIP (HIP at least built, where no AMD GPU is available). A feature available on one platform only may exist on `develop` as an intermediate step, with a clear error on the other platforms, but it does not reach `main` or a release. The same tests run on every platform, with tolerances tied to the precision mode.
+- **Everything is documented**, including results that are negative or contradict an expectation, with their numbers and protocol (`docs/theory.md`, `docs/validation.md`).
 - **Green tests before merging.** No commit reaches `main` with failing tests. Tests run on every available platform (Reference, CUDA, OpenCL, and HIP where possible), in the `single`, `mixed` and `double` precision modes.
 - **Every new feature comes with a test**, and every fixed defect with a regression test.
 - **Reference values** (smoke tests, single-particle drag and finite-size mobility, …) live in a versioned file, with tolerances and provenance.
