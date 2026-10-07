@@ -3,7 +3,10 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.2.1 (2026-10-07)
+
+A fix of the build: CMake builds only the platforms that the OpenMM in `OPENMM_DIR` has. The physics and the
+results are those of version 0.2.0.
 
 ### Fixed
 - Build: a GPU platform is built only if the OpenMM in `OPENMM_DIR` has it, that is its header
