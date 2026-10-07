@@ -158,10 +158,12 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    post-computations (as OpenCL does), create a subclass whose `hasFloatForceBuffers()` returns true, as
    `OpenCLCalcLBMForceKernel` does.
 2. Add the library in `platforms/<platform>/CMakeLists.txt` and, in the top `CMakeLists.txt`, the option
-   `LBM_BUILD_<PLATFORM>_LIB` as for the other platforms: `LBM_OPENMM_PLATFORM_REASON()` checks that the OpenMM
-   in `OPENMM_DIR` has the platform (its header and its library), a test checks the toolkit that compiles it,
-   and `LBM_OPTION()` sets the default, says why the platform is not built, and stops `cmake` if the option is
-   `ON` for a platform that cannot be built. Add the platform to the summary at the end of the file.
+   `LBM_BUILD_<PLATFORM>_LIB` as for the other platforms: `LBM_OPENMM_PLATFORM()` checks that the OpenMM in
+   `OPENMM_DIR` has the platform (its header and its library) and gives the full path of the library, which
+   the platform links (the libraries of OpenMM are never linked with `-l`), a test checks the toolkit that
+   compiles it, and `LBM_OPTION()` sets the default, says why the platform is not built, and stops `cmake` if
+   the option is `ON` for a platform that cannot be built. Add the platform to the summary at the end of the
+   file.
 3. Add `platforms/<platform>/tests/Test<Platform>LBMForce.cpp`, which calls `runPlatformTests()`,
    `runFluidTests()`, `runWallTests()`, `runCouplingTests()` and `runCenteredTests()` and takes the
    precision as its argument, and register it in `platforms/<platform>/tests/CMakeLists.txt` in the three

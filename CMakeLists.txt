@@ -12,7 +12,26 @@ SET(OPENMM_LBM_VERSION 0.2.1 CACHE STRING "The version of openmm-lbm that will b
 # We need to know where OpenMM is installed so we can access the headers and libraries.
 SET(OPENMM_DIR "/usr/local/openmm" CACHE PATH "Where OpenMM is installed")
 INCLUDE_DIRECTORIES("${OPENMM_DIR}/include")
-LINK_DIRECTORIES("${OPENMM_DIR}/lib" "${OPENMM_DIR}/lib/plugins")
+
+# LBM_FIND_OPENMM_LIBRARY(<name> <result>): the full path of the library <name> of the OpenMM in OPENMM_DIR, in
+# lib or lib/plugins (on Windows its import library), or empty.  The libraries of OpenMM are linked by full
+# path: with -l<name> the linker takes the first library of that name in its search path, where the linker
+# flags of an active conda environment (LDFLAGS) put the environment, which may hold another OpenMM, before
+# OPENMM_DIR.
+FUNCTION(LBM_FIND_OPENMM_LIBRARY NAME RESULT)
+    IF(WIN32)
+        SET(file "${CMAKE_IMPORT_LIBRARY_PREFIX}${NAME}${CMAKE_IMPORT_LIBRARY_SUFFIX}")
+    ELSE()
+        SET(file "${CMAKE_SHARED_LIBRARY_PREFIX}${NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    ENDIF()
+    SET(path "")
+    FOREACH(dir lib lib/plugins)
+        IF(NOT path AND EXISTS "${OPENMM_DIR}/${dir}/${file}")
+            SET(path "${OPENMM_DIR}/${dir}/${file}")
+        ENDIF()
+    ENDFOREACH()
+    SET(${RESULT} "${path}" PARENT_SCOPE)
+ENDFUNCTION()
 
 # Supported OpenMM versions: 8.3 to 8.6 (see CONTRIBUTING.md). The minimum is 8.3 because the
 # per-cell reduction of the coupling forces sorts on the device with ComputeSort, which entered
@@ -65,6 +84,28 @@ ENDIF()
 IF(NOT EXISTS "${OPENMM_DIR}/include/openmm/common/ComputeSort.h")
     MESSAGE(FATAL_ERROR "openmm-lbm requires OpenMM 8.3 or later: openmm/common/ComputeSort.h was not found in ${OPENMM_DIR}/include")
 ENDIF()
+LBM_FIND_OPENMM_LIBRARY(OpenMM OPENMM_LIBRARY)
+IF(NOT OPENMM_LIBRARY)
+    MESSAGE(FATAL_ERROR "The OpenMM library was not found in ${OPENMM_DIR}/lib: set OPENMM_DIR to the directory where OpenMM is installed")
+ENDIF()
+
+# The tests and the programs find the libraries of OpenMM at run time through their run path, where the
+# directories of the linker flags (from LDFLAGS) come first: warn if one of these directories holds another
+# OpenMM library than the one of OPENMM_DIR.
+STRING(REGEX MATCHALL "(-L|-rpath-link[,=]|-rpath[,=])[^ ]+" LBM_LINKER_FLAG_DIRS
+    "${CMAKE_SHARED_LINKER_FLAGS} ${CMAKE_MODULE_LINKER_FLAGS} ${CMAKE_EXE_LINKER_FLAGS}")
+GET_FILENAME_COMPONENT(LBM_OPENMM_LIBRARY_REAL "${OPENMM_LIBRARY}" REALPATH)
+FOREACH(entry ${LBM_LINKER_FLAG_DIRS})
+    STRING(REGEX REPLACE "^(-L|-rpath-link[,=]|-rpath[,=])" "" dirs "${entry}")
+    STRING(REPLACE ":" ";" dirs "${dirs}")
+    FOREACH(dir ${dirs})
+        GET_FILENAME_COMPONENT(library "${dir}/${CMAKE_SHARED_LIBRARY_PREFIX}OpenMM${CMAKE_SHARED_LIBRARY_SUFFIX}" REALPATH)
+        IF(EXISTS "${library}" AND NOT library STREQUAL LBM_OPENMM_LIBRARY_REAL AND NOT LBM_OTHER_OPENMM_DIR)
+            SET(LBM_OTHER_OPENMM_DIR "${dir}")
+            MESSAGE(WARNING "The linker flags (from LDFLAGS) contain ${dir}, which holds another OpenMM library than the one in ${OPENMM_DIR}. openmm-lbm is linked to the OpenMM in OPENMM_DIR, but its tests and programs may load the other one when they run: build in the environment whose OpenMM is the one in OPENMM_DIR, or without these linker flags.")
+        ENDIF()
+    ENDFOREACH()
+ENDFOREACH()
 
 # Specify the C++ version we are building for.
 SET(CMAKE_CXX_STANDARD 17)
@@ -139,7 +180,7 @@ ADD_LIBRARY(${SHARED_LBM_TARGET} SHARED ${SOURCE_FILES} ${SOURCE_INCLUDE_FILES} 
 SET_TARGET_PROPERTIES(${SHARED_LBM_TARGET}
     PROPERTIES COMPILE_FLAGS "-DLBM_BUILDING_SHARED_LIBRARY ${EXTRA_COMPILE_FLAGS}"
     LINK_FLAGS "${EXTRA_COMPILE_FLAGS}")
-TARGET_LINK_LIBRARIES(${SHARED_LBM_TARGET} OpenMM)
+TARGET_LINK_LIBRARIES(${SHARED_LBM_TARGET} ${OPENMM_LIBRARY})
 INSTALL(TARGETS ${SHARED_LBM_TARGET} DESTINATION lib)
 
 # install headers
@@ -181,30 +222,21 @@ FUNCTION(LBM_OPTION OPTION_NAME DESCRIPTION PART REASON)
     ENDIF()
 ENDFUNCTION()
 
-# LBM_OPENMM_PLATFORM_REASON(<platform> <header> <library> <result>): empty if the OpenMM in OPENMM_DIR has the
-# platform, that is its header in include/openmm and its library in lib or lib/plugins, else why not.
-FUNCTION(LBM_OPENMM_PLATFORM_REASON PLATFORM HEADER LIBRARY RESULT)
-    SET(names "${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY}${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    IF(CMAKE_IMPORT_LIBRARY_SUFFIX)
-        LIST(APPEND names "${CMAKE_IMPORT_LIBRARY_PREFIX}${LIBRARY}${CMAKE_IMPORT_LIBRARY_SUFFIX}")
-    ENDIF()
-    SET(library_found OFF)
-    FOREACH(dir lib lib/plugins)
-        FOREACH(name ${names})
-            IF(EXISTS "${OPENMM_DIR}/${dir}/${name}")
-                SET(library_found ON)
-            ENDIF()
-        ENDFOREACH()
-    ENDFOREACH()
-    IF(NOT EXISTS "${OPENMM_DIR}/include/openmm/${HEADER}" OR NOT library_found)
-        SET(${RESULT} "OpenMM in ${OPENMM_DIR} was built without the ${PLATFORM} platform (include/openmm/${HEADER} and the ${LIBRARY} library in lib or lib/plugins are required)" PARENT_SCOPE)
+# LBM_OPENMM_PLATFORM(<platform> <header> <library> <library variable> <reason variable>): the library variable
+# is set to the full path of the library of the platform in the OpenMM of OPENMM_DIR, and the reason variable to
+# empty if OpenMM has the platform, that is its header in include/openmm and its library, else to why not.
+FUNCTION(LBM_OPENMM_PLATFORM PLATFORM HEADER LIBRARY LIBRARY_VARIABLE REASON_VARIABLE)
+    LBM_FIND_OPENMM_LIBRARY(${LIBRARY} path)
+    SET(${LIBRARY_VARIABLE} "${path}" PARENT_SCOPE)
+    IF(NOT EXISTS "${OPENMM_DIR}/include/openmm/${HEADER}" OR NOT path)
+        SET(${REASON_VARIABLE} "OpenMM in ${OPENMM_DIR} was built without the ${PLATFORM} platform (include/openmm/${HEADER} and the ${LIBRARY} library in lib or lib/plugins are required)" PARENT_SCOPE)
     ELSE()
-        SET(${RESULT} "" PARENT_SCOPE)
+        SET(${REASON_VARIABLE} "" PARENT_SCOPE)
     ENDIF()
 ENDFUNCTION()
 
 FIND_PACKAGE(OpenCL QUIET)
-LBM_OPENMM_PLATFORM_REASON(OpenCL opencl/OpenCLContext.h OpenMMOpenCL LBM_OPENCL_REASON)
+LBM_OPENMM_PLATFORM(OpenCL opencl/OpenCLContext.h OpenMMOpenCL LBM_OPENMM_OPENCL_LIBRARY LBM_OPENCL_REASON)
 IF(NOT LBM_OPENCL_REASON AND NOT (OpenCL_FOUND AND TARGET OpenCL::OpenCL))
     SET(LBM_OPENCL_REASON "OpenCL (headers and library) was not found on this system")
 ENDIF()
@@ -214,7 +246,7 @@ IF(LBM_BUILD_OPENCL_LIB)
 ENDIF(LBM_BUILD_OPENCL_LIB)
 
 FIND_PACKAGE(CUDAToolkit QUIET)
-LBM_OPENMM_PLATFORM_REASON(CUDA cuda/CudaContext.h OpenMMCUDA LBM_CUDA_REASON)
+LBM_OPENMM_PLATFORM(CUDA cuda/CudaContext.h OpenMMCUDA LBM_OPENMM_CUDA_LIBRARY LBM_CUDA_REASON)
 IF(NOT LBM_CUDA_REASON AND NOT (CUDAToolkit_FOUND AND TARGET CUDA::cuda_driver))
     SET(LBM_CUDA_REASON "the CUDA toolkit with the CUDA driver library was not found on this system")
 ENDIF()
@@ -225,7 +257,7 @@ ENDIF(LBM_BUILD_CUDA_LIB)
 
 LIST(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
 FIND_PACKAGE(HIP CONFIG QUIET)
-LBM_OPENMM_PLATFORM_REASON(HIP hip/HipContext.h OpenMMHIP LBM_HIP_REASON)
+LBM_OPENMM_PLATFORM(HIP hip/HipContext.h OpenMMHIP LBM_OPENMM_HIP_LIBRARY LBM_HIP_REASON)
 IF(NOT LBM_HIP_REASON AND NOT (HIP_FOUND AND TARGET hip::host))
     SET(LBM_HIP_REASON "HIP was not found on this system")
 ENDIF()

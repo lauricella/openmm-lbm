@@ -223,7 +223,8 @@ What each command does:
 
 To see which platforms were built: the line `platforms to build` of `cmake`, or `cmake -LA . | grep LBM_BUILD`,
 which prints `ON` or `OFF` for CUDA, OpenCL, HIP and the Python wrapper. The Reference platform is always
-built. The tests of a platform that is not built are not built either.
+built. The tests of a platform that is not built are not built either. What `cmake` checks, its options and
+its messages are in [section 12](#12-what-cmake-checks-and-the-build-options).
 
 ## 8. Run the tests
 
@@ -317,6 +318,8 @@ The steps are the same, with a few differences.
   `conda activate /path/to/envs/lbm`.
 - **Modules.** Do not load other Python or OpenMM modules of the cluster together with this
   environment: they would mix two installations.
+- **OpenMM compiled from source.** The plugin can only have the platforms that this OpenMM has: see
+  [OpenMM compiled from source](#openmm-compiled-from-source) in section 12.
 - **Login and compute nodes.** The machine you log in to usually has no GPU: build there, but run the
   GPU tests and the simulations on compute nodes, through the job scheduler (for example `sbatch` with
   Slurm). On the login node use `ctest -E Cuda`.
@@ -346,6 +349,129 @@ The steps are the same, with a few differences.
 | errors that mention NumPy and a folder `~/.local` | Python mixes in packages installed outside conda | `conda env config vars set PYTHONNOUSERSITE=1` and reactivate the environment |
 | CUDA: `Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)` | the driver supports an older CUDA than the OpenMM build | update the NVIDIA driver; on a cluster with data-centre GPUs use `cuda-compat` ([section 10](#10-on-a-computing-cluster)) |
 | `Segmentation fault` with the OpenCL platform on an NVIDIA GPU | `cuda-compat` in `LD_LIBRARY_PATH`, or the `pocl` package exposing a second OpenCL device | remove `cuda-compat` from `LD_LIBRARY_PATH` for OpenCL runs; set `export OCL_ICD_VENDORS=/etc/OpenCL/vendors` to use only NVIDIA's driver |
+| `cmake` warning `The linker flags (from LDFLAGS) contain ..., which holds another OpenMM library` | the active conda environment has another OpenMM than `OPENMM_DIR` | activate the environment of `OPENMM_DIR`, or configure in a new build folder without these flags ([section 12](#which-openmm-is-used)) |
+| `make: *** No rule to make target 'PythonInstall'` | the Python module is not built: `cmake` printed why (`... the Python wrapper of openmm-lbm is not built.`) | install what is missing ([section 12](#what-is-built)) and run `cmake` again in a new build folder |
+| `ctest` runs fewer tests than expected (5 instead of 8 on a computer with an NVIDIA GPU) | a platform was not built: `cmake` printed why | install what is missing ([section 12](#what-is-built)), or ignore it if that platform is not needed |
 | a test marked `Failed` | a real problem | run that test alone with `ctest -R <name> --output-on-failure` and send the output to the developers |
 
 Errors that appear while running simulations are explained in [troubleshooting](troubleshooting.md).
+
+## 12. What CMake checks, and the build options
+
+This section is a reference: steps 7 and 8 work without it with OpenMM from conda-forge. It is useful with
+an OpenMM compiled from source, on a cluster, or when `cmake` leaves out a platform.
+
+### What is built
+
+The Reference platform is always built. Each other part is built only if everything it needs is installed:
+
+| Part | Option | What it needs |
+|---|---|---|
+| CUDA platform | `LBM_BUILD_CUDA_LIB` | the CUDA platform of the OpenMM in `OPENMM_DIR`: `include/openmm/cuda/CudaContext.h` and the library `libOpenMMCUDA` in `lib` or `lib/plugins`; the CUDA toolkit (`nvcc`) with the CUDA driver library (`libcuda`, or the stub library of the toolkit on a computer without a GPU) |
+| OpenCL platform | `LBM_BUILD_OPENCL_LIB` | the OpenCL platform of OpenMM: `include/openmm/opencl/OpenCLContext.h` and `libOpenMMOpenCL`; the OpenCL headers and library (`libOpenCL`; with conda, the packages `opencl-headers` and `ocl-icd`) |
+| HIP platform | `LBM_BUILD_HIP_LIB` | the HIP platform of OpenMM: `include/openmm/hip/HipContext.h` and `libOpenMMHIP`; HIP (ROCm), found through `ROCM_PATH` or in `/opt/rocm` |
+| Python module `openmmlbm` | `LBM_BUILD_PYTHON_WRAPPERS` | `python`, which must import `openmm`, `numpy`, `setuptools` and `pip`; `swig`, of the version that made the OpenMM Python module; the SWIG files of OpenMM (`include/swig`) and the headers of its plugins (`OpenMMAmoeba.h`, `OpenMMDrude.h`, `openmm/RPMDIntegrator.h`, `openmm/RPMDMonteCarloBarostat.h`), which OpenMM installs with its own Python module |
+
+OpenMM from conda-forge has the CUDA and OpenCL platforms and its Python module, so with it only the system
+side matters (the CUDA toolkit, the OpenCL library).
+
+For each part that it leaves out, `cmake` says why, for example:
+
+```
+-- HIP was not found on this system: the HIP plugin of openmm-lbm is not built.
+-- OpenMM in /work/openmm was built without the OpenCL platform (include/openmm/opencl/OpenCLContext.h and the OpenMMOpenCL library in lib or lib/plugins are required): the OpenCL plugin of openmm-lbm is not built.
+-- /usr/bin/python3 cannot import the Python module openmm: the Python wrapper of openmm-lbm is not built.
+```
+
+and it ends with the list of what will be built:
+
+```
+-- openmm-lbm 0.2.1: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes
+```
+
+The tests of a platform that is not built are not built, so `ctest` runs fewer tests: 2 (serialization and
+Reference), plus 3 for each GPU platform. Without the Python module, `make PythonInstall` stops with
+`No rule to make target 'PythonInstall'`.
+
+### Choosing the parts
+
+- **Default.** Each option is `ON` when everything the part needs is found, `OFF` otherwise.
+- **Leaving a part out.** `-DLBM_BUILD_OPENCL_LIB=OFF` (and likewise for the other options) does not build
+  that part even if it could be built.
+- **Asking for a part that cannot be built.** `-DLBM_BUILD_OPENCL_LIB=ON` when something is missing stops
+  `cmake` with an error that says what is missing, instead of letting `make` fail later:
+
+  ```
+  CMake Error at CMakeLists.txt:... (MESSAGE):
+    LBM_BUILD_OPENCL_LIB is ON, but OpenMM in /work/openmm was built without the OpenCL platform (...): the
+    OpenCL plugin of openmm-lbm cannot be built.  Configure with -DLBM_BUILD_OPENCL_LIB=OFF, or install what
+    is missing.
+  ```
+
+- **The build folder remembers the options** (in its `CMakeCache.txt`), also those chosen by an earlier
+  `cmake`. After changing `OPENMM_DIR` or installing something that was missing, configure in a new, empty
+  build folder: otherwise a part stays out, or `cmake` stops with the error above.
+
+### Other options
+
+| Option | Meaning |
+|---|---|
+| `OPENMM_DIR` | the OpenMM installation, with the headers in `include` and the libraries in `lib`; with conda, `$CONDA_PREFIX` |
+| `CMAKE_INSTALL_PREFIX` | where `make install` copies the plugin; the platform libraries go to its `lib/plugins`, where OpenMM looks for plugins when it starts, so it is normally the same folder as `OPENMM_DIR` |
+| `PYTHON_EXECUTABLE`, `SWIG_EXECUTABLE` | the full path of `python` and `swig`, if they are not the first ones in `PATH` |
+| `CMAKE_C_COMPILER`, `CMAKE_CXX_COMPILER` | the compilers, if not the default ones; use those that compiled OpenMM |
+| `LBM_DEBUG` | `ON` adds diagnostics of the fluid (`docs/theory.md`, section 6) |
+
+### Checks on OpenMM
+
+- **Version.** `cmake` compiles a small program linked to the OpenMM library of `OPENMM_DIR` and prints the
+  version it reports (`-- OpenMM 8.6.1 in ...`). It stops with an error if the version is older than 8.3,
+  and warns if it is newer than 8.6, the newest tested version. If the version cannot be read, it warns;
+  in any case it requires `openmm/common/ComputeSort.h`, which OpenMM has since 8.3.
+- **Library.** It stops if `OPENMM_DIR/lib` has no OpenMM library.
+- **SWIG.** The Python module must be generated by the same SWIG version as the OpenMM Python module,
+  otherwise OpenMM does not recognize an `LBMForce` as a `Force`: `cmake` compares the two versions and
+  stops with an error that names the version to install.
+
+### Which OpenMM is used
+
+- **Headers.** They come from `OPENMM_DIR/include`, which the compiler searches before its own folders.
+  A header that is missing there would be taken from the compiler's folders: the compilers of conda search
+  `$CONDA_PREFIX/include`, where the environment may have another, complete OpenMM. This is why `cmake`
+  checks each platform in `OPENMM_DIR` before building it.
+- **Libraries.** The OpenMM library and the platform libraries are linked by their full path in
+  `OPENMM_DIR`, for the plugin libraries, the tests and the Python module. With `-lOpenMM` the linker would
+  take the first library of that name in its search path, where the linker flags of an active conda
+  environment (`LDFLAGS`) put the environment's `lib` before `OPENMM_DIR`.
+- **At run time.** Programs (the tests, Python) load the OpenMM they find through their run path and the
+  library path, and the run path set by `LDFLAGS` comes first. If the linker flags contain a folder with
+  another OpenMM library, `cmake` warns:
+
+  ```
+  CMake Warning at CMakeLists.txt:... (MESSAGE):
+    The linker flags (from LDFLAGS) contain /home/me/miniforge3/envs/other/lib, which holds another OpenMM
+    library than the one in /work/openmm.  openmm-lbm is linked to the OpenMM in OPENMM_DIR, but its tests
+    and programs may load the other one when they run: build in the environment whose OpenMM is the one in
+    OPENMM_DIR, or without these linker flags.
+  ```
+
+  The usual case has no warning: the environment is active and `OPENMM_DIR` is `$CONDA_PREFIX`. Otherwise
+  activate the environment of `OPENMM_DIR`, or configure in a new build folder without the flags of the
+  other environment (for example after `unset LDFLAGS`).
+
+### OpenMM compiled from source
+
+- **The platforms of the plugin are those of OpenMM.** If the `cmake` of OpenMM did not find OpenCL (or
+  CUDA), OpenMM has no such platform, and the plugin cannot have it either: its `cmake` says so and builds
+  the others. `python -m openmm.testInstallation` lists the platforms of OpenMM. To add one, compile OpenMM
+  again with it, then configure the plugin in a new build folder.
+- **The Python module of OpenMM** must be installed (`make PythonInstall` of OpenMM): the plugin's Python
+  module needs its SWIG files and imports it.
+- **The same compiler** for OpenMM and the plugin (`CMAKE_C_COMPILER`, `CMAKE_CXX_COMPILER`): a plugin
+  compiled with an older compiler than OpenMM may fail to start with `version 'CXXABI_...' not found`.
+- **No GPU on the build machine.** The CUDA driver library is needed to link: the CUDA toolkit has a stub
+  of it (`lib64/stubs/libcuda.so`), which CMake finds by itself. If linking the tests then fails with
+  `libcuda.so.1` not found, make a link named `libcuda.so.1` to the stub in a folder of its own and add that
+  folder to `LD_LIBRARY_PATH` only for `make`. The programs must run with the real driver, on the GPU nodes,
+  without that folder in `LD_LIBRARY_PATH`.
+

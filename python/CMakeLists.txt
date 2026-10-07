@@ -36,8 +36,13 @@ add_custom_command(
 # Compile the Python module.
 
 add_custom_target(PythonInstall DEPENDS "${WRAP_FILE}" "${CMAKE_CURRENT_SOURCE_DIR}/setup.py")
+add_dependencies(PythonInstall ${SHARED_LBM_TARGET})
 set(LBM_PLUGIN_HEADER_DIR "${CMAKE_SOURCE_DIR}/openmmapi/include")
-set(LBM_PLUGIN_LIBRARY_DIR "${CMAKE_BINARY_DIR}")
+IF(WIN32)
+    set(LBM_PLUGIN_LIBRARY "${CMAKE_BINARY_DIR}/${CMAKE_IMPORT_LIBRARY_PREFIX}${SHARED_LBM_TARGET}${CMAKE_IMPORT_LIBRARY_SUFFIX}")
+ELSE()
+    set(LBM_PLUGIN_LIBRARY "${CMAKE_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${SHARED_LBM_TARGET}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+ENDIF()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/setup.py ${CMAKE_CURRENT_BINARY_DIR}/setup.py)
 add_custom_command(TARGET PythonInstall POST_BUILD
     COMMAND "${PYTHON_EXECUTABLE}" -m pip install --no-deps --no-build-isolation .

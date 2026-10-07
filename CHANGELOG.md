@@ -3,6 +3,16 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Changed
+- Build: the OpenMM library and the platform libraries are linked by their full path in `OPENMM_DIR`, for the
+  plugin, the tests and the Python module, instead of `-lOpenMM` with the search path, in which the linker
+  flags of an active conda environment (`LDFLAGS`) put the environment, which may hold another OpenMM, before
+  `OPENMM_DIR`. CMake warns if the linker flags contain a folder with another OpenMM library, which the
+  programs could load at run time. `make PythonInstall` builds the plugin library first. Section 12 of
+  `docs/user_guide/installation.md` documents what CMake checks, the build options and their messages.
+
 ## 0.2.1 (2026-10-07)
 
 A fix of the build: CMake builds only the platforms that the OpenMM in `OPENMM_DIR` has. The physics and the

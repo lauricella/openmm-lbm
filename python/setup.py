@@ -14,7 +14,11 @@ import platform
 version = '@OPENMM_LBM_VERSION@'
 openmm_dir = '@OPENMM_DIR@'
 lbm_plugin_header_dir = '@LBM_PLUGIN_HEADER_DIR@'
-lbm_plugin_library_dir = '@LBM_PLUGIN_LIBRARY_DIR@'
+# The libraries are linked by full path: with -l the linker would take the first library of that name in its
+# search path, where the linker flags of an active conda environment put the environment, which may hold
+# another OpenMM or an older openmm-lbm (docs/user_guide/installation.md).
+openmm_library = '@OPENMM_LIBRARY@'
+lbm_plugin_library = '@LBM_PLUGIN_LIBRARY@'
 
 extra_compile_args = ['-std=c++17']
 extra_link_args = []
@@ -27,9 +31,8 @@ if platform.system() == 'Darwin':
 
 extension = Extension(name='_openmmlbm',
                       sources=['LBMPluginWrapper.cpp'],
-                      libraries=['OpenMM', 'OpenMMLBM'],
                       include_dirs=[os.path.join(openmm_dir, 'include'), lbm_plugin_header_dir, numpy.get_include()],
-                      library_dirs=[os.path.join(openmm_dir, 'lib'), lbm_plugin_library_dir],
+                      extra_objects=[openmm_library, lbm_plugin_library],
                       runtime_library_dirs=runtime_library_dirs,
                       extra_compile_args=extra_compile_args,
                       extra_link_args=extra_link_args
