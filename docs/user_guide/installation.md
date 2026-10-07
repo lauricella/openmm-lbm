@@ -207,8 +207,11 @@ What each command does:
 
 1. `cmake` looks for OpenMM, the compiler and SWIG, decides which platforms to build and writes the
    build instructions. Among its messages it prints the version of OpenMM it found, for example
-   `-- OpenMM 8.6.1 in /home/<you>/miniforge3/envs/lbm`, and it ends with
-   `-- Build files have been written to: ...`. It stops with an error if OpenMM is older than 8.3 (the
+   `-- OpenMM 8.6.1 in /home/<you>/miniforge3/envs/lbm`, says why it leaves out a platform, for example
+   `-- HIP was not found on this system: the HIP plugin of openmm-lbm is not built.`, prints what it builds,
+   `-- openmm-lbm 0.2.1: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes`, and it ends with
+   `-- Build files have been written to: ...`. A GPU platform is built only if the OpenMM in `OPENMM_DIR` has
+   it (an OpenMM compiled from source may lack OpenCL, CUDA or HIP) and the system can compile it. It stops with an error if OpenMM is older than 8.3 (the
    message gives the version found), and warns if it is newer than 8.6, the newest tested version. It
    also stops if the SWIG version is wrong: the message names the version of SWIG (major and minor) that
    made the OpenMM Python module; install it (for OpenMM 8.6.1 from conda-forge,
@@ -218,8 +221,9 @@ What each command does:
 3. `make install` copies the libraries into the environment.
 4. `make PythonInstall` builds and installs the Python module `openmmlbm`.
 
-To see which platforms were built: `cmake -LA . | grep LBM_BUILD` prints `ON` or `OFF` for CUDA, OpenCL
-and HIP. The Reference platform is always built.
+To see which platforms were built: the line `platforms to build` of `cmake`, or `cmake -LA . | grep LBM_BUILD`,
+which prints `ON` or `OFF` for CUDA, OpenCL, HIP and the Python wrapper. The Reference platform is always
+built. The tests of a platform that is not built are not built either.
 
 ## 8. Run the tests
 
@@ -338,6 +342,7 @@ The steps are the same, with a few differences.
 | `TypeError` in `system.addForce(force)` | the plugin's Python module was made with a different SWIG version from OpenMM's | install the SWIG version named by `cmake` and repeat step 7 from `cmake` |
 | `cmake` error `openmm-lbm requires OpenMM 8.3 or later, but the OpenMM in ... is version ...` | the environment has an OpenMM older than 8.3, or `OPENMM_DIR` points to another installation | create the environment again with `openmm=8.6.1`, and pass `-DOPENMM_DIR=$CONDA_PREFIX` with the environment active |
 | `cmake` error `OpenMM was not found in ...` | `OPENMM_DIR` is wrong, or the environment is not active | `conda activate lbm`, then `cmake` with `-DOPENMM_DIR=$CONDA_PREFIX` |
+| `cmake` error `LBM_BUILD_OPENCL_LIB is ON, but OpenMM in ... was built without the OpenCL platform` (or CUDA, HIP, the Python wrapper) | the option was set to `ON`, on the command line or by an earlier `cmake` in the same build folder, for a part that this OpenMM or system lacks | configure with `-DLBM_BUILD_OPENCL_LIB=OFF` (or the option named), or use a new build folder |
 | errors that mention NumPy and a folder `~/.local` | Python mixes in packages installed outside conda | `conda env config vars set PYTHONNOUSERSITE=1` and reactivate the environment |
 | CUDA: `Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)` | the driver supports an older CUDA than the OpenMM build | update the NVIDIA driver; on a cluster with data-centre GPUs use `cuda-compat` ([section 10](#10-on-a-computing-cluster)) |
 | `Segmentation fault` with the OpenCL platform on an NVIDIA GPU | `cuda-compat` in `LD_LIBRARY_PATH`, or the `pocl` package exposing a second OpenCL device | remove `cuda-compat` from `LD_LIBRARY_PATH` for OpenCL runs; set `export OCL_ICD_VENDORS=/etc/OpenCL/vendors` to use only NVIDIA's driver |

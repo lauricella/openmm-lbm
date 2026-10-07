@@ -3,6 +3,19 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Fixed
+- Build: a GPU platform is built only if the OpenMM in `OPENMM_DIR` has it, that is its header
+  (`include/openmm/opencl/OpenCLContext.h`, `cuda/CudaContext.h`, `hip/HipContext.h`) and its library (in `lib`
+  or `lib/plugins`), besides the toolkit that compiles it. Before, CMake looked only for the toolkit on the
+  system, so with an OpenMM compiled from source without OpenCL, on a system with OpenCL, `cmake` succeeded
+  and `make` stopped with `fatal error: openmm/opencl/OpenCLContext.h: No such file or directory`. Versions
+  0.1.0 and 0.2.0 are affected. The Python wrapper is built only if Python imports the OpenMM module, NumPy,
+  setuptools and pip, SWIG is found, and OpenMM has its SWIG files and the headers of its plugins. CMake says why it leaves
+  a part out and prints the list of what it builds; an option set to `ON` for a part that cannot be built
+  stops `cmake` with an error, instead of the build. The tests of a platform that is not built are not built.
+
 ## 0.2.0 (2026-10-07)
 
 The centred drag on all platforms, beside the explicit drag of version 0.1.0, which stays the default and is
