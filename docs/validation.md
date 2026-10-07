@@ -82,7 +82,39 @@ the platform runs in double precision (`docs/theory.md`, section 2).
 | Checkpoint refused | different number of coupled particles, or data that are not a checkpoint (`testCheckpointMismatch`) | exception |
 | Warning | friction*dt > 1 is reported at Context creation | |
 | Equipartition | 100 free particles, gamma dt = 0.1, T = 300 K: full-step temperature close to T, half-step temperature close to T/(1 - gamma dt/2) | 10% (measured 4% below, from the missing fluid fluctuations) |
-| Warning on tau | tau > 1.7 with coupled particles is reported at Context creation | |
+| Warning on tau | tau > 1.7 with coupled particles and the explicit drag is reported at Context creation | |
+| Repeated force evaluation | 8000 particles with a short-range `CustomNonbondedForce`, compressed into a cube of 2 nm so that the neighbor list overflows and the GPU platforms repeat the force evaluation of the step: the total momentum is conserved in that step (`testRepeatedForceEvaluation`; GPU platforms only) | 1e-11 relative (1.3e-2 before the fix, on CUDA and OpenCL) |
+
+The tests that do not depend on the drag (full-step kinetic energy, momentum conservation, moving with the
+fluid, partial coupling, force evaluations and seeds, momentum with walls, restart, checkpoint with random
+force, equipartition) run again with the centred drag (next section).
+
+## Centred drag (`tests/TestLBMCentered.h`, Reference platform)
+
+| Test | Checks | Tolerance |
+|---|---|---|
+| First step | a particle in a fluid at rest: v1 = v0 (1 - a + a m/m_c)/(1 + a + a m/m_c), a = gamma dt/2; then the force of the next step | 1e-14, 1e-12 |
+| Shared node | three particles of 80, 120 and 150 Da at one node and a fourth alone, external forces, uniform flow and body acceleration: velocities after the first step against the direct solution of the linear system of the drag, and the momentum received by the fluid (j + G at every node, G = body force - S) | 1e-12, 1e-11 |
+| Wall | a particle at a solid node moving out of the wall: v1 = v0 (1 - a)/(1 + a), and the wall receives the opposite of its coupling force | 1e-14, 1e-12 |
+| Large friction | gamma dt = 3, four particles at one node: velocities decay, total momentum conserved | 1e-11 |
+| Requirements | `LBMForce` not last, virtual sites, change of the drag in `updateParametersInContext()`, checkpoint loaded with the other drag | exception |
+| Equipartition | as above, with a fluid 100 times denser: half-step temperature close to T, full-step close to T/(1 + gamma dt/2) | 10% |
+
+**Fluctuation-dissipation balance without the response of the fluid** (Reference, fluid 10^4 times denser,
+100 particles of 100 Da, 300 K, 200000 steps, three seeds, error from 20 blocks). Ratio of the measured
+temperature to the exact value of the discretization (explicit: T at full steps, T/(1 - gamma dt/2) at half
+steps; centred: T at half steps, T/(1 + gamma dt/2) at full steps), mean of the three seeds:
+
+| gamma dt | explicit, full step | explicit, half step | centred, half step | centred, full step |
+|---|---|---|---|---|
+| 0.1 | 1.0002 | 1.0001 | 1.0002 | 1.0002 |
+| 0.5 | 0.9999 | 0.9999 | 0.9999 | 0.9999 |
+| 1.5 | 1.0000 | 0.9999 | 0.9999 | 0.9999 |
+
+The statistical error of each mean is about 4e-4 at gamma dt = 0.1 and 1.5e-4 at 1.5. The kinetic energy that
+OpenMM reports gives the full-step values.
+
+**Temperature with the fluid** and **self-mobility y(tau)** of the two drags: `docs/theory.md`, section 2.
 
 **Temperature** (Reference, 200 free beads of 100 Da, 16^3 nodes, tau = 1.10, gamma dt = 0.1, T = 300 K,
 20000 steps): 295.8 +- 0.4 K from full-step velocities, 311.7 +- 0.4 K from half-step velocities

@@ -249,9 +249,21 @@ gamma = 5/ps, protocol of `docs/validation.md`):
 
 y vanishes at tau = 1.79 (1.79 also for m = 100 Da, gamma = 10/ps), the value found with the reference
 library. Above it, particles move less than Langevin particles with the same friction. A warning is
-printed when a Context with coupled particles has tau > 1.7. The centred drag (below) and a relaxation of
-the ghost moments independent of tau are the candidate corrections; the self-mobility of the centred drag
-is still to be measured.
+printed when a Context with coupled particles and the explicit drag has tau > 1.7.
+
+With the centred drag (Drag schemes, below) the drag sees the fluid velocity with half of the reaction of
+the particle in the same step, h S/m_c, so y grows by dt/(2 m_c), that is by (tau - 1/2)/6 in units of
+1/(eta dx). The same protocol, run with both drags, gives exactly that:
+
+| tau | 0.62 | 0.8 | 1.1 | 1.5 | 1.8 | 2.0 | 3.51 |
+|---|---|---|---|---|---|---|---|
+| y eta dx, explicit | 0.0609 | 0.0577 | 0.0443 | 0.0202 | -0.0007 | -0.0154 | -0.1406 |
+| y eta dx, centred | 0.0808 | 0.1077 | 0.1443 | 0.1868 | 0.2160 | 0.2346 | 0.3611 |
+| explicit + (tau - 1/2)/6 | 0.0809 | 0.1077 | 0.1443 | 0.1868 | 0.2160 | 0.2346 | 0.3611 |
+
+(m = 1000 Da, gamma = 5/ps; m = 100 Da, gamma = 10/ps gives the same values within 0.003.) With the
+centred drag y is positive at every tau, but y eta dx grows with tau: neither drag gives a self-mobility
+independent of tau. A relaxation of the ghost moments independent of tau is the next candidate correction.
 
 **Kinetic temperature.** OpenMM's leapfrog stores the velocities at half steps.
 - For a free particle with fluid at rest, the temperature measured from half-step velocities is
@@ -341,8 +353,14 @@ nodes, dx = 0.5 nm, dt = 0.01 ps, tau = 0.8, gamma dt = 0.1, T = 300 K, particle
 | `Centered`, half-step T (K) | 269.6 | 275.9 | 296.7 |
 
 With a heavy fluid both schemes give T to 1%; at the density of water the deficit of the centred drag is
-8-10% and does not decrease with fewer particles. A fluid with thermal fluctuations is needed for the right
-temperature with either scheme.
+8-10% and does not decrease with fewer particles. It follows from linear response: with F = -zeta (v - u) + R and
+the fluid answering the reaction with u = -y F, the force is (-zeta v + R)/(1 + zeta y), and the kinetic
+temperature is T/(1 + zeta y). The centred drag has y larger by dt/(2 m_c) (Self-mobility, above), so
+zeta (y_centred - y_explicit) = gamma dt m/(2 m_c): measured 0.032, 0.063 and 0.127 at gamma dt = 0.05, 0.1
+and 0.2 with 10 particles, against 0.033, 0.066 and 0.133. With a fluid that does not respond (10^4 times
+denser) both drags give the exact values of their discretization, at gamma dt = 0.1, 0.5 and 1.5, within
+1e-4 (`docs/validation.md`). A fluid with thermal fluctuations is needed for the right temperature with either
+scheme; it would make y appear in the diffusion coefficient, D = kT (1/zeta + y), instead.
 
 **Per-cell reaction on the GPU platforms.** The reaction forces of the particles in the same cell are
 summed without atomic operations (`platforms/common/src/kernels/lbmCoupling.cc`), by sorting keys and

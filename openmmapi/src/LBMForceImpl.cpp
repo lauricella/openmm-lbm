@@ -148,9 +148,10 @@ void LBMForceImpl::initialize(ContextImpl& context) {
              << "the time step or the lattice spacing." << endl;
 
     // With the explicit drag at the nearest node, the hydrodynamic part of the self-mobility of a coupled particle
-    // decreases as tau grows and becomes negative at tau = 1.79 (docs/theory.md, section 2).
+    // decreases as tau grows and becomes negative at tau = 1.79 (docs/theory.md, section 2).  With the centred drag
+    // it stays positive.
 
-    if (!lattice.particles.empty() && lattice.tau > 1.7)
+    if (!lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.tau > 1.7)
         cerr << "Warning: LBMForce: tau = " << lattice.tau << " > 1.7: with the explicit drag at the nearest node "
              << "the hydrodynamic self-mobility of a coupled particle is small, and negative above tau = 1.79, so "
              << "particles move less than they should. Reduce the viscosity or the time step, or use a coarser "
