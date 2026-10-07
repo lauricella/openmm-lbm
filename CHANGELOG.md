@@ -14,7 +14,13 @@ versions the API may still change.
   `NVE` scheme. The random numbers come from the generator of the force on the Reference platform and from
   OpenMM's generator on the CUDA, OpenCL and HIP platforms (64 bytes per node). Without fluctuations, or at zero
   temperature, the run is identical, bit for bit, to that of version 0.2.1. Serialization version 5 and checkpoint version 3 record the switch; older files are read
-  without fluctuations. `docs/theory.md`, section 7.
+  without fluctuations. `docs/theory.md`, section 7. Validated on an NVIDIA A100 (`docs/validation.md`): with the
+  centred drag the coupled particles have the set temperature, their velocity autocorrelation equals the
+  response to a kick and their diffusion coefficient follows the Einstein relation; the explicit drag makes them
+  too hot, by about friction x dt x m/(2 m_c), so the documentation recommends the centred drag with the
+  fluctuating fluid. Close to tau = 1/2 the fluctuating fluid is unstable (tau <= 0.501 at kT = 1/3000 in lattice
+  units).
+- `examples/cocomo/diffusion.py --fluid-fluctuations`.
 
 ### Changed
 - Build: the OpenMM library and the platform libraries are linked by their full path in `OPENMM_DIR`, for the

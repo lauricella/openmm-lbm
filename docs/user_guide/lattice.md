@@ -182,9 +182,13 @@ Context is created.
 | Cost on a GPU | | 0 to 6% more |
 | Same results as | version 0.1.0 and the DragOpenMM library | |
 
-**Use the explicit drag** (the default) in most cases: it is accurate for friction x dt up to about 0.1, it
-reproduces the previous results, the temperature that OpenMM reports is right, and with the fluid of this
-version (without thermal fluctuations) its particles are the closest to T (next paragraph).
+**With the fluctuating fluid** ([`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations))
+**use the centred drag**: its particles have the set temperature (at half steps), while the explicit drag makes
+them too hot (last paragraph).
+
+**Without fluid fluctuations use the explicit drag** (the default) in most cases: it is accurate for friction x dt
+up to about 0.1, it reproduces the previous results, the temperature that OpenMM reports is right, and its
+particles are the closest to T (next paragraph).
 
 **Use the centred drag** when the explicit drag is unstable: large friction, or several heavy beads at a
 node. With beads of 130 Da, dx = 0.5 nm and dt = 0.01 ps, three or four beads at a node make the explicit
@@ -199,8 +203,8 @@ import openmmlbm
 # simulation.reporters.append(openmmlbm.LBMTemperatureReporter('temperature.txt', 1000, force))
 ```
 
-**Both drags give particles colder than T** at the density of water, because the fluid has no thermal
-fluctuations of its own ([limitations](README.md#limitations-of-the-model)). The centred drag couples a
+**Without fluid fluctuations both drags give particles colder than T** at the density of water, because the
+fluid has no thermal fluctuations of its own ([limitations](README.md#limitations-of-the-model)). The centred drag couples a
 particle to its own cell within the step, and is colder, the more so the larger friction x dt and the
 mass of the bead in units of the mass of fluid in a cell, m/m_c (m_c = 75 Da with dx = 0.5 nm), while the
 diffusion coefficient is the same with both drags. Measured at 298 to 300 K, each drag with its right
@@ -215,9 +219,26 @@ velocity ([validation](../validation.md)):
 
 With a fluid much heavier than the particles both give T
 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), temperature with a fluid
-without fluctuations). A fluid with thermal fluctuations
-([`setFluidFluctuations()`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)) should give
-T with both; its validation with particles is to come.
+without fluctuations).
+
+**With the fluctuating fluid only the centred drag gives T.** The thermal motion of the fluid at the node of a
+particle pushes it; the reaction of the particle on its cell compensates this exactly only if the drag sees the
+response of the cell within the step, as the centred drag does. The explicit drag sees it one half step late, and
+its particles are too hot by about friction x dt x m/(2 m_c), the mirror image of the deficit above
+([theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), particles in the fluctuating fluid).
+Measured at 300 K with the fluctuating fluid, each drag with its right velocity
+([validation](../validation.md)):
+
+| System | friction x dt | m/m_c | explicit | centred |
+|---|---|---|---|---|
+| free beads of 100 Da | 0.05 | 1.3 | 3% above T | T within 0.2% |
+| free beads of 100 Da | 0.1 | 1.3 | 6% above T | T within 0.3% |
+| free beads of 100 Da | 0.2 | 1.3 | 14% above T | T within 0.3% |
+| free beads of 1000 Da | 0.01 | 13 | 6% above T | T within 0.4% |
+| free beads of 1000 Da | 0.1 | 13 | 56% above T | T within 0.1% |
+
+With both drags the diffusion coefficient now contains the hydrodynamic contribution of the thermal flows, and
+with the centred drag it follows the Einstein relation D = kT x mobility.
 
 ## Velocity of the fluid
 

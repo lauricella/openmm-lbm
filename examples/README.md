@@ -100,6 +100,7 @@ python $EX/cocomo/diffusion.py --preset smoke            # SOD1, 2000 steps: a q
 python $EX/cocomo/diffusion.py --preset sod1 --seed 1    # SOD1, 200 ns, about 30 minutes on an A100
 python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient of the protein
 # with --drag Centered the prefix of the files is sod1_lb_on_centered
+# with a fluctuating fluid use the centred drag: --drag Centered --fluid-fluctuations (prefix sod1_lb_on_centered_fluct)
 ```
 
 - `--preset sod1` reproduces the runs of the DragOpenMM project with the folded protein SOD1 (box

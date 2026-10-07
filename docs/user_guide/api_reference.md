@@ -269,12 +269,23 @@ thermal energy only from the reaction to the random forces on the coupled partic
 ([limitations](README.md#limitations-of-the-model)). With `True`, every collision adds to the populations of
 each node a random part that conserves its mass and momentum and gives the stress and the higher moments their
 equilibrium fluctuations (ghost-mode filtered fluctuating lattice Boltzmann,
-[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-the-reference-platform-cuda-opencl-and-hip-to-come),
+[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms),
 section 7). It works with both coupling schemes: with `NVE` the particles have no random force and are
 thermalized by the fluid only. The random numbers of the fluid come from the seed of
 [`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed). It is fixed when the Context is
 created. On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's generator, which needs
 64 bytes per lattice node; a step costs about 30% to 40% more on an NVIDIA A100.
+
+With the fluctuating fluid **use the centred drag**
+([`setDragScheme(LBMForce.Centered)`](#setdragschemescheme-getdragscheme)) and measure the temperature with
+[`LBMTemperatureReporter`](#openmmlbmlbmtemperaturereporterfile-reportinterval-force): the coupled particles then
+have the set temperature, their diffusion coefficient contains the hydrodynamic contribution of the thermal
+flows, and the Einstein relation holds. With the explicit drag the particles are too hot, by up to
+friction x dt x m/(2 m_c) (13% for beads of 100 Da with friction 10/ps and dt = 0.02 ps, 56% for beads of
+1000 Da with friction 10/ps and dt = 0.01 ps; [choosing the drag](lattice.md#choosing-the-drag)). Keep tau at
+0.505 or above: closer to 1/2 the fluctuating fluid becomes unstable (at tau <= 0.501 with kT = 1/3000 in
+lattice units, at tau = 0.5001 for water with dx = 0.5 nm and dt = 0.01 ps;
+[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), stability near tau = 1/2).
 
 ```python
 force.setFluidFluctuations(True)

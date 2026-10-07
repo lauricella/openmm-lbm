@@ -22,7 +22,7 @@ the plugin converts the parameters to lattice units.
 | `LBMForce requires a VerletIntegrator: drag and random forces are part of the force` | Use `VerletIntegrator`. Langevin and other thermostatted integrators would add a second friction. |
 | `LBMForce does not support running on multiple devices` | Use a single GPU (`DeviceIndex` with one value). |
 | `the integrator step size changed after the Context was created; reinitialize the Context` | The step size is the lattice time step and cannot change. Create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()`. |
-| `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration or the forces on the fluid, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). |
+| `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration or the forces on the fluid, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). With fluid fluctuations and tau very close to 1/2 (below about 0.502) the fluid can become unstable by itself: keep tau at 0.505 or above ([`setFluidFluctuations()`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)). |
 | `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have 19 nx ny nz values. |
 | `the checkpoint was written on the platform X, not on Y` | A checkpoint can only be loaded on the platform where it was written. Use the same platform, or move the run with `saveState()` and `getFluidState()` ([restart](restart.md#moving-a-run-to-another-platform)). |
 | `the checkpoint was written with a different precision` | The precision (single, mixed, double) differs from that of the checkpoint. Create the Context with the same `Precision` property. |
@@ -87,6 +87,12 @@ disordered protein of `examples/cocomo/diffusion.py --preset rlp`, friction 100/
 temperature is higher, T/(1 - friction*dt/2) for a free particle. With the centred drag the right
 temperature is that of the half step, which `openmmlbm.LBMTemperatureReporter` reports, and the log of
 `StateDataReporter` is lower still; the centred drag is colder than the explicit one
+([choosing the drag](lattice.md#choosing-the-drag)).
+
+**With fluid fluctuations the particles are hotter than the set temperature.** With the explicit drag the
+thermal motion of the fluid heats the coupled particles by up to friction*dt*m/(2 m_c), where m_c is the mass of
+fluid in a cell (56% for beads of 1000 Da with friction 10/ps, dt = 0.01 ps and dx = 0.5 nm). Use the centred
+drag with the fluctuating fluid, and measure the temperature with `openmmlbm.LBMTemperatureReporter`
 ([choosing the drag](lattice.md#choosing-the-drag)).
 
 **Particles that are not coupled cross the walls.** Only coupled particles are reflected at solid

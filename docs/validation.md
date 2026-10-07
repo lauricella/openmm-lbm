@@ -186,6 +186,143 @@ new Context; with 8.6.1 it passed. The buffer is now enlarged when the Context i
 temperature, the fluid, positions and velocities after 40 steps with walls, body force and six coupled particles
 (explicit and centred drag, EM and NVE) are identical, bit for bit, to those of commit `85029a7` (version 0.2.1 with a change of the build only).
 
+### Equilibrium spectra (CUDA, NVIDIA A100)
+
+The protocol of the article of the model (reference 17 of `docs/theory.md`), on a periodic fluid of 64^3 nodes
+with one particle that is not coupled, without removal of the fluid momentum, from rest. kT = 1/3000 in lattice
+units, the value of the article (dx = 1 nm, the density of water, 300 K and dt = 0.284 ps give it), and
+kT = 1.3e-5 (water at dx = 0.5 nm and dt = 0.01 ps). After a transient of 2e4 steps, or 5/(2 nu k_1^2) steps if
+longer (k_1 = 2 pi/64, the slowest mode), 400 snapshots every 2500 steps. Each snapshot gives, at every node, the
+density, the momentum, the non-equilibrium stress a2_ab = sum_q (c_a c_b - delta_ab/3)(f_q - f_q^eq(rho, u))
+(the moments k = 4...9) and the nine non-equilibrium ghost moments of the basis of `docs/theory.md`, section 7,
+from `getFluidState()`, with the velocities of the populations read from `getFluidFields()`. For each field: the
+variance per node and the spherically averaged spectrum S_m(|k|) = <|m(k)|^2>, with the normalized FFT
+m(k) = sum_x m(x) exp(-i k.x)/sqrt(N) and shells of width 1 in the integer wave vector. In the linear regime the
+populations of all nodes are independent Gaussian variables of variance mu rho w_q: this state is stationary,
+because collision acts mode by mode with the variances of section 7 and streaming is a permutation. So the theory
+is S_m(|k|) = mu rho b_k for every |k|, and the equilibration ratio is ER = measured/theory. The four observables
+of the article are rho, sum_a j_a, sum_a a2_aa and sum_{a<b} a2_ab (theory mu, mu, 2 mu/3 and mu/3). Shells 1 to
+16 of 64^3 cover the window |k| in [4, 64] of the 256^3 lattice of the article. Statistical errors: about 1e-4
+for the ER per node (10 blocks), 0.02 to 0.04 for ER(|k|) in the first shells and 1e-3 above shell 10.
+
+ER per node of the four observables, range of ER(|k|) over shells 1 to 16, and range of the ER per node of all 19
+moments (kT = 1/3000):
+
+| tau | rho | sum j | sum a_aa | sum a_ab | ER(\|k\|) rho | ER(\|k\|) sum j | ER(\|k\|) sum a_aa | ER(\|k\|) sum a_ab | ER(\|k\|) ghosts | 19 moments, per node |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0.505 | 1.0060 | 1.0215 | 1.0526 | 1.0408 | 1.02-1.12 | 0.96-1.04 | 1.08-1.15 | 1.03-1.26 | 0.988-1.031 | 1.0018-1.0407 |
+| 0.51 | 1.0046 | 1.0101 | 1.0234 | 1.0193 | 1.01-1.06 | 1.00-1.02 | 1.03-1.10 | 1.02-1.11 | 0.986-1.029 | 1.0016-1.0193 |
+| 0.55 | 1.0023 | 1.0027 | 1.0052 | 1.0045 | 0.99-1.02 | 1.00-1.01 | 0.99-1.02 | 1.00-1.02 | 0.966-1.015 | 1.0011-1.0047 |
+| 0.7 | 1.0012 | 1.0009 | 1.0022 | 1.0017 | 1.00-1.03 | 1.00-1.02 | 0.98-1.01 | 0.99-1.01 | 0.966-1.016 | 1.0004-1.0019 |
+| 1 | 1.0007 | 1.0004 | 1.0015 | 1.0012 | 1.00-1.04 | 1.00-1.02 | 0.99-1.01 | 0.98-1.01 | 0.965-1.016 | 1.0001-1.0013 |
+| 1.5 | 1.0005 | 1.0001 | 1.0013 | 1.0011 | 0.99-1.05 | 1.00-1.02 | 0.99-1.01 | 0.98-1.01 | 0.964-1.016 | 0.9999-1.0011 |
+| 2 | 1.0003 | 1.0000 | 1.0012 | 1.0011 | 0.99-1.06 | 1.00-1.01 | 1.00-1.01 | 0.98-1.01 | 0.964-1.016 | 0.9999-1.0011 |
+| 5 | 1.0001 | 0.9999 | 1.0010 | 1.0010 | 0.99-1.05 | 0.99-1.01 | 1.00-1.01 | 0.99-1.00 | 0.966-1.017 | 0.9999-1.0011 |
+| 10 | 1.0000 | 0.9999 | 1.0009 | 1.0009 | 0.99-1.04 | 0.99-1.01 | 1.00-1.01 | 0.99-1.00 | 0.967-1.018 | 0.9998-1.0011 |
+| 50 | 0.9999 | 0.9999 | 1.0008 | 1.0008 | 1.00-1.02 | 0.99-1.01 | 1.00-1.01 | 0.99-1.01 | 0.968-1.019 | 0.9998-1.0010 |
+| 100 | 0.9999 | 0.9999 | 1.0008 | 1.0008 | 1.00-1.02 | 0.99-1.00 | 1.00-1.01 | 0.99-1.02 | 0.968-1.018 | 0.9998-1.0010 |
+
+The same with kT = 1.3e-5:
+
+| tau | rho | sum j | sum a_aa | sum a_ab | ER(\|k\|) rho | ER(\|k\|) sum j | ER(\|k\|) sum a_aa | ER(\|k\|) sum a_ab | ER(\|k\|) ghosts | 19 moments, per node |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0.501 | 1.0004 | 1.0028 | 1.0179 | 1.0114 | 0.95-1.04 | 0.94-1.01 | 1.03-1.04 | 1.00-1.06 | 0.966-1.019 | 0.9999-1.0117 |
+| 0.505 | 1.0000 | 1.0007 | 1.0021 | 1.0017 | 0.99-1.00 | 0.96-1.00 | 1.00-1.01 | 1.00-1.03 | 0.988-1.030 | 0.9998-1.0017 |
+| 0.62 | 1.0000 | 1.0002 | 1.0001 | 1.0000 | 0.99-1.01 | 1.00-1.01 | 0.97-1.01 | 0.99-1.01 | 0.966-1.015 | 0.9998-1.0003 |
+| 1 | 1.0000 | 1.0000 | 0.9999 | 1.0002 | 1.00-1.04 | 1.00-1.02 | 0.99-1.01 | 0.98-1.01 | 0.964-1.016 | 0.9998-1.0002 |
+| 3.5 | 0.9999 | 0.9999 | 1.0000 | 1.0001 | 0.99-1.05 | 0.99-1.01 | 0.99-1.01 | 0.99-1.00 | 0.965-1.017 | 0.9999-1.0002 |
+
+- **tau >= 0.55**: the ER per node of every moment is within 0.5% of 1, within 0.12% for tau >= 2; ER(|k|) is
+  within 1.6% of 1 from shell 4 on (1.2% for tau >= 0.7), and in the first three shells within 6%, about two
+  statistical errors (0.02 to 0.04: they have few wave vectors; the runs share the seed, so their deviations there
+  are correlated from one tau to the next).
+  The small excess (0.1% to 0.2% on the stress) is nonlinear: it grows with kT and is absent (within 3e-4) at
+  kT = 1.3e-5. The article, on D3Q27, reports ER about 1.002 to 1.004 at the same tau.
+- **tau -> 1/2**: the fluctuations of the stress and of the density are too large at long wavelengths (at
+  tau = 0.505 and kT = 1/3000, ER(|k|) of the stress 1.15 to 1.26 in the first shells, decreasing to 1.03
+  (off-diagonal) and 1.08 (diagonal) at shell 16), and the ER per node grows (stress 1.03 to 1.04 at tau = 0.505).
+  This excess is nonlinear as well: at kT = 1.3e-5 and tau = 0.505 the ER per node is within 0.25% of 1, and up
+  to 1.8% above it at tau = 0.501. The article, on D3Q27, finds 1.005 to 1.016 at tau = 0.505 and 1.04 to 1.07 at tau = 0.5001 with kT = 1/3000. At
+  tau <= 0.501 with kT = 1/3000 the fluid of openmm-lbm is unstable (below).
+- **Ghost moments**: ER per node within 0.25% of 1 at every tau, within 0.1% for tau >= 0.7; their ER(|k|) is
+  within the statistical error (0.03 in the first shells) at every wavelength.
+- **Platforms and precisions**: with the same seed CUDA in mixed, double and single precision and OpenCL draw the
+  same random numbers, and their ER agree to four digits; the Reference platform (another generator, 16^3 nodes,
+  300 snapshots every 500 steps, statistical error about 1e-3) agrees within 0.3%:
+
+  | tau | run | rho | sum j | sum a_aa | sum a_ab | 19 moments, per node |
+  |---|---|---|---|---|---|---|
+  | 0.505 | CUDA, mixed | 1.0060 | 1.0215 | 1.0526 | 1.0408 | 1.0018-1.0407 |
+  | 0.505 | CUDA, mixed, from the Gaussian state | 1.0061 | 1.0216 | 1.0526 | 1.0406 | 1.0018-1.0407 |
+  | 0.505 | CUDA, double | 1.0060 | 1.0215 | 1.0526 | 1.0408 | 1.0018-1.0407 |
+  | 0.505 | OpenCL, mixed | 1.0060 | 1.0215 | 1.0526 | 1.0408 | 1.0018-1.0407 |
+  | 0.505 | Reference, 16^3 | 1.0063 | 1.0233 | 1.0530 | 1.0391 | 1.0003-1.0419 |
+  | 0.7 | CUDA, mixed | 1.0012 | 1.0009 | 1.0022 | 1.0017 | 1.0004-1.0019 |
+  | 0.7 | CUDA, double | 1.0012 | 1.0009 | 1.0022 | 1.0017 | 1.0004-1.0019 |
+  | 0.7 | CUDA, single | 1.0012 | 1.0009 | 1.0022 | 1.0017 | 1.0004-1.0019 |
+  | 0.7 | OpenCL, mixed | 1.0012 | 1.0009 | 1.0022 | 1.0017 | 1.0004-1.0019 |
+  | 0.7 | Reference, 16^3 | 0.9990 | 1.0000 | 1.0029 | 1.0003 | 0.9982-1.0023 |
+  | 0.501 | CUDA, mixed, kT = 1.3e-5 | 1.0004 | 1.0028 | 1.0179 | 1.0114 | 0.9999-1.0117 |
+  | 0.501 | CUDA, mixed, kT = 1.3e-5, from the Gaussian state | 1.0003 | 1.0032 | 1.0180 | 1.0113 | 1.0000-1.0114 |
+
+  The state reached does not depend on the initial one: from rest, and from the stationary Gaussian state
+  (rows "from the Gaussian state"), the ER agree within 1e-3.
+- **Uniform flow** u0 = 0.02 along x (Mach number 0.035, as in the article): the ER in the frame of the flow
+  minus those at rest, with the same seed, per node and over shells 1 to 16:
+
+  | tau | rho | sum j | sum a_aa | sum a_ab | Delta ER(\|k\|) rho | Delta ER(\|k\|) sum j | Delta ER(\|k\|) sum a_aa | Delta ER(\|k\|) sum a_ab | error of Delta ER(\|k\|) |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 0.505 | +0.0017 | +0.0033 | +0.0101 | +0.0092 | -0.002..+0.027 | -0.011..+0.058 | -0.016..+0.013 | -0.016..+0.010 | 0.003 |
+  | 1 | +0.0004 | +0.0005 | +0.0008 | +0.0007 | -0.009..+0.002 | -0.001..+0.001 | -0.000..+0.001 | -0.001..+0.001 | 0.003 |
+
+  At tau = 1 the flow changes the ER per node by less than 1e-3, and ER(|k|) within the statistical error; at
+  tau = 0.505 the ER per node by up to 1%.
+
+### Time correlations (CUDA, NVIDIA A100)
+
+The decay of the thermal fluctuations at long wavelengths is that of hydrodynamics (Onsager's regression). On
+32^3 nodes at kT = 1/3000, from the stationary Gaussian state, the amplitudes of the density and of the
+momentum at the wave vectors k = 2 pi m/32 along the three axes (m = 1, 2) were recorded every 1 to 5 steps over
+129 to 1542 decay times of the shear mode. The transverse momentum decays as exp(-nu k^2 t) (linear fit of its
+logarithm after 20 steps, or a fifth of the decay time if shorter, while the correlation is above 0.3; the first
+steps contain a fast decay of 0.4% (m = 1) to 1.6% (m = 2) at tau = 0.55 from the non-hydrodynamic moments); the
+density as a damped sound wave,
+exp(-Gamma k^2 t) [cos(W t) + (Gamma k^2/W) sin(W t)] with W^2 = c_s^2 k^2 - Gamma^2 k^4, where
+Gamma = (4/3 nu + nu_bulk)/2 = nu for the bulk viscosity 2 nu/3 of a single relaxation time of the stress.
+Errors from 10 blocks of the time series:
+
+| tau | m | decay times sampled | nu_fit/nu: fluctuations / deterministic | c/c_s: fluctuations / deterministic | Gamma/nu: fluctuations / deterministic |
+|---|---|---|---|---|---|
+| 0.55 | 1 | 129 | 1.090 +- 0.055 / 1.003 | 0.9985 +- 0.0003 / 0.9990 | 1.025 +- 0.073 / 1.000 |
+| 0.55 | 2 | 514 | 1.038 +- 0.030 / 1.010 | 0.9957 +- 0.0004 / 0.9958 | 1.006 +- 0.049 / 1.000 |
+| 0.7 | 1 | 257 | 0.975 +- 0.046 / 1.001 | 1.0008 +- 0.0013 / 0.9994 | 0.989 +- 0.029 / 1.000 |
+| 0.7 | 2 | 1028 | 1.033 +- 0.038 / 1.005 | 0.9977 +- 0.0012 / 0.9978 | 0.995 +- 0.028 / 1.002 |
+| 1 | 1 | 257 | 0.938 +- 0.051 / 1.000 | 1.0078 +- 0.0024 / 1.0021 | 0.915 +- 0.031 / 1.003 |
+| 1 | 2 | 1028 | 1.024 +- 0.014 / 1.000 | 1.0111 +- 0.0026 / 1.0086 | 1.010 +- 0.032 / 1.013 |
+| 2 | 1 | 386 | 1.076 +- 0.027 / 1.013 | 1.0410 +- 0.0053 / 1.0282 | 0.998 +- 0.030 / 1.031 |
+| 2 | 2 | 1542 | 1.050 +- 0.018 / 1.046 | 1.1183 +- 0.0077 / 1.1148 | 1.147 +- 0.019 / 1.144 |
+
+The deterministic values come from a shear wave and a sound wave of amplitude 1e-4 started on the same lattice
+without fluctuations (CUDA, double precision) and fitted in the same way: they contain the dispersion of the
+lattice at these wave numbers (for example a sound speed 2.8% above c_s at tau = 2 and m = 1). The thermal
+fluctuations relax as the deterministic hydrodynamics of the model, within 2.8 standard errors (most within 1.5):
+the shear viscosity within 9% (errors 1.4% to 5.5%), the sound speed within 1.3% and the attenuation within 9%.
+
+### Stability near tau = 1/2
+
+On 64^3 nodes over 10^5 steps (CUDA, mixed precision; the same in double precision and on the Reference platform
+at 16^3): the fluctuating fluid exceeds the Mach number limit within a few thousand steps at
+
+| kT (lattice units) | unstable at tau | stable at tau |
+|---|---|---|
+| 1/3000 | 0.5001, 0.5002, 0.5005, 0.501 | 0.502, 0.503, 0.505 |
+| 1e-4 | 0.5001, 0.5002, 0.5005 | 0.501, 0.502, 0.503, 0.505 |
+| 1.3e-5 | 0.5001 | 0.5002, 0.5005, 0.501, 0.502, 0.503, 0.505 |
+
+Without noise, from the same thermal initial state, only tau = 0.5001 and 0.5002 at kT = 1/3000 and 0.5001 at
+kT = 1e-4 are unstable, because the velocities decay. The explanation is in `docs/theory.md`, section 7
+(stability near tau = 1/2). The article of the model, on D3Q27, is stable down to tau = 0.5001 at kT = 1/3000.
+
 ## Equivalence with the reference implementation: coupled particles (E0)
 
 The Reference platform was compared with the validation campaign of the reference CUDA library (version
@@ -463,4 +600,74 @@ plateau at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps:
 | centred | 0.97 | 0.96 | 0.94 | 0.93 | 0.89 | 0.79 |
 
 The centred drag is closer to the fluctuation-dissipation relation for the dynamics.
+
+**With the fluctuating fluid** (same cases and seeds, `setFluidFluctuations(True)`, both drags; the kick
+responses of T7 are those above, computed at T = 0 with the same drag). The fluid temperature, from the kinetic
+energy of the fluid at the end of each run, is 294 to 305 K in all cases.
+
+T2, mean temperatures in K, half step / full step (statistical error about 0.5 K); the right one is the full step
+for the explicit drag and the half step for the centred drag:
+
+| dt (ps) | tau | gamma (1/ps) | explicit | centred |
+|---|---|---|---|---|
+| 0.005 | 0.80 | 1 | 300.5 / 299.7 | 298.7 / 297.9 |
+| 0.005 | 0.80 | 5 | 308.3 / 304.6 | 299.5 / 296.0 |
+| 0.005 | 0.80 | 10 | 317.0 / 309.2 | 299.5 / 292.6 |
+| 0.01 | 1.10 | 1 | 303.6 / 302.2 | 300.0 / 298.5 |
+| 0.01 | 1.10 | 5 | 316.8 / 308.8 | 299.0 / 291.9 |
+| 0.01 | 1.10 | 10 | 335.6 / 319.0 | 299.3 / 286.1 |
+| 0.02 | 1.70 | 1 | 309.6 / 306.6 | 302.0 / 299.1 |
+| 0.02 | 1.70 | 5 | 337.7 / 321.0 | 300.4 / 287.1 |
+| 0.02 | 1.70 | 10 | 378.2 / 340.7 | 300.7 / 276.5 |
+
+T6, particles of 1000 Da (m/m_c = 13.3), L = 16 nm except the last row:
+
+| gamma (1/ps) | L (nm) | D/(kT/m gamma), MSD, explicit / centred | D/(kT (1/zeta + y_centred)) | full-step T, explicit | half-step T, centred |
+|---|---|---|---|---|---|
+| 1 | 16 | 1.109 / 1.108 | 1.009 / 1.009 | 318.4 K | 298.9 K |
+| 5 | 16 | 1.511 / 1.496 | 1.011 / 1.001 | 388.7 K | 299.5 K |
+| 10 | 16 | 1.976 / 1.954 | 0.994 / 0.983 | 466.7 K | 300.2 K |
+| 5 | 8 | 1.467 / 1.454 | 0.992 / 0.983 | 388.6 K | 299.3 K |
+
+zeta = m gamma, and y_centred = y_explicit + dt/(2 m_c) is the self-mobility of the centred drag measured with a
+constant force (`docs/theory.md`, section 2): 9.59e-5 ps/Da at L = 8 nm and 9.88e-5 ps/Da at L = 16 nm, with
+y_explicit from the reference campaign at L = 16 nm. The diffusion coefficient now contains the hydrodynamic
+contribution of the thermal flows, about 2.5e-4 nm^2/ps whatever the friction, and is the same for both drags:
+the Einstein relation holds with the mobility of the centred drag (within 2%, the statistical error of D), and not
+with that of the explicit one (D/(kT (1/zeta + y_explicit)) = 1.07, 1.30, 1.49 and 1.28). The full-step
+temperature of the explicit drag agrees with T (1 + gamma dt m/(2 m_c (1 + zeta y_explicit))) within 1% in the
+nine T2 cases and in T6 at gamma = 1 and 5/ps, and is 3.6% above it at gamma = 10/ps (`docs/theory.md`,
+section 7).
+
+T7, ratio of the normalized VACF at half steps to the kick response minus its plateau (gamma = 10/ps,
+L = 16 nm):
+
+| drag | 0.05 | 0.1 | 0.2 | 0.3 | 0.5 | 1 ps |
+|---|---|---|---|---|---|---|
+| explicit | 0.97 | 0.96 | 0.95 | 0.93 | 0.89 | 0.79 |
+| centred | 1.001 | 1.001 | 1.002 | 1.003 | 0.998 | 0.996 |
+
+With the centred drag and the fluctuating fluid the fluctuation-dissipation theorem holds for the dynamics as
+well: the velocity autocorrelation equals the response to a kick.
+
+**SOD1 with the fluctuating fluid** (`examples/cocomo/diffusion.py --fluid-fluctuations`, presets `sod1`:
+friction 10/ps, box 15 nm, 200 ns, and `fabio-g30`: friction 30/ps, box 30 nm, 50 ns; one run each, seed 1, the
+same as the first run without fluctuations). Temperatures in K (target 298 K) and apparent diffusion coefficient
+of the centre of mass, MSD(lag)/(6 lag), in Å^2/ns at lags of 0.1, 1, 2 and 3 ns:
+
+| preset | drag | fluid | full-step T | half-step T | D at 0.1 / 1 / 2 / 3 ns |
+|---|---|---|---|---|---|
+| sod1 | explicit | without fluctuations | 293.6 | 309.8 | 2.32 / 2.40 / 2.37 / 2.37 |
+| sod1 | centred | without fluctuations | 264.1 | 277.2 | 2.32 / 2.40 / 2.38 / 2.39 |
+| sod1 | explicit | fluctuating | 316.4 | 333.7 | 4.91 / 4.91 / 4.76 / 4.77 |
+| sod1 | centred | fluctuating | 284.8 | **298.6** | 4.99 / 5.11 / 4.87 / 4.70 |
+| fabio-g30 | explicit | without fluctuations | 294.6 | 349.7 | 0.89 / 0.98 / 1.00 / 1.00 |
+| fabio-g30 | centred | without fluctuations | 220.5 | 250.2 | 0.86 / 0.93 / 0.96 / 0.99 |
+| fabio-g30 | explicit | fluctuating | 355.6 | 419.8 | 3.67 / 3.39 / 3.21 / 3.18 |
+| fabio-g30 | centred | fluctuating | 264.6 | **298.7** | 3.68 / 3.34 / 3.25 / 3.29 |
+
+With the fluctuating fluid and the centred drag the protein has the set temperature, and its diffusion coefficient
+gains the hydrodynamic contribution of the solvent (twice and three times the value without fluctuations, which
+is close to kT/(M friction)), the same for both drags. The explicit drag is too hot, by 6% and 19%, as
+T (1 + friction dt m/(2 m_c (1 + zeta y_explicit))) predicts with the mean bead mass (6% and 18%).
 

@@ -387,8 +387,9 @@ temperature is T/(1 + zeta y). The centred drag has y larger by dt/(2 m_c) (Self
 zeta (y_centred - y_explicit) = gamma dt m/(2 m_c): measured 0.032, 0.063 and 0.127 at gamma dt = 0.05, 0.1
 and 0.2 with 10 particles, against 0.033, 0.066 and 0.133. With a fluid that does not respond (10^4 times
 denser) both drags give the exact values of their discretization, at gamma dt = 0.1, 0.5 and 1.5, within
-2e-4, the statistical error (`docs/validation.md`). A fluid with thermal fluctuations is needed for the right temperature with either
-scheme; it would make y appear in the diffusion coefficient, D = kT (1/zeta + y), instead.
+2e-4, the statistical error (`docs/validation.md`). With a fluid that has thermal fluctuations of its own the
+same argument gains a term, and only the centred drag gives the right temperature (section 7, Particles in the
+fluctuating fluid).
 
 The extra deficit of the centred drag grows with gamma dt m/m_c, so it is large for heavy particles or large
 friction, while the diffusion coefficient does not change. Measured on CUDA (mixed precision; stochastic
@@ -408,9 +409,10 @@ diffusion of the centre of mass of SOD1 (`docs/validation.md`),
 and the normalized velocity autocorrelation of the centred drag is closer to the response to a kick computed
 with the same drag (fluctuation-dissipation for the dynamics: ratio 0.97 to 0.79 between 0.05 and 1 ps,
 against 0.93 to 0.50 with the explicit drag). So, without thermal fluctuations of the fluid, the centred drag
-keeps the diffusion and is stable for any friction, but its kinetic temperature is lower; with a fluctuating
-fluid both drags would give T, and the local fluctuation-dissipation balance of the centred drag (Which
-velocity has the right temperature, above) would hold for particles and cells together.
+keeps the diffusion and is stable for any friction, but its kinetic temperature is lower. With the fluctuating
+fluid of section 7 the centred drag gives T, as the local fluctuation-dissipation balance of the centred drag
+(Which velocity has the right temperature, above) suggests for particles and cells together, while the explicit
+drag makes the particles too hot (section 7, Particles in the fluctuating fluid).
 
 **Per-cell reaction on the GPU platforms.** The reaction forces of the particles in the same cell are
 summed without atomic operations (`platforms/common/src/kernels/lbmCoupling.cc`), by sorting keys and
@@ -704,6 +706,57 @@ and reading of the random numbers in OpenMM's buffer. The platforms therefore dr
 with each other through the statistics of the tests below, and without fluctuations or at zero temperature to
 rounding.
 
+**Stability near tau = 1/2.** Without fluid velocity the linearized model is a contraction: collision multiplies
+every non-conserved mode by |1 - omega_k| <= 1 and streaming permutes the populations, so the norm
+sum_q delta f_q^2/w_q cannot grow. The fluctuating fluid nevertheless becomes unstable close to tau = 1/2,
+through the nonlinear terms of the equilibrium: the thermal velocities act as local flows at a grid Reynolds
+number u_th dx/nu, with u_th = sqrt(3 kT) in lattice units. On a 64^3 lattice over 10^5 steps (CUDA, mixed
+precision; the same in double precision and on the Reference platform) the Mach number exceeds the limit within
+a few thousand steps for tau <= 0.501 at kT = 1/3000 (the value of reference 17), tau <= 0.5005 at kT = 1e-4 and
+tau = 0.5001 at kT = 1.3e-5 (water at dx = 0.5 nm and dt = 0.01 ps); above these values it is stable. The limit
+is a grid Reynolds number between about 50 and 100. The same initial thermal state without noise is unstable only
+at tau = 0.5001 and 0.5002 (kT = 1/3000), because its velocities decay. Reference 17 uses the D3Q27 lattice,
+which stays stable down to tau = 0.5001 at kT = 1/3000; on D3Q19 the regularized collision has less margin. Close
+to the limit the fluctuations are also too large at long wavelengths (`docs/validation.md`, Fluctuating fluid).
+Molecular simulations of water have tau >= 0.52 and kT ~ 1e-5, far from the limit, and the warning for tau
+below 0.505 (section 6) covers this range.
+
+**Particles in the fluctuating fluid: use the centred drag.** The linear-response argument of section 2
+(Temperature with a fluid without fluctuations) gains a term. Let the velocity of the node be
+u = u_th - y F, with u_th the thermal velocity of the fluid and y the self-mobility with which the node answers
+the force F of the particle within the drag (section 2, Self-mobility). The thermal velocity adds the random
+force zeta u_th, whose strength the fluctuation-dissipation theorem of the fluid sets through the self-mobility
+y_th that the thermal flows carry, and the kinetic temperature becomes
+
+    T_p = T (1 + zeta y_th)/(1 + zeta y).
+
+It is T only for the drag whose y equals y_th. The measurements show that this is the centred drag: its particles
+have the right temperature at half steps for every friction and time step tried, their velocity autocorrelation
+equals the response to a kick computed with the same drag (fluctuation-dissipation theorem for the dynamics), and
+their diffusion coefficient follows the Einstein relation with the mobility of the same drag,
+D = kT (1/zeta + y_centred). The explicit drag misses the response of the cell within the step,
+y_explicit = y_centred - dt/(2 m_c), so its particles are too hot:
+
+    T_explicit/T = 1 + gamma dt m/(2 m_c (1 + zeta y_explicit)),
+
+the mirror image of the deficit without fluctuations. Measured on CUDA (mixed precision; stochastic tests T2
+and T6 with the fluctuating fluid, `docs/validation.md`), with y from section 2 and from the reference campaign:
+
+| System | m/m_c | gamma dt | `Explicit`, full step | predicted | `Centered`, half step |
+|---|---|---|---|---|---|
+| 100 free particles of 100 Da (T2), gamma = 10/ps, dt = 0.005 ps | 1.33 | 0.05 | 309.2 K | 309.6 K | 299.5 K |
+| same, dt = 0.01 ps | 1.33 | 0.1 | 319.0 K | 319.4 K | 299.3 K |
+| same, dt = 0.02 ps | 1.33 | 0.2 | 340.7 K | 339.7 K | 300.7 K |
+| 64 free particles of 1000 Da (T6), gamma = 1/ps, dt = 0.01 ps | 13.3 | 0.01 | 318.4 K | 319.3 K | 298.9 K |
+| same, gamma = 5/ps | 13.3 | 0.05 | 388.7 K | 385.8 K | 299.5 K |
+| same, gamma = 10/ps | 13.3 | 0.1 | 466.7 K | 450.5 K | 300.2 K |
+
+The diffusion coefficient now contains the hydrodynamic contribution of the thermal flows and is the same for
+both drags, D = kT (1/zeta + y_centred) within 2%: the thermal flows move the particle with the self-mobility of
+the centred drag. With `setFluidFluctuations(true)` the centred drag is therefore the scheme to use, with the
+temperature of the half steps (`LBMTemperatureReporter`); the explicit drag is accurate only when
+gamma dt m/(2 m_c) is small.
+
 **Walls.** The halfway bounce-back of the solid nodes (section 1) is a permutation of populations: it neither
 dissipates nor needs noise, and it is unchanged. Walls that also exchange thermal fluctuations with the fluid
 (walls at the temperature of the bath, with a thermal accommodation coefficient) are a planned extension.
@@ -720,6 +773,12 @@ dissipates nor needs noise, and it is unchanged. Walls that also exchange therma
   them; runs with the same seed are identical, also with force evaluations between steps; a different seed
   gives a different run; a run restarted from the checkpoints is identical to the uninterrupted one; with the
   `NVE` scheme a fluctuating fluid sets particles at rest in motion.
+- Validation on an NVIDIA A100 (`docs/validation.md`, Fluctuating fluid and Stochastic tests): equilibrium
+  spectra of all 19 moments on 64^3 nodes for tau from 0.505 to 100, with the protocol of reference 17 (for
+  tau >= 0.55 the ER per node within 0.5% of 1, and ER(|k|) within 1.6% from the fourth shell on); decay of the
+  thermal shear and
+  sound modes as in the deterministic model; stability near tau = 1/2 (above); coupled particles with both drags
+  (above).
 
 ## References
 

@@ -25,7 +25,9 @@ Know these before using the plugin for a study:
   ([choosing the drag](lattice.md#choosing-the-drag)). See [validation.md](../validation.md). A fluctuating lattice Boltzmann fluid, which removes
   these limits, is available with
   [`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations);
-  its validation with particles is to come.
+  with it use the centred drag, whose particles then have the set temperature and the diffusion coefficient
+  with the hydrodynamic contribution (the explicit drag makes them too hot;
+  [choosing the drag](lattice.md#choosing-the-drag)).
 - **Nearest-node coupling.** Each particle is coupled to the nearest lattice node, so the forces jump when
   a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
   lattice spacing and on tau.

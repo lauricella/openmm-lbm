@@ -8,7 +8,8 @@
 
 Every bead is coupled to the fluid with the Euler-Maruyama scheme of LBMForce, which is also the
 thermostat, with the explicit drag (the default) or the centred one (--drag Centered, docs/theory.md,
-section 2).  With --no-lb there is no fluid: OpenMM's LangevinMiddleIntegrator, at the same friction and
+section 2).  With --fluid-fluctuations the fluid itself fluctuates at the same temperature (docs/theory.md,
+section 7).  With --no-lb there is no fluid: OpenMM's LangevinMiddleIntegrator, at the same friction and
 temperature, moves the beads without hydrodynamic interactions.
 
 Parameter sets (--preset):
@@ -25,7 +26,7 @@ every step.
 
 The protocol is that of the original scripts: velocities at T, energy minimization, new velocities at
 T, production.  Files written, with the prefix given by --output (default <preset>_lb_on, <preset>_lb_on_centered with
---drag Centered, or <preset>_lb_off):
+--drag Centered, <preset>_lb_on_fluct with --fluid-fluctuations, or <preset>_lb_off):
   <prefix>.dcd               trajectory (DCD), every --report steps
   <prefix>.log               step, time, potential energy, temperature, speed (OpenMM's StateDataReporter;
                              its temperature is that of the full step, docs/theory.md, section 2)
@@ -74,6 +75,8 @@ def parse_arguments():
     parser.add_argument('--no-lb', action='store_true', help='no fluid: LangevinMiddleIntegrator')
     parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
                         help='drag scheme of LBMForce (default Explicit)')
+    parser.add_argument('--fluid-fluctuations', action='store_true',
+                        help='fluctuating fluid at the temperature of the beads (default off)')
     parser.add_argument('--box', type=float, help='side of the cubic box (nm)')
     parser.add_argument('--spacing', type=float, default=0.5, help='lattice spacing (nm, default 0.5)')
     parser.add_argument('--friction', type=float, help='friction (1/ps)')
@@ -109,6 +112,8 @@ def parse_arguments():
         args.output = '%s_lb_%s' % (args.preset, 'off' if args.no_lb else 'on')
         if not args.no_lb and args.drag == 'Centered':
             args.output += '_centered'
+        if not args.no_lb and args.fluid_fluctuations:
+            args.output += '_fluct'
     if args.checkpoint is None:
         args.checkpoint = 100*args.report
     return args
@@ -215,6 +220,7 @@ def main():
         force.setRandomNumberSeed(args.seed)
         force.setFluidMomentumRemovalFrequency(1)
         force.setDragScheme(getattr(LBMForce, args.drag))
+        force.setFluidFluctuations(args.fluid_fluctuations)
         for i in range(system.getNumParticles()):
             force.addParticle(i)
         system.addForce(force)          # the last force of the System, as the centred drag requires
@@ -236,7 +242,8 @@ def main():
         'no fluid (Langevin)' if args.no_lb else '%d^3 lattice nodes' % round(args.box/args.spacing)))
     print('Friction %g 1/ps, viscosity %g nm^2/ps, %g K, dt %g ps, %d steps (%g ns)%s' % (
         args.friction, args.viscosity, args.temperature, args.dt, args.steps, args.steps*args.dt/1000,
-        '' if args.no_lb else ', %s drag' % args.drag.lower()))
+        '' if args.no_lb else ', %s drag%s' % (args.drag.lower(), ', fluctuating fluid' if args.fluid_fluctuations
+                                               else '')))
 
     checkpointFile = args.output + '.chk'
     if args.restart:

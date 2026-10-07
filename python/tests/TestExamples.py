@@ -32,6 +32,8 @@ CASES = [
     ('particle/thermal.py', ['--beads', '4', '--steps', '20', '--seed', '3', '--drag', 'Centered']),
     ('particle/uniform_flow.py', ['--nodes', '12', '--steps', '20', '--interval', '10', '--drag', 'Centered']),
     ('cocomo/diffusion.py', ['--preset', 'smoke', '--box', '10', '--steps', '20', '--report', '10', '--drag', 'Centered']),
+    ('cocomo/diffusion.py', ['--preset', 'smoke', '--box', '10', '--steps', '20', '--report', '10', '--drag', 'Centered',
+                             '--fluid-fluctuations']),
     ('cocomo/kick.py', ['--preset', 'peptide', '--nodes', '24', '--steps', '5', '--drag', 'Centered']),
 ]
 
