@@ -2,9 +2,14 @@
 OpenMM plugin coupling molecular dynamics to a thread-safe lattice Boltzmann fluid (D3Q19, regularized collision, Guo forcing) for coarse-grained simulations with hydrodynamics. Particles exchange friction and thermal noise with the fluid. Native OpenMM plugin with Reference, CUDA, OpenCL and HIP platforms.
 
 **Version 0.2.1 (2026-10-07).** The fluid, solid walls and the particle-fluid coupling, with the explicit drag or
-the centred drag new in this version, run on all platforms (Reference, CUDA, OpenCL, HIP); the platforms agree
+the centred drag of version 0.2.0, run on all platforms (Reference, CUDA, OpenCL, HIP); the platforms agree
 with each other, and the explicit drag with the reference CUDA library of the DragOpenMM project (see the
 [user guide](docs/user_guide/README.md#what-works-in-this-version) and `docs/validation.md`).
+
+**Development version** (not yet released, [CHANGELOG](CHANGELOG.md)): thermal fluctuations of the fluid
+(`setFluidFluctuations()`) on all platforms, VTK files of the fluid and of the particles for ParaView
+(`openmmlbm.LBMVTKReporter`), and, on the Reference platform only for now, regularized walls
+(`setWallScheme()`) and open faces with an imposed velocity or density (`setFaceBoundary()`).
 
 ## Requirements
 
@@ -96,7 +101,7 @@ the OpenMM checkpoint and the fluid together ([restart](docs/user_guide/restart.
 - [docs/user_guide/](docs/user_guide/README.md): user guide. Installation step by step, a tutorial
   for newcomers to OpenMM, every method of `LBMForce` explained, how to choose the lattice parameters
   and the drag, and complete examples (channel flow between walls, monitoring, restarts, serialization,
-  `openmm.app.Simulation`).
+  `openmm.app.Simulation`, Couette flow and a duct between open faces).
 - [examples/](examples/README.md): example scripts (a kicked bead, thermalization, a bead in a uniform
   flow, a fluid started from a shear wave, and proteins with the COCOMO2 model: diffusion of SOD1 and
   of a disordered protein, kicks of a peptide and of ubiquitin), compared with the DragOpenMM plugin.

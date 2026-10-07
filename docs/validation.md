@@ -9,8 +9,10 @@ Tests of openmm-lbm, what each one checks, its tolerance and the values measured
 The fluid tests use no coupled particles. The lattice spacing is 0.5 nm, the time step 0.01 ps and the
 density 602.2 Da/nm^3; the viscosity is chosen to give the relaxation time tau of each test. The momentum
 removal is off unless stated.
-- `runFluidTests()` and `runWallTests()` (`testSolidNodeChecks`, `testPoiseuille`, `testWallConservation`)
-  run on every platform, in the `single`, `mixed` and `double` precision modes.
+- `runFluidTests()` and `runWallTests()` (`testSolidNodeChecks`, `testPoiseuille`, `testWallConservation`,
+  `testWallBalance` with bounce-back) run on every platform, in the `single`, `mixed` and `double` precision
+  modes; the tests of the regularized walls and of the open faces in `runWallTests()` run on the Reference
+  platform only ([walls and open faces](#walls-and-open-faces-teststestlbmfluidh-reference)).
 - The tolerances below hold on the Reference platform and in `mixed` and `double` precision. In `single`
   precision (`getFluidTolerance()`) the tolerances of 1e-12 and below become 2e-6, the resolution of the
   stored type, and those of `testPoiseuille` become 5e-5: its steady state is the result of thousands of
@@ -170,12 +172,13 @@ the density of water give kT = 1.3e-5.
 | Basis | the polynomials e_k of the test, written independently of the plugin, are orthogonal with the norms b_k | 1e-15 |
 | Single node | a 1x1x1 lattice streams every population back to its node, so the state is the post-collision state: density and momentum unchanged at every step; over 20000 steps the moments k = 4...18 have the variance mu b_k and are uncorrelated, for tau = 1 and 0.8 | 1e-15; 0.05 (statistical error 0.01) |
 | Equilibrium | fluid at rest, 8x8x8, 300 steps of transient, 300 samples every 5 steps: variances of density, momentum and moments k = 4...18 of a node equal to mu rho, rho kT and mu rho b_k, for tau = 0.8 and 2.5; total mass and momentum conserved | 0.05; 1e-13 |
+| Velocity spectrum (`testVelocitySpectrum`) | fluid on 8x8x8 nodes, tau = 1, 300 steps of transient, 400 samples every 5 steps: the velocity of `getFluidFields()` minus the mean velocity of the sample, Fourier transformed; the longitudinal and transverse parts of the spectrum equal kT/rho and 2 kT/rho in three bands of \|k\| (\|m\|^2 <= 3, 4...12, > 12, with k = 2 pi m/8), and the variance per node is (N - 1)/N kT/rho per component; at rest, in a uniform flow (0.05, 0.02, -0.03) and with a body force g = 1e-5 along x, whose mean velocity u0 + g t is checked to 2e-4 | 5% (spectrum), 3% (per node) |
 | Zero temperature | with walls, body force and particles with the NVE scheme, the run with the fluctuations switched on at T = 0 equals the run without them | bitwise |
 | Reproducibility | same seed: identical runs, also with force evaluations between steps; another seed: a different run | bitwise |
 | Restart | with coupled particles at 300 K and seed 0, a run restarted from the checkpoints of OpenMM and of the force equals the uninterrupted run | bitwise |
 | NVE | with the NVE scheme, particles at rest are set in motion by a fluctuating fluid, and stay at rest without fluctuations | exact |
 | Parameters | `updateParametersInContext()` changes the temperature and refuses to switch the fluctuations; a checkpoint is refused by a Context with the fluctuations switched differently | exceptions |
-| Warning | with fluid fluctuations a warning is printed only for the explicit drag with the EM scheme at T > 0, with the bound friction*dt*m/(2 m_c) of the heaviest coupled particle | exact |
+| Warning | with fluid fluctuations a warning is printed only for the explicit drag with the EM scheme at T > 0, with the estimate friction*dt*m/(2 m_c) of the heaviest coupled particle | exact |
 
 **Measured** (OpenMM 8.6.1 and 8.3.1; Reference, and CUDA and OpenCL on an NVIDIA A100 in the three
 precisions): all pass. A first version of the GPU kernel enlarged OpenMM's buffer of random numbers in the first
@@ -327,14 +330,15 @@ kT = 1e-4 are unstable, because the velocities decay. The explanation is in `doc
 ## Walls and open faces (`tests/TestLBMFluid.h`, Reference)
 
 Regularized walls (`setWallScheme(Regularized)`) and open faces (`setFaceBoundary()`) exist on the Reference
-platform only, for now; the tests below run there, and on the CUDA, OpenCL and HIP platforms
-`testRegularizedWallsRefused` checks that they are refused. Theory: `docs/theory.md`, section 1.
+platform only, for now; the tests below run there (`testWallBalance` with bounce-back runs on every platform),
+and on the CUDA, OpenCL and HIP platforms `testRegularizedWallsRefused` checks that a Context with regularized
+walls is refused (open faces are refused in the same way, without a test). Theory: `docs/theory.md`, section 1.
 
 | Test | What it checks | Tolerance |
 |---|---|---|
-| `testRegularizedPoiseuille` (tau = 0.7, 1, 1.5) | channel between regularized walls on the nodes j = 1 and j = ny - 1, driven by g: u(y) = g/(2 nu)(y - 1)(ny - 1 - y) + g(tau - 1)/(tau - 1/2), u = 0 on the walls, uniform density, wall force = g M | 1e-9 |
+| `testRegularizedPoiseuille` (tau = 0.7, 1, 1.5) | channel between regularized walls on the nodes j = 1 and j = ny - 1, driven by g: u(y) = g/(2 nu)(y - 1)(ny - 1 - y) + g(tau - 1)/(tau - 1/2), u = 0 on the walls, uniform density, wall force = g M | 1e-9 (wall force 1e-8) |
 | `testWallBalance` (both wall schemes) | a plate one node thick and a block, a flow against them and a body force: mass conserved and P(t + dt) - P(t) = (M g - F_wall) dt at every step | 1e-13, 1e-12 |
-| `testWallMomentumBalance` (both drags, regularized walls) | particles, fluid and walls: total momentum conserved | 1e-12 |
+| `testWallMomentumBalance` (`tests/TestLBMCoupling.h`; both drags, regularized walls) | particles, fluid and walls: total momentum conserved | 1e-11 relative (1e-12 with bounce-back): rebuilding the boundary nodes adds rounding, measured 1e-13 to 1.02e-12 |
 | `testCouette` (tau = 0.6, 1, 1.5) | ZMin `Velocity` at rest, ZMax `Velocity` U along x: u_x = U z/(nz - 1), uniform density | 1e-9 |
 | `testUniformFlowThroughFaces` | a uniform flow from a `Velocity` inlet to a `Density` outlet stays unchanged | 1e-13 |
 | `testPressureDrivenDuct` | square duct between bounce-back walls, `Density` faces at 1.01 and 1: linear density, velocity in the middle within 2 % of the incompressible duct solution, steady to 1e-9 between two steps | see text |
@@ -359,7 +363,7 @@ populations, which is only first order.
 
 **Fluctuations next to the walls** (Reference, 12 x 14 x 12 nodes with the solid planes j = 0 and j = 13, fluid
 fluctuations at kT = 1/3000 in lattice units, tau = 0.8, 600 samples; ER = variance of the mode over the plane /
-mu rho b_k, as in the equilibrium spectra below):
+mu rho b_k, as in the equilibrium spectra above):
 
 | plane | bounce-back: rho, j, stress, ghosts | regularized: rho | j along, j normal | stress | ghosts |
 |---|---|---|---|---|---|
@@ -370,7 +374,8 @@ mu rho b_k, as in the equilibrium spectra below):
 
 Bounce-back walls are in thermal equilibrium with the fluctuating fluid at every distance, within the
 statistical error (about 1 %): bounce-back permutes the populations and keeps the Gaussian equilibrium state.
-The regularized wall is not: the fluctuations of the first fluid node next to it are 3 to 9 % low.
+The regularized wall is not: the fluctuations of the first fluid node next to it are 3 to 9 % low, and the
+momentum normal to the wall is still 1.4 % low on the second node.
 
 **Duct driven by a difference of density** (8 x 16 x 8 nodes and 10 x 32 x 10 nodes, `Density` faces at
 1.01 and 1, largest error in the middle cross-section relative to the incompressible solution): with
@@ -657,7 +662,8 @@ normalized VACF at half steps to the kick response minus its plateau is 0.93, 0.
 0.50 at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps (reference: 0.93, 0.90, 0.85, 0.81, 0.70, 0.47). With thermal
 fluctuations of the fluid the two curves would coincide (fluctuation-dissipation theorem).
 
-**With the centred drag** (same cases and seeds; `LBM_DRAG=centered` in the scripts of the campaign). The
+**With the centred drag** (same cases and seeds; the scripts of the campaign, which are not part of this
+repository, were run with the centred drag). The
 temperature that is right for the centred drag is that of the half step (`docs/theory.md`, section 2).
 
 T2, mean temperatures in K, half step / full step (statistical error about 0.5 K):

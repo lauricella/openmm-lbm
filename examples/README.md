@@ -96,6 +96,7 @@ the thermostat; with `--no-lb` the beads are integrated by OpenMM's Langevin int
 friction, without hydrodynamics.
 
 ```bash
+export EX=/path/to/openmm-lbm/examples                   # the folder of the examples
 python $EX/cocomo/diffusion.py --preset smoke            # SOD1, 2000 steps: a quick check
 python $EX/cocomo/diffusion.py --preset sod1 --seed 1    # SOD1, 200 ns, about 30 minutes on an A100
 python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient of the protein
@@ -110,8 +111,9 @@ python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient
 - `--preset rlp` is an intrinsically disordered protein of 166 residues, without elastic network
   (box 20 nm, friction 100/ps, dt 2 fs, nu = 1.0035 nm^2/ps, 10 ns), from the thermal-diffusion example
   of the DragOpenMM plugin. Its full-step temperature stays at about 260 K, 13% below 298 K: with this
-  large friction the fluid, which has no thermal fluctuations of its own, takes a large part of the
-  momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin gives the same value.
+  large friction the fluid, which has no thermal fluctuations of its own without `--fluid-fluctuations`,
+  takes a large part of the momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin
+  gives the same value.
 - The script writes the trajectory (DCD), the energies and temperature (OpenMM's log), the full-step and
   half-step temperature and the centre of mass of the protein, not wrapped into the box, which `msd.py`
   reads.

@@ -272,7 +272,10 @@ def test_fluid_fluctuations_gpu(name):
     force.setFluidFluctuations(True)
     force.setFluidMomentumRemovalFrequency(0)
     integrator = mm.VerletIntegrator(0.01)
-    context = mm.Context(system, integrator, platform, {'Precision': 'double'})
+    try:
+        context = mm.Context(system, integrator, platform, {'Precision': 'double'})
+    except Exception as e:
+        pytest.skip('no Context on the %s platform: %s' % (name, e))
     context.setPositions(positions[:1])
     integrator.step(10)
     density, velocity = force.getFluidFields(context)

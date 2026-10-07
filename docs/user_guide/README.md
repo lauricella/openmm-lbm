@@ -44,8 +44,8 @@ Know these before using the plugin for a study:
    with the scripts of [`examples/`](../../examples/README.md).
 3. [Getting started](getting_started.md): checking the installation, a first simulation, units,
    platforms.
-4. [The lattice](lattice.md): geometry, node indexing and NumPy arrays, units, relaxation time, Mach
-   number, removal of the fluid momentum, initial state.
+4. [The lattice](lattice.md): geometry, node indexing and NumPy arrays, units, relaxation time, choosing
+   the drag, Mach number, removal of the fluid momentum, initial state.
 5. [API reference](api_reference.md): every method of `LBMForce`, with units, defaults and errors.
 6. [Saving and continuing a simulation](restart.md): checkpoints of a run with the fluid, a script for
    long runs split into several jobs, moving a run to another platform.
@@ -58,6 +58,8 @@ Know these before using the plugin for a study:
    - Saving and restoring the fluid.
    - Serialization.
    - `openmm.app.Simulation` with a reporter for the fluid.
+   - A Couette flow between two open faces (Reference platform).
+   - A flow in a duct driven by a pressure difference (Reference platform).
 8. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
 
 ## What works in this version
@@ -73,11 +75,14 @@ Know these before using the plugin for a study:
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |
+| Checkpoints of the fluid (`createCheckpoint()`, `openmmlbm.saveCheckpoint()`, `LBMCheckpointReporter`) | yes | yes |
 | VTK files of the fluid and of the particles for ParaView ([`openmmlbm.LBMVTKReporter`](api_reference.md#openmmlbmlbmvtkreporterprefix-reportinterval-force)) | yes | yes |
 
-Every feature runs on every platform. The random forces of the Reference platform, and the fluctuations of the fluid, come from a
+Every feature runs on every platform, except the regularized walls and the open faces, which run only on the
+Reference platform for now. The random forces of the Reference platform, and the fluctuations of the fluid, come from a
 generator of the force, those of the GPU platforms from OpenMM's generator: with the same seed the two are
-different sequences with the same statistics. The coupling is dissipative: on every platform it adds no energy.
+different sequences with the same statistics. The coupling is dissipative and has no potential energy: on every
+platform its energy in the State is zero.
 
 ## Conventions
 

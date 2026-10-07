@@ -3,8 +3,9 @@
 This document describes the physics implemented by `LBMForce`, the conversion between OpenMM and
 lattice units, and the conventions every platform must follow. Each section says whether it is
 already implemented or still to be implemented. The fluid and the explicit drag reproduce the CUDA
-lattice Boltzmann library of the DragOpenMM project; the centred drag (section 2) is an extension of this
-plugin.
+lattice Boltzmann library of the DragOpenMM project; the centred drag (section 2), the regularized walls and
+the open faces (section 1, Reference platform only for now) and the fluctuating fluid (section 7) are
+extensions of this plugin.
 
 ## 1. Fluid model (implemented on all platforms)
 
@@ -152,8 +153,9 @@ regularized wall above. The validation tests check the profile to 1e-9.
   permutes the populations and keeps the Gaussian equilibrium state, so the fluctuations of all modes
   keep their equilibrium variance next to the walls (`docs/validation.md`). The regularized wall rebuilds
   the stress and drops the ghost modes of its nodes: in a test at tau = 0.8 the fluctuations of the first
-  fluid node next to the wall were 3 to 10 % below equilibrium (momentum normal to the wall 0.905, stress
-  0.92, ghosts 0.91), within 1 % from the second node on.
+  fluid node next to the wall were 3 to 9 % below equilibrium (density 0.954, momentum normal to the wall
+  0.910, stress down to 0.917, ghosts down to 0.920), the momentum normal to the wall was still 1.4 % low on
+  the second node, and from the third node on all modes were within the statistical error (`docs/validation.md`).
 - With Density faces (below) bounce-back walls let a spurious staggered mode survive, which the Density
   faces damp; regularized walls damp it themselves.
 - The regularized wall places the wall on the fluid nodes, which can be convenient to define a geometry;
@@ -166,11 +168,13 @@ P(t + dt) - P(t) = (M g - F_wall) dt, holds at every step, as with bounce-back.
 
 ### Open faces
 
-By default the box is periodic. `setFaceBoundary(face, type)` makes a face of the box open: `Velocity` (the
-fluid on the face has the velocity set with `setFaceVelocity()`: an inlet, an outlet or a moving wall) or
-`Density` (the fluid on the face has the density, that is the pressure p = c_s^2 rho, set with
-`setFaceDensity()`). The two faces perpendicular to an axis must be both periodic or both open, in any
-combination of `Velocity` and `Density`. The six faces have independent velocities and densities.
+Open faces exist on the Reference platform only, for now: the CUDA, OpenCL and HIP platforms refuse them
+when the Context is created. By default the box is periodic. `setFaceBoundary(face, type)` makes a face of
+the box open: `Velocity` (the fluid on the face has the velocity set with `setFaceVelocity()`: an inlet, an
+outlet or a moving wall) or `Density` (the fluid on the face has the density, that is the pressure
+p = c_s^2 rho, set with `setFaceDensity()`). The two faces perpendicular to an axis must be both periodic or
+both open, in any combination of `Velocity` and `Density`, and an open axis needs at least 3 nodes. The six
+faces have independent velocities and densities.
 - The nodes on an open face (i = 0 for `XMin`, i = nx - 1 for `XMax`, and so on) are boundary nodes, on
   the face: the populations that would come from beyond the face are unknown, and the populations that
   leave through the face are lost. All 19 populations of a face node are rebuilt as for the regularized
@@ -181,7 +185,8 @@ combination of `Velocity` and `Density`. The six faces have independent velociti
   6 w_q rho c_q.v), or of f^eq_q(rho, v) if opp(q) is unknown too]. It is solved for rho in closed form.
 - On a `Density` face rho is that of the face, the velocity along the face is zero and the velocity across
   it follows from the same balance (note 5.1 of [20]): rho = rho_0 + 2 rho_out + rho v_n, with rho_0 the sum of
-  the populations along the face and rho_out the sum of those that leave the domain through it.
+  the populations along the face, rho_out the sum of those that leave the domain through it and v_n the
+  velocity into the domain.
 - **Staggered mode.** For any lattice whose velocities have components -1, 0 and 1, the staggered
   momentum sum_y (-1)^(y+t) j_y is conserved exactly by the bulk (the collision keeps the momentum of each
   node, the streaming moves a population by one node in one step). In a periodic box it stays zero; open
@@ -267,7 +272,9 @@ With the Euler-Maruyama scheme the budget gains the work of the random force; in
 power balances the dissipation of the drag.
 
 **Order in the lattice step.** Moments, removal of the fluid momentum, coupling, collision and
-streaming, bounce-back. The coupling therefore sees the fluid momentum after the removal.
+streaming, bounce-back (with the `BounceBack` wall scheme), then, on the Reference platform, the rebuild of
+the boundary nodes of regularized walls and open faces (section 1). The coupling therefore sees the fluid
+momentum after the removal.
 
 **Time levels.** OpenMM's Verlet integrator is a leapfrog: during the force evaluation of step t
 the velocities are v(t - dt/2). The fluid momentum before the step is j(t - dt/2), because
@@ -559,8 +566,9 @@ that step drawn once (When the coupling forces are computed, above).
 
 The public API uses OpenMM units: nm, ps, Da (g/mol), K and kJ/mol. Internally the plugin works in
 lattice units only, as is usual for lattice Boltzmann [7]. `LBMForceImpl::computeLatticeParameters()`
-computes the lattice parameters of the fluid (tau, omega, the initial velocity and the body acceleration)
-and passes dx, dt, rho0, the friction and kT, from which every kernel converts the quantities of the
+computes the lattice parameters of the fluid (tau, omega, the initial velocity, the body acceleration and the
+velocities and densities of the faces) and passes dx, dt, rho0, the friction and kT, from which every kernel
+converts the quantities of the
 particles with the same factors:
 
 | Quantity | Lattice unit | OpenMM value |
@@ -661,16 +669,17 @@ so it is rejected.
   to the walls in the last step and, on the Reference platform, the random number generator of the force
   (on the GPU platforms it is OpenMM's, which the OpenMM checkpoint contains). With both checkpoints a run
   continues bit for bit (`testCheckpointWithRandomForce`). `LBMForceImpl` writes a header before the data
-  of the kernel: a tag, the format version (3), the platform, the grid size, the number of coupled particles,
-  the drag scheme and whether the fluid fluctuates. A checkpoint is refused on another platform, with another
-  grid, number of coupled particles, drag scheme or switch of the fluid fluctuations, and on the GPU platforms
-  with another precision; a checkpoint of version 1 (plugin version 0.1.0) is read as one of the explicit drag,
-  and those of versions 1 and 2 (plugin versions 0.1 and 0.2) as ones without fluid fluctuations.
+  of the kernel: a tag, the format version (4), the platform, the grid size, the number of coupled particles,
+  the drag scheme, whether the fluid fluctuates and the wall scheme. A checkpoint is refused on another
+  platform, with another grid, number of coupled particles, drag scheme, switch of the fluid fluctuations or
+  wall scheme, and on the GPU platforms with another precision; a checkpoint of version 1 (plugin version
+  0.1.0) is read as one of the explicit drag, those of versions 1 and 2 (plugin versions 0.1 and 0.2) as ones
+  without fluid fluctuations, and those of versions 1 to 3 as ones with bounce-back walls.
 - **Fluid state.** `getFluidState()` returns the deviations df_q in this layout, in lattice units: a
   population is the value plus w_q. Saving and restoring them is exact, so a restarted run is identical
   to an uninterrupted one.
 - **Initial state.** A new Context starts from the equilibrium at lattice density 1 and the initial
-  velocity.
+  velocity; the nodes of regularized walls start at rest (fluid velocity zero).
 
 ## 5. Precision (implemented)
 
@@ -696,7 +705,7 @@ range. The plugin checks both.
   implementation.
 - With coupled particles and the explicit drag, warnings for tau > 1.7 and friction*dt > 1 (section 2), and,
   with fluid fluctuations and the EM scheme at T > 0, a warning that the particles will be too hot, with the
-  bound friction*dt*m/(2 m_c) for the heaviest one (section 7);
+  estimate friction*dt*m/(2 m_c) for the heaviest one (section 7);
   with the centred drag, an error if `LBMForce` is not the last force or the System has virtual sites
   (section 2, Solution of the centred drag).
 
@@ -860,8 +869,10 @@ particles, the EM scheme, T > 0 and a friction that is not zero, a warning on st
 heaviest coupled particle.
 
 **Walls.** The halfway bounce-back of the solid nodes (section 1) is a permutation of populations: it neither
-dissipates nor needs noise, and it is unchanged. Walls that also exchange thermal fluctuations with the fluid
-(walls at the temperature of the bath, with a thermal accommodation coefficient) are a planned extension.
+dissipates nor needs noise, and it is unchanged. The regularized walls of section 1 (Reference platform)
+rebuild their nodes without noise, and next to them the fluctuations are below equilibrium (section 1, Which
+wall to choose). Walls that also exchange thermal fluctuations with the fluid (walls at the temperature of the
+bath, with a thermal accommodation coefficient) are a planned extension.
 
 **Tests** (`tests/TestLBMFluctuations.h`, all platforms and precisions).
 - A lattice of a single node, which streams every population back to itself: mass and momentum stay those of the
@@ -871,6 +882,10 @@ dissipates nor needs noise, and it is unchanged. Walls that also exchange therma
 - A fluid at rest on an 8x8x8 lattice, after 300 steps: the variances of the density, of the momentum and of
   the moments k = 4...18 of a node are mu rho, rho kT and mu rho b_k within 5%, for tau = 0.8 and 2.5; the total
   mass and momentum are conserved to 1e-13 (1e-5 in single precision).
+- The spectrum of the velocity fluctuations on an 8x8x8 lattice at tau = 1: the velocity of `getFluidFields()`,
+  minus the mean velocity of each sample, is Fourier transformed, and its longitudinal and transverse parts are
+  white, kT/rho and 2 kT/rho within 5% at long, medium and short wavelengths, at rest, in a uniform flow and in
+  a fluid accelerated by a body force (the mean velocity, which grows with time, is subtracted).
 - With the fluctuations switched on at zero temperature the run is identical, bit for bit, to the run without
   them; runs with the same seed are identical, also with force evaluations between steps; a different seed
   gives a different run; a run restarted from the checkpoints is identical to the uninterrupted one; with the

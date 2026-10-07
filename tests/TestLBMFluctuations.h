@@ -359,12 +359,97 @@ void testFluctuationDragWarning(Platform& platform) {
             }
 }
 
+/**
+ * Spectrum of the velocity fluctuations.  At every sample the velocity field of getFluidFields() (the velocity a
+ * user reads), minus the mean velocity of the sample, is Fourier transformed on the 8x8x8 lattice,
+ * F(k) = sum_x u(x) exp(-i k.x)/sqrt(N).  Equipartition gives a white spectrum: the longitudinal part khat.F has
+ * <|khat.F|^2> = kT/rho and the transverse part 2 kT/rho at every wave vector, checked here in three bands of |k|
+ * (long, medium and short waves), and the variance per node is (N - 1)/N kT/rho per component.  The mean velocity
+ * is subtracted even when it should be zero.  The test runs at rest, in a uniform flow u0 and in a fluid accelerated
+ * by a uniform body force g, whose mean velocity grows as u0 + g t (u0 and g in lattice units).
+ */
+void testVelocitySpectrum(Platform& platform, Vec3 u0, Vec3 g) {
+    double temperature = 300.0;
+    int n = 8, numNodes = n*n*n, numWarmup = 300, numSamples = 400, interval = 5;
+    LBMForce* force;
+    System* system = createFluidSystem(force, n, n, n, 1.0);
+    force->setFluidFluctuations(true);
+    force->setTemperature(temperature);
+    force->setRandomNumberSeed(13);
+    force->setInitialFluidVelocity(u0*(fluidDx/fluidDt));
+    force->setBodyAcceleration(g*(fluidDx/(fluidDt*fluidDt)));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    double kT = latticeKT(temperature);
+    vector<double> cosTable(n), sinTable(n);
+    for (int m = 0; m < n; m++) {
+        cosTable[m] = cos(2*M_PI*m/n);
+        sinTable[m] = sin(2*M_PI*m/n);
+    }
+    // bands of |m|^2, for the wave vectors k = 2 pi m/n with the components of m in -n/2+1 ... n/2
+    const int numBands = 3;
+    vector<double> longitudinal(numBands, 0.0), transverse(numBands, 0.0), count(numBands, 0.0);
+    double nodeVariance = 0.0;
+    vector<double> density;
+    vector<Vec3> velocity, du(numNodes);
+    Vec3 mean;
+    integrator.step(numWarmup);
+    for (int sample = 0; sample < numSamples; sample++) {
+        integrator.step(interval);
+        force->getFluidFields(context, density, velocity);
+        mean = Vec3();
+        for (int node = 0; node < numNodes; node++)
+            mean += velocity[node];
+        mean *= 1.0/numNodes;
+        for (int node = 0; node < numNodes; node++) {
+            du[node] = (velocity[node]-mean)*(fluidDt/fluidDx);
+            nodeVariance += du[node].dot(du[node]);
+        }
+        for (int mz = 0; mz < n; mz++)
+            for (int my = 0; my < n; my++)
+                for (int mx = 0; mx < n; mx++) {
+                    if (mx == 0 && my == 0 && mz == 0)
+                        continue;
+                    Vec3 re, im;
+                    for (int z = 0; z < n; z++)
+                        for (int y = 0; y < n; y++)
+                            for (int x = 0; x < n; x++) {
+                                int phase = (mx*x+my*y+mz*z)%n, node = x+n*(y+n*z);
+                                re += du[node]*cosTable[phase];
+                                im -= du[node]*sinTable[phase];
+                            }
+                    Vec3 m(mx > n/2 ? mx-n : mx, my > n/2 ? my-n : my, mz > n/2 ? mz-n : mz);
+                    double m2 = m.dot(m);
+                    Vec3 khat = m/sqrt(m2);
+                    double power = (re.dot(re)+im.dot(im))/numNodes;
+                    double powerL = (re.dot(khat)*re.dot(khat)+im.dot(khat)*im.dot(khat))/numNodes;
+                    int band = (m2 <= 3 ? 0 : (m2 <= 12 ? 1 : 2));
+                    longitudinal[band] += powerL;
+                    transverse[band] += power-powerL;
+                    count[band] += 1;
+                }
+    }
+    // the mean velocity of the last sample is that of the uniform flow accelerated by g, to within the fluctuations
+    double time = numWarmup+numSamples*interval;
+    ASSERT_EQUAL_VEC((u0+g*time)*(fluidDx/fluidDt), mean, 2e-4*fluidDx/fluidDt);
+    for (int band = 0; band < numBands; band++) {
+        ASSERT_EQUAL_TOL(1.0, longitudinal[band]/(count[band]*kT), 0.05);
+        ASSERT_EQUAL_TOL(1.0, transverse[band]/(count[band]*2*kT), 0.05);
+    }
+    ASSERT_EQUAL_TOL(1.0, nodeVariance/(numSamples*(numNodes-1)*3*kT), 0.03);
+    delete system;
+}
+
 void runFluctuationTests(Platform& platform) {
     testFluctuationBasis();
     testFluctuationsSingleNode(platform, 1.0);
     testFluctuationsSingleNode(platform, 0.8);
     testFluctuationsEquilibrium(platform, 0.8);
     testFluctuationsEquilibrium(platform, 2.5);
+    testVelocitySpectrum(platform, Vec3(), Vec3());
+    testVelocitySpectrum(platform, Vec3(0.05, 0.02, -0.03), Vec3());
+    testVelocitySpectrum(platform, Vec3(), Vec3(1e-5, 0.0, 0.0));
     testFluctuationsAtZeroTemperature(platform);
     testFluctuationsReproducible(platform);
     testFluctuationsRestart(platform);

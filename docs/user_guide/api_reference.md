@@ -160,7 +160,7 @@ give no-slip walls, accurate to second order in the lattice spacing, and conserv
 | where the wall is | halfway between the solid node and the first fluid node | on the first fluid node next to the solid nodes |
 | channel between the solid planes j = 0 and j = ny - 1 | walls at y = dx/2 and (ny - 3/2) dx | walls at y = dx and (ny - 2) dx |
 | most accurate for | tau < 15/16 (water: tau about 0.6) | tau > 15/16 |
-| with fluid fluctuations | exact thermal equilibrium next to the wall | fluctuations 3 to 10 % low on the first node next to the wall |
+| with fluid fluctuations | exact thermal equilibrium next to the wall | fluctuations 3 to 9 % low on the first node next to the wall |
 | platforms | all | Reference only, for now |
 
 If you do not know which one to use, keep the default. The theory and the exact solutions are in
@@ -182,8 +182,11 @@ True
 Returns the force exerted on the solid nodes during the last lattice step, as a `Vec3` in kJ/mol/nm.
 It is the momentum given to the walls, divided by the time step, by:
 - the fluid, through bounce-back (momentum exchange method of Ladd,
-  [theory.md](../theory.md#solid-nodes-and-walls));
-- the coupled particles: the reaction of particles at solid nodes and their reflections.
+  [theory.md](../theory.md#solid-nodes-and-walls)) or, with `Regularized` walls, as the momentum of the
+  populations that stream into the solid nodes minus the momentum that the walls put into their fluid nodes
+  when they rebuild them;
+- the coupled particles: the reaction of particles at solid nodes (and, with `Regularized` walls, at the fluid
+  nodes on the walls) and their reflections.
 
 It is zero before the first step and without solid nodes. With it, the total momentum of particles, fluid
 and walls is conserved. In a steady flow driven by a body acceleration g it equals g times the mass of
@@ -376,7 +379,7 @@ reporter = LBMTemperatureReporter('temperature.txt', 1000, force)
 
 A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps, the fluid of `force` and the
 particles of the System in VTK files, which ParaView and VisIt read. Everything is in OpenMM units, and the files
-of one report have the step in their name:
+of one report have the step in their name, written with 10 digits (for example `run_fluid_0000001000.vti`):
 
 | File | Content |
 |---|---|
@@ -417,8 +420,8 @@ With the fluctuating fluid **use the centred drag**
 ([`setDragScheme(LBMForce.Centered)`](#setdragschemescheme-getdragscheme)) and measure the temperature with
 [`LBMTemperatureReporter`](#openmmlbmlbmtemperaturereporterfile-reportinterval-force): the coupled particles then
 have the set temperature, their diffusion coefficient contains the hydrodynamic contribution of the thermal
-flows, and the Einstein relation holds. With the explicit drag the particles are too hot, by up to
-friction x dt x m/(2 m_c), and a warning on stderr says so when the Context is created (13% for beads of 100 Da with friction 10/ps and dt = 0.02 ps, 56% for beads of
+flows, and the Einstein relation holds. With the explicit drag the particles are too hot, by about
+friction x dt x m/(2 m_c), and a warning on stderr says so when the Context is created (measured: 14% for beads of 100 Da with friction 10/ps and dt = 0.02 ps, 56% for beads of
 1000 Da with friction 10/ps and dt = 0.01 ps; [choosing the drag](lattice.md#choosing-the-drag)). Keep tau at
 0.505 or above: closer to 1/2 the fluctuating fluid becomes unstable (at tau <= 0.501 with kT = 1/3000 in
 lattice units, at tau = 0.5001 for water with dx = 0.5 nm and dt = 0.01 ps;
@@ -528,11 +531,12 @@ bytes b'LBMCKPT1'
 ```
 
 Errors: a checkpoint written on another platform, with another precision, for a different grid size,
-number of coupled particles, drag scheme or switch of the fluid fluctuations, by a newer version of the plugin, or data that are not a
+number of coupled particles, drag scheme, wall scheme or switch of the fluid fluctuations, by a newer version of the plugin, or data that are not a
 checkpoint or are damaged or truncated, make `loadCheckpoint()` raise an exception
 ([troubleshooting](troubleshooting.md)). A checkpoint of version 0.1.0 has no drag scheme in its header,
 and loads only in a Context with the explicit drag; checkpoints of versions 0.1 and 0.2 load only in a Context
-without fluid fluctuations.
+without fluid fluctuations and with the `BounceBack` wall scheme. The types of the faces are not in the checkpoint,
+and are not checked.
 
 ### `openmmlbm.saveCheckpoint(file, context, force)`, `openmmlbm.loadCheckpoint(file, context, force)`
 
@@ -540,7 +544,7 @@ Functions of the module `openmmlbm` that write and read one file with both check
 (`context.createCheckpoint()`) and the force's (`force.createCheckpoint(context)`). `saveCheckpoint()` writes
 to `file + '.tmp'` and then renames it, so an interrupted write never damages an existing checkpoint.
 `loadCheckpoint()` restores positions, velocities, box, time, step count and random numbers, and the fluid;
-it raises `ValueError` if the file is not a checkpoint written by `saveCheckpoint()`.
+it raises `ValueError` if the file is not a checkpoint written by `saveCheckpoint()`, or is truncated.
 
 ### `openmmlbm.LBMCheckpointReporter(file, reportInterval, force)`
 
@@ -599,10 +603,12 @@ that the integrator evaluates; by default the integrator evaluates all groups.
 
 `openmm.XmlSerializer` saves and loads an `LBMForce`, alone or as part of a System, with all its
 parameters: grid, fluid properties, friction, temperature, random number seed, body acceleration, initial
-velocity, frequencies, Mach limit, coupling and drag schemes, fluid fluctuations, solid nodes, coupled
-particles, force group and name. The fluid of a Context is not part of it. The XML has version 5; the
-versions 1 to 3 written by version 0.1.0 load with the explicit drag, and versions 1 to 4 (versions 0.1 and
-0.2 of the plugin) without fluid fluctuations, while older versions of the plugin cannot read newer XML. Import `openmmlbm` before
+velocity, frequencies, Mach limit, coupling and drag schemes, fluid fluctuations, wall scheme, solid nodes, the
+type, velocity and density of each face, coupled particles, force group and name. The fluid of a Context is not
+part of it. The XML has version 7. Older XML still loads: versions 1 to 3 (written by version 0.1.0) with the
+explicit drag, versions 1 to 4 (versions 0.1 and 0.2 of the plugin) without fluid fluctuations, versions 1 to 5
+with the `BounceBack` wall scheme and versions 1 to 6 with periodic faces. Older versions of the plugin cannot
+read newer XML. Import `openmmlbm` before
 deserializing. A force deserialized on its own is returned as a generic `openmm.Force`; obtain the
 `LBMForce` with `LBMForce.cast()` (see the [serialization example](examples.md#serialization)).
 

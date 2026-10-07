@@ -10,17 +10,19 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `openmmapi/include/LBMForce.h`, `openmmapi/src/LBMForce.cpp` | public API: parameters, coupled particles, access to the fluid |
 | `openmmapi/include/LBMKernels.h` | `CalcLBMForceKernel`, the interface every platform implements, and `LBMLatticeParameters` |
 | `openmmapi/include/internal/LBMForceImpl.h`, `openmmapi/src/LBMForceImpl.cpp` | checks the setup, computes the lattice parameters for all platforms (Invariants, below), prints the warnings, writes and checks the header of the checkpoints |
-| `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium and its deviation from the rest equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing (host code) |
+| `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium and its deviation from the rest equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing, orthogonal basis of Lulli et al. and random part of the fluctuating fluid (host code) |
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform (on OpenCL its subclass `OpenCLCalcLBMForceKernel`, step 3 below), and the tests |
-| `serialization/` | XML proxy of `LBMForce` (parameters only; version 5, which reads versions 1 to 4) |
+| `serialization/` | XML proxy of `LBMForce` (parameters only; version 7, which reads versions 1 to 6) |
 | `python/` | SWIG wrapper `openmmlbm`, with the Python helpers `LBMTemperatureReporter`, `LBMVTKReporter`, `saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter`, and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
 | `examples/` | example scripts, ports of the examples of the DragOpenMM plugin (`examples/README.md`) |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
-| `tests/TestLBMFluid.h` | tests of the fluid on its own, `runFluidTests()`, and of the solid nodes, `runWallTests()`, on every platform (`docs/validation.md`) |
+| `tests/TestLBMFluid.h` | tests of the fluid on its own, `runFluidTests()`, and of the walls and the open faces, `runWallTests()`, on every platform (`docs/validation.md`); the regularized walls and the open faces are tested on the Reference platform, and the other platforms check that they refuse them |
 | `tests/TestLBMCoupling.h` | tests of the particle-fluid coupling, `runCouplingTests()`, on every platform |
 | `tests/TestLBMCentered.h` | tests of the centred drag, `runCenteredTests()`, which also runs the coupling tests that do not depend on the drag with the centred one, on every platform |
+| `tests/TestLBMFluctuations.h` | tests of the fluctuating fluid, `runFluctuationTests()`, on every platform |
+| `devtools/`, `.github/workflows/CI.yml` | continuous integration and its conda environments; `devtools/check_user_guide.py` runs the Python blocks of `docs/user_guide/` and checks their output |
 
 ## Libraries
 
@@ -37,7 +39,7 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
 
 1. **Context creation.**
    - `LBMForceImpl::initialize()` checks the integrator (Verlet), the box (rectangular, cubic cells),
-     the viscosity (tau > 1/2) and the coupled particles.
+     the viscosity (tau > 1/2), the solid nodes, the faces and the coupled particles.
    - It computes `LBMLatticeParameters` and passes them to the kernel of the platform.
    - The kernel allocates the fluid and sets it to equilibrium.
 2. **Integration step.** `VerletIntegrator::step()` calls `ContextImpl::updateContextState()`, which
@@ -47,7 +49,7 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
    kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
    step (moments, momentum removal, coupling of the particles, collision, with the random part of a
-   fluctuating fluid, and streaming, bounce-back at solid nodes, then, on the Reference platform, the rebuild
+   fluctuating fluid, and streaming, bounce-back at solid nodes with the `BounceBack` wall scheme, then, on the Reference platform, the rebuild
    of the boundary nodes of regularized walls and open faces; see `docs/theory.md` sections 1, 2 and 7) and
    adds the coupling forces of the step to the particles. The other force evaluations (`getState()`, for example) do not advance the fluid: they add the
    coupling forces of the next step, computed on the current fluid without its reaction, as OpenMM does for
@@ -117,9 +119,9 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    repeated evaluation then does the step.
 4. **Checkpoints.** `LBMForce::createCheckpoint()` and `loadCheckpoint()` go through `LBMForceImpl`, which
    writes and checks a header (tag, version, platform, grid size, number of coupled particles, from
-   version 2 the drag scheme and from version 3 the switch of the fluid fluctuations; version 1 is read as the
-   explicit drag, versions 1 and 2 as without fluctuations), to the kernel, which writes its state as
-   it is. The common kernel writes the size of its floating point type (a checkpoint is refused in another
+   version 2 the drag scheme, from version 3 the switch of the fluid fluctuations and from version 4 the wall
+   scheme; version 1 is read as the explicit drag, versions 1 and 2 as without fluctuations, versions 1 to 3
+   as with bounce-back walls), to the kernel, which writes its state as it is. The common kernel writes the size of its floating point type (a checkpoint is refused in another
    precision), whether the random numbers of the next step are already drawn and whether the fluid has
    advanced, then the populations, those random numbers and the wall momentum of the particles and of the
    solid nodes. The Reference kernel writes the populations, the random numbers of the next step, the wall
@@ -133,8 +135,9 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
 ## Invariants
 
 - **Unit conversion in two documented steps.** `LBMForceImpl::computeLatticeParameters()` validates the
-  setup and computes tau, omega and the initial velocity and body acceleration in lattice units; it passes
-  dx, dt, the density, the friction and kT in OpenMM units (`LBMLatticeParameters`). The kernels convert the
+  setup and computes tau, omega, the initial velocity, the body acceleration and the velocities and densities
+  of the faces in lattice units; it passes dx, dt, the density, the friction and kT in OpenMM units
+  (`LBMLatticeParameters`). The kernels convert the
   per-particle quantities with the same factors on every platform: masses in units of the cell mass
   m_c = rho0 dx^3, gamma = friction dt, kT dt^2/(m_c dx^2), velocities with `getVelocityScale()` = dx/dt and
   forces with m_c dx/dt^2 (`docs/theory.md`, section 3).
@@ -173,7 +176,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    the option is `ON` for a platform that cannot be built. Add the platform to the summary at the end of the
    file.
 3. Add `platforms/<platform>/tests/Test<Platform>LBMForce.cpp`, which calls `runPlatformTests()`,
-   `runFluidTests()`, `runWallTests()`, `runCouplingTests()` and `runCenteredTests()` and takes the
+   `runFluidTests()`, `runWallTests()`, `runCouplingTests()`, `runCenteredTests()` and
+   `runFluctuationTests()` and takes the
    precision as its argument, and register it in `platforms/<platform>/tests/CMakeLists.txt` in the three
    precision modes.
 4. Add the platform to the Python tests that compare the GPU platforms with the Reference platform.

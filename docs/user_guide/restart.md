@@ -262,9 +262,9 @@ dependency: `sbatch --dependency=afterany:<number of the previous job> job.sh`.
   to them: loading it on another platform or with another precision gives an error. To move a run to a
   different computer or platform, see [moving a run to another platform](#moving-a-run-to-another-platform).
 - **Build the same System.** Same particles in the same order, same forces, same `LBMForce` parameters and
-  grid. `loadCheckpoint()` refuses a checkpoint written for a different grid or number of coupled
-  particles, but it cannot check everything else: a different friction or viscosity would simply be used
-  from then on. The random number seed of the script does not matter on a restart: the state of the
+  grid. `loadCheckpoint()` refuses a checkpoint written for a different grid, number of coupled particles,
+  drag scheme, wall scheme or switch of the fluid fluctuations, but it cannot check everything else: a
+  different friction or viscosity, or different open faces, would simply be used from then on. The random number seed of the script does not matter on a restart: the state of the
   generator comes from the checkpoint.
 - **Reports written after the last checkpoint.** If a job stops between two checkpoints, its reporters have
   already written the steps after the last checkpoint, and the restart writes them again. Choose the

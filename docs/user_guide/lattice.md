@@ -18,7 +18,7 @@ examples. The rest of this page explains each of them.
 | Friction | 5 to 10 /ps, so that friction x dt = 0.05 to 0.1 | with the explicit drag (the default) friction x dt must be below 1 (warning) and below 2 (stability), at 0.1 or below it is accurate; for larger values use the centred drag ([choosing the drag](#choosing-the-drag)) |
 | Temperature | that of the simulation, e.g. 298 K | the fluid is the thermostat of the coupled particles: no other thermostat |
 | Integrator | `VerletIntegrator(dt)` | friction and random force are part of `LBMForce` |
-| Removal of the fluid momentum | every step (the default) | keeps the system at rest; set 0 for flows driven by a body force |
+| Removal of the fluid momentum | every step (the default) | keeps the system at rest; set 0 for flows driven by a body force, and with open faces |
 
 **Checking a new setup.** Create the Context, then:
 
@@ -37,7 +37,8 @@ divides it into cubic cells:
 
 - the lattice spacing is dx = Lx/nx, and Ly/ny and Lz/nz must be equal to it (to a relative 1e-6);
 - node (i, j, k) sits at (i dx, j dx, k dx), with 0 <= i < nx, 0 <= j < ny and 0 <= k < nz;
-- the lattice is periodic in all three directions, like the box.
+- the lattice is periodic in all three directions, like the box, unless you open the faces of the box
+  ([open faces](api_reference.md#open-faces), Reference platform only for now).
 
 The box is read from the default periodic box vectors of the System when the Context is created.
 For a box of 15 x 15 x 7.5 nm and dx = 0.5 nm:
@@ -278,7 +279,11 @@ way.
 
 - `setFluidMomentumRemovalFrequency(n)` removes it every n steps.
 - `setFluidMomentumRemovalFrequency(0)` never removes it. Use 0 for flows driven by a body force,
-  otherwise the removal cancels the momentum that the force gives to the fluid.
+  otherwise the removal cancels the momentum that the force gives to the fluid. With open faces 0 is
+  required: the Context is not created otherwise.
+
+With `Regularized` walls the fluid nodes on the walls keep the velocity of the wall: they are left out of
+the removal.
 
 ## Initial state
 
@@ -286,7 +291,7 @@ A new Context starts the fluid at equilibrium:
 
 - the density of every fluid node is the density set by `setFluidDensity()`;
 - the velocity of every fluid node is the velocity set by `setInitialFluidVelocity()` (zero by
-  default);
+  default), except the fluid nodes on `Regularized` walls, which start at rest;
 - solid nodes hold no fluid.
 
 The fluid is not part of the State or of the checkpoints of OpenMM. `Context.reinitialize()` also

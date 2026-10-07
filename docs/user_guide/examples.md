@@ -293,8 +293,9 @@ full step 293 K, half step 308 K
 
 Notes:
 
-- **Full step.** Slightly below T: the fluid has no thermal fluctuations of its own and takes part of the
-  momentum of the particles. Over 20000 steps the same system gives 295.8 +- 0.4 K, 1.4% below T
+- **Full step.** Slightly below T: the fluid has no thermal fluctuations of its own (`setFluidFluctuations()`
+  is off by default) and takes part of the momentum of the particles. Over 20000 steps the same system gives
+  295.8 +- 0.4 K, 1.4% below T
   ([validation.md](../validation.md)).
 - **Half step.** For a free particle it is T/(1 - gamma dt/2) = 315.8 K, lowered by the same factor:
   311.7 +- 0.4 K over 20000 steps.
@@ -593,13 +594,15 @@ Notes:
   Context; none of them advances the fluid.
 - **Which particles to couple.** Only the particles passed to `addParticle()` interact with the fluid.
 - **GPU platforms.** To run on CUDA, replace the platform with `mm.Platform.getPlatformByName('CUDA')`
-  and pass `{'Precision': 'mixed'}`. Every example runs unchanged; the random forces, and therefore
+  and pass `{'Precision': 'mixed'}`. Every example above runs unchanged (the two examples with open faces
+  below need the Reference platform for now); the random forces, and therefore
   the outputs with T > 0, differ from those of the Reference platform (see the
   [status table](README.md#what-works-in-this-version)).
 
 ## Couette flow between two open faces
 
-The faces of the box can be open instead of periodic ([open faces](api_reference.md#open-faces)). Here the
+The faces of the box can be open instead of periodic ([open faces](api_reference.md#open-faces); on the
+Reference platform only for now, the other platforms refuse them when the Context is created). Here the
 bottom face z = 0 holds the fluid at rest and the top face moves along x with the velocity U: the fluid
 between them is sheared, and in the steady state its velocity grows linearly from 0 to U. x and y stay
 periodic, so the two plates are infinite.

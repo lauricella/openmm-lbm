@@ -166,7 +166,8 @@ Free bead in a fluid at rest, explicit drag: full step 300.0 K, half step T/(1 -
 
 (on an A100 GPU; another platform gives slightly different numbers, because the random numbers are
 rounded differently.) The full-step temperature is about 1% below 300 K: the fluid itself has no
-thermal fluctuations, and it takes part of the momentum of the beads.
+thermal fluctuations in this example (they are off by default, `setFluidFluctuations()`), and it takes part
+of the momentum of the beads.
 
 Exercises:
 
@@ -202,8 +203,8 @@ Exercises:
 1. Measure the viscosity: take the amplitude at two times, A1 and A2, and compute
    nu = ln(A1/A2) / (k^2 (t2 - t1)) with k = 2 pi / L. Compare it with the value printed at the start.
 2. Repeat with `--viscosity 3` and `--viscosity 0.3`. How does the decay rate change? The script
-   prints the relaxation time tau: below about 0.505 the plugin warns that the fluid may become
-   unstable.
+   prints the relaxation time tau: below 0.505 (or above 2) the plugin warns that the model is no longer
+   accurate, and close to 0.5 the fluid may become unstable.
 
 ## 7. Lesson 5: a protein in the fluid (`cocomo/diffusion.py`)
 
@@ -231,7 +232,7 @@ Exercises:
 
 1. Open `sod1_1ns_temperature.txt`: is the protein at 298 K?
 2. Run the same with `--no-lb` (no fluid, Langevin integrator) and compare the diffusion coefficients.
-   A run of 1 ns gives only a rough value; the presets run for 50 to 200 ns.
+   A run of 1 ns gives only a rough value; the SOD1 presets run for 50 to 200 ns.
 
 ## 8. Lesson 6: a long run in several pieces
 
@@ -244,7 +245,8 @@ python $EX/cocomo/diffusion.py --preset sod1 --steps 200000 --report 1000 --chec
 ```
 
 Stop it with Ctrl+C after at least one checkpoint has been written: the script writes one every 10000
-steps, about every 1.5 minutes on a GPU, and the file `long.chk` appears. It holds the last checkpoint:
+steps, about every second on a GPU (at the speed of 30 minutes for 200 ns, that is 2e7 steps), and the file
+`long.chk` appears. It holds the last checkpoint:
 positions, velocities, fluid and random numbers. Now continue:
 
 ```bash
@@ -262,8 +264,8 @@ submit again and again on a cluster until the run is finished.
 ## 9. Where to go next
 
 - The [examples page](examples.md) of this guide has shorter scripts on specific topics: a channel
-  between two walls, monitoring the Mach number, saving and restoring the fluid, serialization, and a
+  between two walls, monitoring the Mach number, saving and restoring the fluid, serialization, a
   simulation with `openmm.app.Simulation` and reporters, the usual way to run long simulations with
-  OpenMM.
+  OpenMM, and flows between open faces of the box.
 - The [API reference](api_reference.md) describes every method of `LBMForce`.
 - More examples with coarse-grained proteins are being prepared in `examples/`.

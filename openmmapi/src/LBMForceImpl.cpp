@@ -212,7 +212,7 @@ void LBMForceImpl::initialize(ContextImpl& context) {
         for (int particle : lattice.particles)
             maxMass = max(maxMass, context.getSystem().getParticleMass(particle));
         cerr << "Warning: LBMForce: with fluid fluctuations the explicit drag makes the coupled particles hotter than "
-             << "the set temperature, by up to friction*dt*m/(2 m_c) = " << 100.0*gammaDt*maxMass/(2.0*cellMass)
+             << "the set temperature, by about friction*dt*m/(2 m_c) = " << 100.0*gammaDt*maxMass/(2.0*cellMass)
              << "% for the heaviest one (m_c = " << cellMass << " Da is the mass of fluid in a cell). Use the Centered "
              << "drag scheme with fluid fluctuations." << endl;
     }

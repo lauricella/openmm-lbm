@@ -145,7 +145,8 @@ print(force.getFluidDensity())    # 602.214... Da/nm^3
 
 ## Platforms
 
-The fluid, the solid nodes and the coupling of the particles run on every platform (see the
+The fluid, the solid nodes and the coupling of the particles run on every platform; the regularized walls and
+the open faces run only on the Reference platform for now (see the
 [status table](README.md#what-works-in-this-version)). The Reference platform is for tests and small
 systems; CUDA, OpenCL and HIP are for production. On those platforms the fluid is stored in the "mixed"
 type of the platform:
@@ -164,6 +165,6 @@ precision. `mixed` is recommended for production.
 - [The lattice](lattice.md): a quick recipe for the parameters, then geometry, units, stability.
 - [Saving and continuing a simulation](restart.md): checkpoints and long runs.
 - [Examples](examples.md): a channel between two walls, monitoring, restarts, serialization,
-  `openmm.app.Simulation`.
+  `openmm.app.Simulation`, flows between open faces.
 - [API reference](api_reference.md): every method of `LBMForce`.
 - [Glossary](glossary.md): the words used in this guide.

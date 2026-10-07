@@ -18,10 +18,13 @@ versions the API may still change.
   centred drag the coupled particles have the set temperature, their velocity autocorrelation equals the
   response to a kick and their diffusion coefficient follows the Einstein relation; the explicit drag makes them
   too hot, by about friction x dt x m/(2 m_c), so the documentation recommends the centred drag with the
-  fluctuating fluid, and a warning on stderr gives this bound when a Context is created with fluid fluctuations,
-  the explicit drag and coupled particles at T > 0. Close to tau = 1/2 the fluctuating fluid is unstable (tau <= 0.501 at kT = 1/3000 in lattice
+  fluctuating fluid, and a warning on stderr gives this estimate when a Context is created with fluid fluctuations,
+  the explicit drag, a friction and coupled particles with the `EulerMaruyama` scheme at T > 0. Close to tau = 1/2 the fluctuating fluid is unstable (tau <= 0.501 at kT = 1/3000 in lattice
   units).
 - `examples/cocomo/diffusion.py --fluid-fluctuations`.
+- A test of the spectrum of the velocity fluctuations on all platforms (`testVelocitySpectrum`): the velocity of
+  `getFluidFields()`, minus the mean velocity of each sample, is Fourier transformed and its longitudinal and
+  transverse parts are compared with equipartition, at rest, in a uniform flow and with a body force.
 - `openmmlbm.LBMVTKReporter`, a reporter for `openmm.app.Simulation` that writes the fluid (density and
   velocity, solid nodes) and the particles (positions, velocities, masses, coupled or not) in VTK files for
   ParaView, in OpenMM units (nm, Da/nm^3, nm/ps), with a `.pvd` file for the series; `--vtk N` in
@@ -36,7 +39,8 @@ versions the API may still change.
   flows driven by a pressure difference, with the local regularized boundary condition of Latt on the nodes of
   the faces; the Density faces damp the staggered mode that the lattice otherwise keeps. The velocities and
   densities can be changed with `updateParametersInContext()`. Serialization version 7. With open faces the
-  removal of the fluid momentum must be off. Examples: Couette flow and a duct driven by a pressure difference
+  removal of the fluid momentum must be off. The CUDA, OpenCL and HIP platforms refuse regularized walls and open
+  faces with an exception when the Context is created. Examples: Couette flow and a duct driven by a pressure difference
   (`docs/user_guide/examples.md`).
 
 ### Changed

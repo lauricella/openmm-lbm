@@ -18,19 +18,23 @@ the plugin converts the parameters to lattice units.
 | `a solid node index is out of range` | Solid node indices must be between 0 and nx ny nz - 1; see [node indexing](lattice.md#node-indexing-and-numpy-arrays). |
 | `a solid node is listed more than once` | Remove the duplicates, for example with `np.unique()`. |
 | `all lattice nodes are solid` | At least one node must be fluid. |
+| `expected a sequence of integers` (a `TypeError` from `setSolidNodes()`) | Pass the node indices as a list, a range or a NumPy array of integers. |
 | `a coupled particle index is out of range`, `a particle is coupled more than once`, `coupled particles must have a positive mass` | Check the indices passed to `addParticle()` and the masses in the System. Massless particles (virtual sites) cannot be coupled. |
 | `LBMForce requires a VerletIntegrator: drag and random forces are part of the force` | Use `VerletIntegrator`. Langevin and other thermostatted integrators would add a second friction. |
 | `LBMForce does not support running on multiple devices` | Use a single GPU (`DeviceIndex` with one value). |
 | `the integrator step size changed after the Context was created; reinitialize the Context` | The step size is the lattice time step and cannot change. Create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()`. |
-| `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration or the forces on the fluid, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). With fluid fluctuations and tau very close to 1/2 (below about 0.502) the fluid can become unstable by itself: keep tau at 0.505 or above ([`setFluidFluctuations()`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)). |
+| `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration, the forces on the fluid or the velocities of the open faces, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). With fluid fluctuations and tau very close to 1/2 (below about 0.502) the fluid can become unstable by itself: keep tau at 0.505 or above ([`setFluidFluctuations()`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)). |
 | `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have 19 nx ny nz values. |
-| `the checkpoint was written on the platform X, not on Y` | A checkpoint can only be loaded on the platform where it was written. Use the same platform, or move the run with `saveState()` and `getFluidState()` ([restart](restart.md#moving-a-run-to-another-platform)). |
-| `the checkpoint was written with a different precision` | The precision (single, mixed, double) differs from that of the checkpoint. Create the Context with the same `Precision` property. |
+| `the checkpoint was written on the platform X, not on Y`, or OpenMM's `loadCheckpoint: Checkpoint was created with a different Platform: ...` | A checkpoint can only be loaded on the platform where it was written. Use the same platform, or move the run with `saveState()` and `getFluidState()` ([restart](restart.md#moving-a-run-to-another-platform)). |
+| `the checkpoint was written with a different precision`, or OpenMM's `Checkpoint was created with a different numeric precision` | The precision (single, mixed, double) differs from that of the checkpoint. Create the Context with the same `Precision` property. |
+| `Checkpoint was created with a different version of OpenMM` (from OpenMM) | The OpenMM part of the checkpoint was written by another version of OpenMM. Continue the run with the version of OpenMM that wrote it. |
 | `the checkpoint was written for a different grid size or number of coupled particles` | The System built for the restart is not the same as the one of the checkpoint. Build the System exactly as in the first run. |
 | `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by openmmlbm.saveCheckpoint()` | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
 | `unsupported checkpoint version`, `the checkpoint is damaged`, `the checkpoint is truncated`, `... is truncated or damaged` | The checkpoint was written by a newer version of the plugin, or the file was cut or changed (for example by a job that stopped while writing it). Use the version that wrote it, or an earlier checkpoint. |
+| `error writing the checkpoint` | In C++, the stream passed to `createCheckpoint()` could not be written. Check that it is open, in binary mode, and that the disk is not full. |
 | `the checkpoint must be bytes` | `LBMForce.loadCheckpoint(context, data)` takes the bytes returned by `createCheckpoint()`; to read a file, use `openmmlbm.loadCheckpoint(file, context, force)`. |
-| `Unsupported version number` (from `XmlSerializer.deserialize()`) | The XML was written by a newer version of the plugin: version 0.1.0 cannot read the XML of version 0.2.0. Use the newer version. |
+| `Unsupported version number` (from `XmlSerializer.deserialize()`) | The XML was written by a newer version of the plugin: for example, version 0.2 cannot read the XML of this version (XML version 7). Use the newer version. |
+| `the serialized force must have 6 faces` (from `XmlSerializer.deserialize()`) | The XML of the force was changed by hand or is damaged: its `Faces` element must hold one `Face` for each of the six faces. Serialize the force again. |
 | `unknown coupling scheme`, `unknown drag scheme` | `setCouplingScheme()` or `setDragScheme()` received a number that is not a scheme. Use `LBMForce.EulerMaruyama` or `LBMForce.NVE`, and `LBMForce.Explicit` or `LBMForce.Centered`. |
 | `with the Centered drag scheme LBMForce must be the last force of the System; add it after all the other forces` | The centred drag reads the other forces on the particles, which are complete only when `LBMForce` comes last. Call `system.addForce(force)` after adding every other force. |
 | `the Centered drag scheme does not support virtual sites` | OpenMM moves the forces of virtual sites to their particles after the forces are computed, so the centred drag would miss them. Use the explicit drag. |
@@ -40,8 +44,8 @@ the plugin converts the parameters to lattice units.
 | `with open faces perpendicular to y the grid needs at least 3 nodes along y` | The two faces sit on the first and the last node of the axis; there must be fluid between them. Use more nodes. |
 | `with open faces the fluid exchanges momentum with the outside, and its momentum cannot be removed: call setFluidMomentumRemovalFrequency(0)` | The default removes the momentum of the fluid at every step, which makes no sense with inlets and outlets. Call `force.setFluidMomentumRemovalFrequency(0)`. |
 | `the density of a face must not be negative` | `setFaceDensity()` takes a density in Da/nm^3; 0 means the density of the fluid at rest. |
-| `the Regularized wall scheme is not yet implemented on the X platform; use the Reference platform or the BounceBack wall scheme`, `open faces (setFaceBoundary()) are not yet implemented on the X platform; use the Reference platform` | These features exist only on the Reference platform for now. |
-| `the checkpoint was written with a different wall scheme` | Use the same `setWallScheme()` as in the first run (a checkpoint of version 0.2 has bounce-back walls). |
+| `the Regularized wall scheme is not yet implemented on the X platform; use the Reference platform or the BounceBack wall scheme`, `open faces (setFaceBoundary()) are not yet implemented on the X platform; use the Reference platform` | These features exist only on the Reference platform for now. The first message appears only when the System has solid nodes. |
+| `the checkpoint was written with a different wall scheme` | Use the same `setWallScheme()` as in the first run (checkpoints of versions 0.1 and 0.2 have bounce-back walls). |
 | `updateParametersInContext: the wall scheme cannot be changed`, `updateParametersInContext: the boundary types of the faces cannot be changed` | These are fixed when the Context is created. The velocities and densities of the faces can be changed. |
 | `the checkpoint was written with fluid fluctuations, and this Context has them off` (or the opposite) | The fluid fluctuations of the restarted run differ from those of the checkpoint (checkpoints of versions 0.1 and 0.2 have none). Use the same `setFluidFluctuations()` as in the first run. |
 | `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles, the solid nodes, the drag scheme and the fluid fluctuations) | These parameters are fixed when the Context is created. Create a new Context. |
@@ -59,8 +63,8 @@ friction*dt >= 2. Reduce the friction or the time step, or use the centred drag
 (`setDragScheme(LBMForce.Centered)`), which is stable for any friction.
 
 The warning `with fluid fluctuations the explicit drag makes the coupled particles hotter than the set
-temperature, by up to friction*dt*m/(2 m_c) = ...%` is printed on stderr when fluid fluctuations are switched on
-with the explicit drag and coupled particles at T > 0. Use the centred drag (`setDragScheme(LBMForce.Centered)`)
+temperature, by about friction*dt*m/(2 m_c) = ...%` is printed on stderr when fluid fluctuations are switched on
+with the explicit drag, coupled particles, the `EulerMaruyama` scheme, T > 0 and a friction above zero. Use the centred drag (`setDragScheme(LBMForce.Centered)`)
 with the fluctuating fluid; see [choosing the drag](lattice.md#choosing-the-drag).
 
 The warning `the relaxation time tau = ... is outside the range [0.505, 2]` is printed on stderr and
@@ -89,7 +93,7 @@ library path.
 
 **A run on a GPU differs from the same run on the Reference platform.** With T > 0 the random forces
 come from different generators, so the trajectories differ while their statistics agree. At T = 0, or with
-the NVE scheme, the platforms agree to rounding in double precision.
+the NVE scheme and without fluid fluctuations, the platforms agree to rounding in double precision.
 
 **The temperature in the log is a little below the set temperature.** The temperature that OpenMM
 reports for coupled particles is the full-step one. With the explicit drag (the default) it is the right
@@ -103,7 +107,7 @@ temperature is that of the half step, which `openmmlbm.LBMTemperatureReporter` r
 ([choosing the drag](lattice.md#choosing-the-drag)).
 
 **With fluid fluctuations the particles are hotter than the set temperature.** With the explicit drag the
-thermal motion of the fluid heats the coupled particles by up to friction*dt*m/(2 m_c), where m_c is the mass of
+thermal motion of the fluid heats the coupled particles by about friction*dt*m/(2 m_c), where m_c is the mass of
 fluid in a cell (56% for beads of 1000 Da with friction 10/ps, dt = 0.01 ps and dx = 0.5 nm); a warning says so
 when the Context is created. Use the centred
 drag with the fluctuating fluid, and measure the temperature with `openmmlbm.LBMTemperatureReporter`
