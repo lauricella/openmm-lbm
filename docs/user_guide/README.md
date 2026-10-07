@@ -63,7 +63,7 @@ Know these before using the plugin for a study:
 | Fluid update: collision, streaming, body force, removal of the fluid momentum, Mach number check | yes | yes |
 | Solid nodes (`setSolidNodes()`) and the force of the fluid on the walls (`getWallForce()`) | yes | yes |
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
-| Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | not yet |
+| Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 
 Every feature runs on every platform. The random forces of the Reference platform come from a generator of
 the force, those of the GPU platforms from OpenMM's generator: with the same seed the two are different

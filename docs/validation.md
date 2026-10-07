@@ -89,16 +89,47 @@ The tests that do not depend on the drag (full-step kinetic energy, momentum con
 fluid, partial coupling, force evaluations and seeds, momentum with walls, restart, checkpoint with random
 force, equipartition) run again with the centred drag (next section).
 
-## Centred drag (`tests/TestLBMCentered.h`, Reference platform)
+## Centred drag (`tests/TestLBMCentered.h`, all platforms)
 
 | Test | Checks | Tolerance |
 |---|---|---|
-| First step | a particle in a fluid at rest: v1 = v0 (1 - a + a m/m_c)/(1 + a + a m/m_c), a = gamma dt/2; then the force of the next step | 1e-14, 1e-12 |
+| First step | a particle in a fluid at rest: v1 = v0 (1 - a + a m/m_c)/(1 + a + a m/m_c), a = gamma dt/2; then the force of the next step | 1e-14 (5e-14 on the GPU platforms, see below), 1e-12 |
 | Shared node | three particles of 80, 120 and 150 Da at one node and a fourth alone, external forces, uniform flow and body acceleration: velocities after the first step against the direct solution of the linear system of the drag, and the momentum received by the fluid (j + G at every node, G = body force - S) | 1e-12, 1e-11 |
-| Wall | a particle at a solid node moving out of the wall: v1 = v0 (1 - a)/(1 + a), and the wall receives the opposite of its coupling force | 1e-14, 1e-12 |
+| Wall | a particle at a solid node moving out of the wall: v1 = v0 (1 - a)/(1 + a), and the wall receives the opposite of its coupling force | 1e-14 (5e-14 on the GPU platforms), 1e-12 |
 | Large friction | gamma dt = 3, four particles at one node: velocities decay, total momentum conserved | 1e-11 |
+| Repeated evaluation | 8000 particles with a short-range pair force compressed into a cube of 2 nm: a step whose force evaluation overflows the neighbor list gives the same velocities as the same step after the list has grown in an evaluation between steps, so the step uses the complete other forces (`testCenteredRepeatedEvaluation`; GPU platforms only) | 1e-12 relative to the largest velocity |
 | Requirements | `LBMForce` not last, virtual sites, change of the drag in `updateParametersInContext()`, checkpoint loaded with the other drag | exception |
 | Equipartition | as above, with a fluid 100 times denser: half-step temperature close to T, full-step close to T/(1 + gamma dt/2) | 10% |
+
+The tests of the previous section that do not depend on the drag run again with the centred drag, among them
+the momentum conservation in a step whose force evaluation is repeated (`testRepeatedForceEvaluation`).
+In single and mixed precision the tolerances are at least 2e-6, as for the explicit drag. In double
+precision the GPU platforms add the forces in fixed point, with a resolution of 2^-32 kJ/mol/nm, that is
+2.3e-14 nm/ps of velocity in one step of 0.01 ps for a particle of 100 Da: measured 1.2e-14 to 1.9e-14 for
+the centred first step on CUDA (the explicit one happens to be exact there), hence 5e-14 for the one-step
+tests on these platforms.
+
+**Python tests.** `test_centered_drag_sees_all_forces` checks, on every platform, that the drag of a step
+uses all the other forces: four charged particles with a constant field and a `NonbondedForce` with PME
+(whose reciprocal part the CUDA platform computes on a separate stream), each alone at its node, in a fluid
+at rest at T = 0; the velocities after the first step agree within 1e-11 with the closed form computed with
+the forces of the other force groups, read from the State. Without the PME forces in the drag the error would
+be about 1e-3. `test_coupling_agrees_with_reference` compares both drags with the Reference platform (next
+sections).
+
+**Verifications done once, outside the test suite** (NVIDIA A100, OpenMM 8.6.1, `develop` before the commit
+of the centred drag on the GPU platforms).
+- *Floating point force buffers of OpenCL.* OpenMM's own forces do not write them during a force evaluation
+  on one device, so the tests cannot reach the code that reads them. In a modified build a kernel moved all
+  the other forces from the fixed point buffer into the floating point buffer just before the centred drag
+  read them: all the OpenCL tests passed in single, mixed and double precision. With the same build and the
+  floating point buffers not read, `testCenteredSharedNode` failed (velocities wrong by 3e-3).
+- *Repeated evaluation.* In a build without the check of the validity of the evaluation, the centred drag
+  of a step whose evaluation overflows the neighbor list used the incomplete forces, and
+  `testCenteredRepeatedEvaluation` failed with velocities wrong by 1e-3.
+- *Explicit drag unchanged.* The final state of a run with random force, momentum removal, walls and force
+  evaluations between steps is identical bit for bit to that of version 0.1.0 on the Reference platform and
+  with CUDA in double and mixed precision (SHA-256 of positions, velocities and fluid state).
 
 **Fluctuation-dissipation balance without the response of the fluid** (Reference, fluid 10^4 times denser,
 100 particles of 100 Da, 300 K, 200000 steps, three seeds, error from 20 blocks). Ratio of the measured
@@ -195,27 +226,54 @@ bounce-back is written by one thread, so two runs give identical results.
 The Python test `test_coupling_agrees_with_reference` runs four coupled particles at T = 0 (friction
 10/ps, 60 steps; two particles share a node, one crosses the periodic boundary), without and with the solid
 plane j = 0, which reflects two of them, on the Reference platform and in double precision on each GPU
-platform. Positions, velocities, fluid state and force on the walls must agree to 1e-10. Largest relative
-differences measured on an NVIDIA A100 with OpenMM 8.6.1:
+platform, with each drag scheme. A constant field and a soft pair force act on the particles, so that the
+centred drag sees other forces. Positions, velocities, fluid state and force on the walls must agree to
+1e-10. Largest differences relative to max(1, largest value), with the walls, measured on an NVIDIA A100
+with OpenMM 8.6.1 (`develop` at the commit of the centred drag on the GPU platforms):
 
-| Platform and precision | positions | velocities | fluid | force on the walls |
-|---|---|---|---|---|
-| CUDA double and mixed, OpenCL double | 2e-14 | 8e-12 to 2e-11 | 4e-12 | 5e-13 |
-| OpenCL mixed | 3e-10 | 1e-8 | 7e-9 | 2e-9 |
-| CUDA and OpenCL single | 4e-7 | 1e-6 | 1e-6 | 2e-6 |
+| Platform and precision | drag | positions | velocities | fluid | force on the walls |
+|---|---|---|---|---|---|
+| CUDA and OpenCL double | explicit | 2e-14 | 2e-13 | 2e-16 | 7e-13 |
+| | centred | 2e-14 | 2e-13 | 1e-16 | 8e-13 |
+| CUDA mixed | explicit | 2e-9 | 1e-8 | 2e-16 | 7e-13 |
+| | centred | 3e-10 | 4e-9 | 1e-16 | 8e-13 |
+| OpenCL mixed | explicit | 2e-9 | 1e-8 | 9e-14 | 3e-9 |
+| | centred | 3e-10 | 4e-9 | 2e-13 | 7e-9 |
+| CUDA and OpenCL single | explicit | 3e-7 | 3e-7 | 1e-8 | 1.4e-6 |
+| | centred | 3e-7 | 3e-7 | 1e-8 | 1.6e-6 |
 
-The velocities differ at 1e-11 because OpenMM adds the forces in fixed point, with a resolution of
-2^-32 kJ/mol/nm. The OpenCL platform rounds the total force on a particle to single precision in mixed
-precision.
+In double precision the velocities differ at 1e-13 because OpenMM adds the forces in fixed point, with a
+resolution of 2^-32 kJ/mol/nm. In mixed precision OpenMM computes the other forces (field and pair force) in
+single precision; the OpenCL platform also rounds the total force on a particle to single precision.
 
-**Momentum conservation** (`testMomentumConservation`, 50 steps, 300 K): relative drift of the total
-momentum 7e-14 on the Reference platform, 5e-14 with CUDA in double and mixed precision, 7e-14 with
-OpenCL in double precision, 1e-8 with OpenCL in mixed precision and 3e-7 to 6e-7 in single precision.
+**Momentum conservation** (the system of `testMomentumConservation`: two particles at one node, 50 steps,
+300 K): relative drift of the total momentum, measured with `getFluidFields()`:
+
+| Platform and precision | explicit | centred |
+|---|---|---|
+| Reference | 4e-14 | 7e-14 |
+| CUDA double and mixed | 7e-14 | 9e-14 |
+| OpenCL double | 5e-14 | 1.4e-13 |
+| OpenCL mixed | 7e-9 | 1.1e-8 |
+| CUDA and OpenCL single | 1.5e-7 to 2.1e-7 | 1.4e-7 to 1.7e-7 |
 
 **Speed.** With 110 coupled particles on a 30^3 lattice at 300 K and the removal of the fluid momentum at
 every step, a step takes 61 us with CUDA in mixed precision (51 us in single, 55 us in double) and 64 us
 with OpenCL in mixed precision, on an NVIDIA A100 with OpenMM 8.6.1. The CUDA library of the DragOpenMM
-project takes 517 us for the same system.
+project takes 517 us for the same system. The centred drag costs 0 to 6% more (A100, OpenMM 8.6.1, 300 K,
+removal at every step, 5000 steps after 200), in us per step:
+
+| System | precision | CUDA explicit | CUDA centred | OpenCL explicit | OpenCL centred |
+|---|---|---|---|---|---|
+| 110 particles, 30^3 | mixed | 61.4 | 58.7 | 67.3 | 70.5 |
+| | single | 53.7 | 53.8 | 62.9 | 62.8 |
+| | double | 58.1 | 57.8 | 66.9 | 68.7 |
+| 1000 particles, 30^3 | mixed | 78.6 | 81.1 | 86.8 | 89.6 |
+| | single | 73.8 | 77.1 | 81.4 | 83.5 |
+| | double | 78.2 | 80.5 | 87.1 | 91.3 |
+| 8000 particles, 40^3 | mixed | 103.6 | 104.9 | 116.6 | 119.2 |
+| | single | 88.0 | 93.1 | 101.7 | 104.7 |
+| | double | 100.8 | 104.6 | 114.1 | 118.6 |
 
 ## Examples compared with the DragOpenMM plugin
 

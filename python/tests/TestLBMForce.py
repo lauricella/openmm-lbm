@@ -242,12 +242,15 @@ def test_fluid_agrees_with_reference(name, precision, walls):
     assert abs(wallForces[1] - wallForces[0]).max() <= 1e-10*max(1.0, abs(wallForces[0]).max())
 
 
-@pytest.mark.parametrize('name,walls', [(name, walls) for name in ('CUDA', 'OpenCL', 'HIP') for walls in (False, True)],
+@pytest.mark.parametrize('name,walls,drag', [(name, walls, drag) for name in ('CUDA', 'OpenCL', 'HIP') for walls in (False, True)
+                                              for drag in ('Explicit', 'Centered')],
                          ids=lambda value: {False: 'periodic', True: 'walls'}.get(value, value))
-def test_coupling_agrees_with_reference(name, walls):
+def test_coupling_agrees_with_reference(name, walls, drag):
     # At T = 0 the coupling is deterministic: in double precision the particles and the fluid of the GPU platforms
     # follow those of the Reference platform to rounding, also with particles that share a node, cross the
-    # periodic boundary or are reflected by a wall (the plane j = 0 of the 8^3 grid).
+    # periodic boundary or are reflected by a wall (the plane j = 0 of the 8^3 grid), with both drag schemes.
+    # With the centred drag the other forces enter the drag: a constant field and a soft pair force act on the
+    # particles, added to the System before the LBMForce.
     import numpy as np
     try:
         platform = mm.Platform.getPlatformByName(name)
@@ -255,7 +258,23 @@ def test_coupling_agrees_with_reference(name, walls):
         pytest.skip('the %s platform is not available' % name)
     results = []
     for plat, properties in ((mm.Platform.getPlatformByName('Reference'), {}), (platform, {'Precision': 'double'})):
-        system, force, positions = create_system(num_particles=4)
+        system = mm.System()
+        system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 4, 0), mm.Vec3(0, 0, 4))
+        field = mm.CustomExternalForce('-3*x+2*y-z')
+        pair = mm.CustomNonbondedForce('50*(1-r)^2')
+        pair.setNonbondedMethod(mm.CustomNonbondedForce.CutoffPeriodic)
+        pair.setCutoffDistance(1.0)
+        force = LBMForce()
+        force.setGridSize(8, 8, 8)
+        for i in range(4):
+            system.addParticle(100.0)
+            field.addParticle(i)
+            pair.addParticle()
+            force.addParticle(i)
+        system.addForce(field)
+        system.addForce(pair)
+        system.addForce(force)
+        force.setDragScheme(getattr(LBMForce, drag))
         force.setFriction(10.0)
         force.setTemperature(0.0)
         force.setFluidMomentumRemovalFrequency(0)
@@ -278,6 +297,65 @@ def test_coupling_agrees_with_reference(name, walls):
                         np.array(force.getWallForce(context).value_in_unit(unit.kilojoule_per_mole/unit.nanometer))))
     for a, b in zip(results[0], results[1]):
         assert abs(b - a).max() <= 1e-10*max(1.0, abs(a).max())
+
+
+@pytest.mark.parametrize('name', ['Reference', 'CUDA', 'OpenCL', 'HIP'])
+def test_centered_drag_sees_all_forces(name):
+    # The centred drag of a step uses the other forces on the particles at the time of the force, Fc.  With one
+    # particle per node, in a fluid at rest and at T = 0, the velocity after the first step is
+    #   v1 = v0 + dt (Fc + F)/m,   F = -gamma m v~/(1 + a + a m/m_c),   v~ = v0 + dt Fc/(2m),   a = gamma dt/2.
+    # Fc is read from the State with the force group of the other forces: a constant field and a NonbondedForce
+    # with PME, whose reciprocal part the CUDA platform computes on a separate stream.  This checks that the drag
+    # sees all of them, and that it respects force groups.
+    import numpy as np
+    try:
+        platform = mm.Platform.getPlatformByName(name)
+    except Exception:
+        pytest.skip('the %s platform is not available' % name)
+    dt, friction, mass, density, dx = 0.01, 20.0, 100.0, 602.2, 0.5
+    system = mm.System()
+    system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 4, 0), mm.Vec3(0, 0, 4))
+    field = mm.CustomExternalForce('-30*x+20*y-10*z')
+    nonbonded = mm.NonbondedForce()
+    nonbonded.setNonbondedMethod(mm.NonbondedForce.PME)
+    nonbonded.setCutoffDistance(1.0)
+    force = LBMForce()
+    force.setGridSize(8, 8, 8)
+    force.setFluidDensity(density)
+    force.setFriction(friction)
+    force.setTemperature(0.0)
+    force.setFluidMomentumRemovalFrequency(0)
+    force.setDragScheme(LBMForce.Centered)
+    charges = [1.0, -1.0, 0.5, -0.5]
+    for i, q in enumerate(charges):
+        system.addParticle(mass)
+        field.addParticle(i)
+        nonbonded.addParticle(q, 0.3, 0.5)
+        force.addParticle(i)
+    force.setForceGroup(1)
+    system.addForce(field)
+    system.addForce(nonbonded)
+    system.addForce(force)
+    integrator = mm.VerletIntegrator(dt)
+    properties = {} if name == 'Reference' else {'Precision': 'double'}
+    try:
+        context = mm.Context(system, integrator, platform, properties)
+    except Exception as e:
+        pytest.skip('no Context on the %s platform: %s' % (name, e))
+    context.setPositions([mm.Vec3(0.6, 0.7, 0.4), mm.Vec3(1.9, 1.1, 0.8), mm.Vec3(2.6, 3.1, 2.4), mm.Vec3(1.1, 2.4, 3.3)])
+    v0 = np.array([[0.5, -0.2, 0.3], [-0.4, 0.1, 0.2], [0.2, -0.5, -0.1], [0.0, 0.3, -0.6]])
+    context.setVelocities([mm.Vec3(*v) for v in v0])
+    fc = context.getState(getForces=True, groups={0}).getForces(asNumpy=True).value_in_unit(
+        unit.kilojoule_per_mole/unit.nanometer)
+    assert abs(fc).max() > 10.0
+    integrator.step(1)
+    v1 = context.getState(getVelocities=True).getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)
+    a = 0.5*friction*dt
+    b = a*mass/(density*dx**3)
+    known = v0 + 0.5*dt*fc/mass
+    drag = -friction*mass*known/(1 + a + b)
+    expected = v0 + dt*(fc + drag)/mass
+    assert abs(v1 - expected).max() <= 1e-11*abs(expected).max()
 
 
 def test_requires_verlet():

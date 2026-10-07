@@ -49,12 +49,15 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `execute()` adds those forces to the particles, so other force evaluations neither advance the fluid
    nor draw new random numbers. `beginStep()` also reverses the velocity of a coupled particle that has
    entered a solid node. Every platform does all of this.
-   With the centred drag (`LBMForce::Centered`, Reference platform only in this version) the coupling needs
-   the other forces on the particles: `LBMForceImpl::initialize()` checks that `LBMForce` is the last force
-   of the System and that there are no virtual sites, so that when its `execute()` runs OpenMM's force
-   array already holds the sum of the other forces. `ReferenceCalcLBMForceKernel::coupleParticlesCentered()`
-   reads them, sorts the keys node*N_p + i, solves the drag of each node in closed form
-   (`docs/theory.md` section 2, Solution of the centred drag) and gives the node the reaction -S.
+   With the centred drag (`LBMForce::Centered`) the coupling needs the other forces on the particles:
+   `LBMForceImpl::initialize()` checks that `LBMForce` is the last force of the System and that there are
+   no virtual sites. On the Reference platform, when its `execute()` runs, OpenMM's force array already
+   holds the sum of the other forces; `ReferenceCalcLBMForceKernel::coupleParticlesCentered()` reads them,
+   sorts the keys node*N_p + i, solves the drag of each node in closed form (`docs/theory.md` section 2,
+   Solution of the centred drag) and gives the node the reaction -S. On the CUDA, OpenCL and HIP platforms
+   `execute()` does nothing: `CommonCalcLBMForceKernel::initialize()` registers a `ForcePostComputation`
+   (`CenteredDragPostComputation`), which OpenMM calls at the end of every force evaluation, when its force
+   buffers hold all the other forces, and which does the work of `execute()` (step 3).
 3. **Lattice step on the CUDA, OpenCL and HIP platforms** (`CommonCalcLBMForceKernel::advanceFluid()`,
    kernels in `platforms/common/src/kernels/lbmFluid.cc` and `lbmCoupling.cc`):
 
@@ -65,9 +68,11 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    | `sumFluidMomentum` (when the removal is due) | work groups of 64 | rho - 1, j | one partial sum per group |
    | `computeFluidCenterVelocity` | one work group | partial sums | u_cm |
    | `removeFluidMomentum` | one per node | rho - 1, u_cm | j |
-   | `coupleParticles` (with coupled particles) | one per atom | positions, velocities, moments of the nearest node, OpenMM's random numbers | force of the particle, its key node*N_p + i |
+   | `coupleParticles` (explicit drag, with coupled particles) | one per atom | positions, velocities, moments of the nearest node, OpenMM's random numbers | force of the particle, its key node*N_p + i |
+   | `prepareCenteredDrag` (centred drag, with coupled particles) | one per atom | positions, velocities, OpenMM's force buffers (the other forces), OpenMM's random numbers | v~ = v + dt Fc/(2m) and random force of the particle, its key node*N_p + i |
    | OpenMM's `ComputeSort` | | keys | sorted keys |
-   | `sumCellReactions` | one per key | sorted keys, forces | the reaction of each node, written by its first key |
+   | `sumCellReactions` (explicit drag) | one per key | sorted keys, forces | the reaction of each node, written by its first key |
+   | `solveCenteredDrag` (centred drag) | one per key | sorted keys, v~, random forces, moments of the node | the forces of the particles of each node and its reaction -S, written by its first key |
    | `collideAndStream` | one per fluid node | moments and reaction of the node | the 19 populations it sends to the neighbours |
    | `clearCellReactions` | one per key | sorted keys | zero reaction at the nodes of the step |
    | `bounceBack` (with solid nodes) | one per solid node | populations of the solid node | the populations it returns to the fluid neighbours, and its momentum exchange |
@@ -83,7 +88,15 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    buffer: in the evaluation of a step, those of the step; between steps, those of the next step, computed
    by `computeFluidMoments`, the momentum removal if due and `coupleParticles` without the reaction on the
    fluid. The random numbers of a step are copied from OpenMM's generator into the array `noise` once, by the
-   first `coupleParticles` that needs them (`drawNoise`), and reused by the step.
+   first `coupleParticles` or `prepareCenteredDrag` that needs them (`drawNoise`), and reused by the step.
+   With the centred drag all of this runs in the post-computation, which reads the other forces from
+   OpenMM's fixed point buffer and, on the OpenCL platform, also from its floating point buffers, which
+   OpenCL adds to the fixed point one only after the post-computations. The OpenCL factory creates a
+   subclass of the common kernel, `OpenCLCalcLBMForceKernel`, whose `hasFloatForceBuffers()` returns true;
+   the kernels are compiled with `HAS_FLOAT_FORCE_BUFFERS` and get the buffers on first use, since OpenMM
+   creates them after the forces are initialized. The post-computation does nothing if `LBMForce`'s force
+   group is not requested, or if OpenMM has marked the evaluation as invalid (neighbor list overflow): the
+   repeated evaluation then does the step.
 4. **Checkpoints.** `LBMForce::createCheckpoint()` and `loadCheckpoint()` go through `LBMForceImpl`, which
    writes and checks a header (tag, version, platform, grid size, number of coupled particles and, from
    version 2, drag scheme; version 1 is read as the explicit drag), to the

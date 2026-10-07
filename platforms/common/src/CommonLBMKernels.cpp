@@ -39,6 +39,27 @@ class CouplingSortTrait : public ComputeSortImpl::SortTrait {
 };
 
 /**
+ * With the Centered drag scheme, the work of the force at the end of every force evaluation, when OpenMM has
+ * computed all the other forces (LBMForce is the last force of the System, so this post-computation comes after
+ * those of the other forces).  It respects the force groups as execute() does.  When the neighbor list has
+ * overflowed, OpenMM has already marked the evaluation as invalid and will repeat it: the other forces are then
+ * incomplete, and the post-computation does nothing, so that the lattice step is done in the repeated evaluation
+ * with the complete forces.
+ */
+class CommonCalcLBMForceKernel::CenteredDragPostComputation : public ComputeContext::ForcePostComputation {
+public:
+    CenteredDragPostComputation(CommonCalcLBMForceKernel& owner) : owner(owner) {
+    }
+    double computeForceAndEnergy(bool includeForces, bool includeEnergy, int groups) {
+        if ((groups&(1<<owner.forceGroup)) == 0 || !owner.cc.getForcesValid())
+            return 0.0;
+        return owner.evaluate(owner.cc.getStepCount(), includeForces);
+    }
+private:
+    CommonCalcLBMForceKernel& owner;
+};
+
+/**
  * Download an array of floats or doubles into a vector of doubles.  ComputeArray::download() converts
  * types only from OpenMM 8.4, and the plugin supports OpenMM 8.3.
  */
@@ -58,9 +79,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
-    if (lattice.dragScheme != LBMForce::Explicit)
-        throw OpenMMException("LBMForce: the Centered drag scheme is not yet available on this platform; use the Reference platform");
     this->lattice = lattice;
+    forceGroup = force.getForceGroup();
+    bool centered = (lattice.dragScheme == LBMForce::Centered);
 
     // The fluid is stored in the mixed type: double unless the platform runs in single precision.
 
@@ -141,6 +162,10 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         particleWallMomentum.initialize(cc, 3*numCoupled, elementSize, "lbmParticleWallMomentum");
         particleWallMomentum.upload(vector<double>(3*numCoupled, 0.0), true);
         sortKeys.initialize(cc, numCoupled, sizeof(long long), "lbmSortKeys");
+        if (centered) {
+            knownVelocity.initialize(cc, 3*numCoupled, elementSize, "lbmKnownVelocity");
+            randomForce.initialize(cc, 3*numCoupled, elementSize, "lbmRandomForce");
+        }
         noise.initialize<mm_float4>(cc, numCoupled, "lbmNoise");
         noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
         sort = cc.createSort(new CouplingSortTrait(), numCoupled, false);
@@ -212,6 +237,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         defines["DX"] = cc.doubleToString(lattice.dx, true);
         defines["VELOCITY_SCALE"] = cc.doubleToString(lattice.getVelocityScale(), true);
         defines["FORCE_SCALE"] = cc.doubleToString(cellMass*lattice.dx/(lattice.dt*lattice.dt), true);
+        if (centered && hasFloatForceBuffers())
+            defines["HAS_FLOAT_FORCE_BUFFERS"] = "1";
         ComputeProgram coupling = cc.compileProgram(CommonLBMKernelSources::lbmCoupling, defines);
         if (numSolidNodes > 0) {
             reflectKernel = coupling->createKernel("reflectParticles");
@@ -252,8 +279,46 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         applyForcesKernel->addArg(couplingIndex);
         applyForcesKernel->addArg(particleForce);
         applyForcesKernel->addArg(cc.getLongForceBuffer());
+        if (centered) {
+            prepareCenteredKernel = coupling->createKernel("prepareCenteredDrag");
+            prepareCenteredKernel->addArg(cc.getPosq());
+            prepareCenteredKernel->addArg(cc.getPosqCorrection());
+            prepareCenteredKernel->addArg(cc.getVelm());
+            prepareCenteredKernel->addArg(cc.getAtomIndexArray());
+            prepareCenteredKernel->addArg(couplingIndex);
+            prepareCenteredKernel->addArg(particleMass);
+            prepareCenteredKernel->addArg(cc.getLongForceBuffer());
+            prepareCenteredKernel->addArg(knownVelocity);
+            prepareCenteredKernel->addArg(randomForce);
+            prepareCenteredKernel->addArg(sortKeys);
+            prepareCenteredKernel->addArg(cc.getIntegrationUtilities().getRandom());
+            prepareCenteredKernel->addArg(noise);
+            for (int i = 0; i < 4; i++)
+                prepareCenteredKernel->addArg();    // index of the random numbers, drawNoise, gamma and kT, set later
+            if (hasFloatForceBuffers())
+                for (int i = 0; i < 2; i++)
+                    prepareCenteredKernel->addArg();    // floating point force buffers and their number, set on first use
+            solveCenteredKernel = coupling->createKernel("solveCenteredDrag");
+            solveCenteredKernel->addArg(sortKeys);
+            solveCenteredKernel->addArg(particleMass);
+            solveCenteredKernel->addArg(knownVelocity);
+            solveCenteredKernel->addArg(randomForce);
+            solveCenteredKernel->addArg(densityDeviation);
+            solveCenteredKernel->addArg(momentum);
+            solveCenteredKernel->addArg(particleForce);
+            solveCenteredKernel->addArg(cellReaction);
+            solveCenteredKernel->addArg(particleWallMomentum);
+            for (int i = 0; i < 5; i++)
+                solveCenteredKernel->addArg();      // isStep, gamma and the body acceleration, set later
+        }
     }
     setFluidParameters();
+
+    // With the Centered drag the work of execute() is done at the end of the force evaluation.  OpenMM owns the
+    // post-computation and deletes it with the ComputeContext.
+
+    if (centered)
+        cc.addPostComputation(new CenteredDragPostComputation(*this));
 }
 
 void CommonCalcLBMForceKernel::setFluidParameters() {
@@ -282,6 +347,24 @@ void CommonCalcLBMForceKernel::setFluidParameters() {
             coupleKernel->setArg(17, (float) kT);
         }
     }
+    if (!lattice.particles.empty() && lattice.dragScheme == LBMForce::Centered) {
+        prepareCenteredKernel->setArg(12, 0);  // index of the random numbers, set when they are drawn
+        prepareCenteredKernel->setArg(13, 0);  // drawNoise
+        solveCenteredKernel->setArg(9, 1);     // isStep
+        double solveValues[4] = {gamma, lattice.bodyAcceleration[0], lattice.bodyAcceleration[1], lattice.bodyAcceleration[2]};
+        if (useDouble) {
+            prepareCenteredKernel->setArg(14, gamma);
+            prepareCenteredKernel->setArg(15, kT);
+            for (int i = 0; i < 4; i++)
+                solveCenteredKernel->setArg(10+i, solveValues[i]);
+        }
+        else {
+            prepareCenteredKernel->setArg(14, (float) gamma);
+            prepareCenteredKernel->setArg(15, (float) kT);
+            for (int i = 0; i < 4; i++)
+                solveCenteredKernel->setArg(10+i, (float) solveValues[i]);
+        }
+    }
 }
 
 void CommonCalcLBMForceKernel::beginStep(ContextImpl& context) {
@@ -297,6 +380,13 @@ void CommonCalcLBMForceKernel::beginStep(ContextImpl& context) {
 }
 
 double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
+    // With the Centered drag the post-computation does the work, once OpenMM has computed the other forces.
+    if (lattice.dragScheme == LBMForce::Centered)
+        return 0.0;
+    return evaluate(context.getStepCount(), includeForces);
+}
+
+double CommonCalcLBMForceKernel::evaluate(long long stepCount, bool includeForces) {
     // As on the Reference platform: the fluid advances once per integration step, on the first force evaluation
     // after beginStep(), which also computes the coupling forces of the step.  The evaluations between steps do
     // not change the fluid and return the coupling force of the next step, as OpenMM does for every force, so
@@ -306,13 +396,13 @@ double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForce
     // (finishComputation() returns valid = false); the repeated evaluation comes before the integrator increments
     // the step count, and it uses the forces of the step again.
     ContextSelector selector(cc);
-    bool repeatedStep = (stepForcesCurrent && context.getStepCount() == stepIndex-1);
+    bool repeatedStep = (stepForcesCurrent && stepCount == stepIndex-1);
     if (stepPending) {
         stepPending = false;
         advanceFluid();
     }
-    else if (includeForces && !lattice.particles.empty() && context.getStepCount() > 0 && !repeatedStep)
-        computeNextStepForces(context);
+    else if (includeForces && !lattice.particles.empty() && stepCount > 0 && !repeatedStep)
+        computeNextStepForces(stepCount);
     if (includeForces && !lattice.particles.empty())
         applyForcesKernel->execute(cc.getNumAtoms());
     return 0.0;
@@ -327,11 +417,8 @@ void CommonCalcLBMForceKernel::advanceFluid() {
         removeMomentumKernel->execute(numNodes);
     }
     int numCoupled = lattice.particles.size();
-    if (numCoupled > 0) {
+    if (numCoupled > 0)
         computeCouplingForces(true);
-        sort->sort(sortKeys);
-        sumReactionsKernel->execute(numCoupled);
-    }
     collideKernel->execute(numNodes);
     if (numCoupled > 0)
         clearReactionsKernel->execute(numCoupled);
@@ -344,14 +431,13 @@ void CommonCalcLBMForceKernel::advanceFluid() {
         checkMachNumber();
 }
 
-void CommonCalcLBMForceKernel::computeNextStepForces(ContextImpl& context) {
+void CommonCalcLBMForceKernel::computeNextStepForces(long long nextStep) {
     // The coupling of the next lattice step computed on the current fluid, positions and velocities, without its
     // reaction on the fluid.  The step recomputes it, with the same random numbers, after any change of the
     // velocities in between (the reflection at the walls, setVelocities()).
     stepForcesCurrent = false;
     int numNodes = lattice.getNumNodes();
     computeMomentsKernel->execute(numNodes);
-    long long nextStep = context.getStepCount();
     if (lattice.momentumRemovalFrequency > 0 && nextStep%lattice.momentumRemovalFrequency == 0) {
         sumMomentumKernel->execute(numGroups*blockSize, blockSize);
         centerVelocityKernel->execute(blockSize, blockSize);
@@ -364,15 +450,48 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
     // The N(0,1) numbers of a step are drawn once, when there is a random force, by the first computation that
     // needs them, and copied into the array noise.  One float4 per padded atom is reserved, although only the
     // first numCoupled are used: this is how the DragOpenMM plugin consumes the generator, so with the same seed
-    // both plugins draw the same numbers and their stochastic runs can be compared step by step.
+    // both plugins draw the same numbers and their stochastic runs can be compared step by step.  In a lattice
+    // step (isStep) the keys are sorted and the reactions of the particles are summed per node.
+    int numCoupled = lattice.particles.size();
     bool draw = (lattice.kT > 0 && lattice.friction > 0 && !noiseDrawn);
+    int randomIndex = 0;
     if (draw) {
-        coupleKernel->setArg(13, cc.getIntegrationUtilities().prepareRandomNumbers(cc.getPaddedNumAtoms()));
+        randomIndex = cc.getIntegrationUtilities().prepareRandomNumbers(cc.getPaddedNumAtoms());
         noiseDrawn = true;
     }
-    coupleKernel->setArg(14, draw ? 1 : 0);
-    coupleKernel->setArg(15, isStep ? 1 : 0);
-    coupleKernel->execute(cc.getNumAtoms());
+    if (lattice.dragScheme == LBMForce::Centered) {
+        // The particles of a node are solved together (docs/theory.md, section 2): the keys are sorted in every
+        // evaluation, and the first entry of each node solves its segment.  The other forces are read from
+        // OpenMM's fixed point buffer and, where the platform has them, from its floating point buffers; their
+        // number is known once OpenMM has created its buffers, after the forces were initialized.
+        if (numFloatForceBuffers < 0) {
+            numFloatForceBuffers = 0;
+            if (hasFloatForceBuffers()) {
+                ArrayInterface& buffers = cc.getForceBuffers();
+                numFloatForceBuffers = buffers.getSize()/cc.getPaddedNumAtoms();
+                prepareCenteredKernel->setArg(16, buffers);
+                prepareCenteredKernel->setArg(17, numFloatForceBuffers);
+            }
+        }
+        if (draw)
+            prepareCenteredKernel->setArg(12, randomIndex);
+        prepareCenteredKernel->setArg(13, draw ? 1 : 0);
+        prepareCenteredKernel->execute(cc.getNumAtoms());
+        sort->sort(sortKeys);
+        solveCenteredKernel->setArg(9, isStep ? 1 : 0);
+        solveCenteredKernel->execute(numCoupled);
+    }
+    else {
+        if (draw)
+            coupleKernel->setArg(13, randomIndex);
+        coupleKernel->setArg(14, draw ? 1 : 0);
+        coupleKernel->setArg(15, isStep ? 1 : 0);
+        coupleKernel->execute(cc.getNumAtoms());
+        if (isStep) {
+            sort->sort(sortKeys);
+            sumReactionsKernel->execute(numCoupled);
+        }
+    }
     if (isStep)
         noiseDrawn = false;
 }

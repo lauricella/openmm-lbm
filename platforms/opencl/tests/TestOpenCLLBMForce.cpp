@@ -8,6 +8,7 @@
 #include "TestLBMForce.h"
 #include "TestLBMFluid.h"
 #include "TestLBMCoupling.h"
+#include "TestLBMCentered.h"
 
 extern "C" OPENMM_EXPORT void registerLBMOpenCLKernelFactories();
 
@@ -21,6 +22,7 @@ int main(int argc, char* argv[]) {
         runFluidTests(platform);
         runWallTests(platform);
         runCouplingTests(platform);
+        runCenteredTests(platform);
     }
     catch (const exception& e) {
         cout << "exception: " << e.what() << endl;

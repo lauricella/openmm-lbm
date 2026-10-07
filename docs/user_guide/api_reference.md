@@ -231,8 +231,8 @@ Time discretization of the drag
   is solved exactly for all the particles of a node. It is stable for any friction. The velocities of the
   State have the right temperature, while `StateDataReporter` reports a lower one; use
   [`LBMTemperatureReporter`](#openmmlbmlbmtemperaturereporterfile-reportinterval-force). `LBMForce` must be the
-  last force of the System, and the System must not contain virtual sites. In this version it runs only on
-  the Reference platform.
+  last force of the System, and the System must not contain virtual sites. It runs on every platform, and
+  costs a few percent more than the explicit drag on a GPU.
 
 The drag scheme is fixed when the Context is created and saved with the force by `XmlSerializer`; a
 checkpoint can only be loaded in a Context with the same drag scheme.

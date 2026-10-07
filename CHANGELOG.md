@@ -12,7 +12,9 @@ versions the API may still change.
   equilibrium; the implicit system is solved in closed form for all the particles of a node, and conserves
   the total momentum exactly. It is stable for any friction, and the velocities of the State (half steps)
   have the right temperature of the drag (`docs/theory.md`, section 2). It requires `LBMForce` to be the
-  last force of the System and no virtual sites. Reference platform only in this version.
+  last force of the System and no virtual sites. All platforms: on CUDA, OpenCL and HIP it runs in a
+  `ForcePostComputation`, which reads the other forces at the end of the force evaluation; it costs 0 to 6%
+  more than the explicit drag on an A100.
 - `openmmlbm.LBMTemperatureReporter`: temperature of the coupled particles with the velocity that has the
   right temperature for the drag scheme.
 - Serialization version 4 (the drag scheme; versions 1 to 3 are read with the explicit drag) and version 2

@@ -27,12 +27,16 @@ namespace LBMPlugin {
  * nodes, and the Mach number check when due.  The reactions of the particles are summed per node in particle
  * order without atomic operations: the keys node*numCoupled + i are sorted with OpenMM's ComputeSort, and the
  * first entry of each node sums its segment.
+ *
+ * With the Centered drag scheme the coupling needs the other forces on the particles at the time of the force
+ * evaluation, which OpenMM completes only at the end of it: the kernel then does its work in a
+ * ForcePostComputation, registered when the Context is created, and execute() does nothing.
  */
 class CommonCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     CommonCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform, OpenMM::ComputeContext& cc, const OpenMM::System& system) :
             CalcLBMForceKernel(name, platform), cc(cc), system(system), stepPending(false), stepIndex(0), machWarningPrinted(false),
-            hasAdvanced(false), stepForcesCurrent(false), noiseDrawn(false) {
+            hasAdvanced(false), stepForcesCurrent(false), noiseDrawn(false), numFloatForceBuffers(-1) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
@@ -45,9 +49,19 @@ public:
     void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
     void createCheckpoint(OpenMM::ContextImpl& context, std::ostream& stream);
     void loadCheckpoint(OpenMM::ContextImpl& context, std::istream& stream);
+protected:
+    /**
+     * True if the platform accumulates part of the forces in the floating point buffers getForceBuffers() of the
+     * ComputeContext, which it adds to the fixed point buffer only after the post-computations (OpenCL).
+     */
+    virtual bool hasFloatForceBuffers() const {
+        return false;
+    }
 private:
+    class CenteredDragPostComputation;
+    double evaluate(long long stepCount, bool includeForces);
     void advanceFluid();
-    void computeNextStepForces(OpenMM::ContextImpl& context);
+    void computeNextStepForces(long long nextStep);
     void computeCouplingForces(bool isStep);
     void setFluidParameters();
     void checkMachNumber();
@@ -70,6 +84,10 @@ private:
     bool noiseDrawn;
     /** True if the mixed type is double. */
     bool useDouble;
+    /** The force group of the force. */
+    int forceGroup;
+    /** Number of floating point force buffers read by the Centered drag, set on its first use (-1 before). */
+    int numFloatForceBuffers;
     /** 1 for fluid nodes and 0 for solid nodes, on the host. */
     std::vector<int> isFluidHost;
     /** Momentum (lattice units) given to the walls in every step by the part w of the populations, the static
@@ -95,10 +113,14 @@ private:
         from OpenMM's generator (one float4 per particle). */
     OpenMM::ComputeArray couplingIndex, particleMass, particleForce, sortKeys, particleWallMomentum, cellReaction;
     OpenMM::ComputeArray noise;
+    /** Centered drag: velocity of every coupled particle with half the other forces, v(t - dt/2) + dt Fc/(2m), and
+        its random force (lattice units, 3 components of numCoupled each). */
+    OpenMM::ComputeArray knownVelocity, randomForce;
     OpenMM::ComputeSort sort;
     OpenMM::ComputeKernel computeMomentsKernel, sumMomentumKernel, centerVelocityKernel, removeMomentumKernel;
     OpenMM::ComputeKernel collideKernel, bounceBackKernel, maxSpeedKernel;
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
+    OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel;
 };
 
 } // namespace LBMPlugin

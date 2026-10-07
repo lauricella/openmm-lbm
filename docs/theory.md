@@ -194,7 +194,8 @@ without changing the fluid.
   evaluation comes before the integrator increments the step count, and it applies the coupling forces of
   the step again. Before version 0.2.0 it applied those of the next step, computed on the fluid that had
   already received the reaction of the step, so in that step particles and fluid received different momenta
-  (`testRepeatedForceEvaluation`).
+  (`testRepeatedForceEvaluation`). With the centred drag the evaluation that will be repeated does nothing
+  (Solution of the centred drag, below).
 - Before the first step of the Context the coupling forces are zero, so that an energy minimization
   before the dynamics sees only the forces of the other terms.
 - The coupling is dissipative and has no energy.
@@ -315,8 +316,23 @@ Fc_k is read from OpenMM's forces after the other forces of the System have been
   steps is computed with the forces of those groups only.
 - Constraints are applied by the integrator after the forces, and the drag does not see them.
 
-The centred drag runs on the Reference platform; on the CUDA, OpenCL and HIP platforms it is not yet
-available, and a Context with it is refused.
+On the Reference platform `execute()` finds the other forces already summed in OpenMM's force array, since
+`LBMForce` is the last force. On the CUDA, OpenCL and HIP platforms the forces of the System are complete only
+at the end of the force evaluation, so the centred drag runs in a `ForcePostComputation`, which OpenMM calls
+after all the forces (`finishComputation()`, OpenMM 8.3 to 8.6) and, since `LBMForce` is the last force, after
+the post-computations of the other forces, such as the one that joins the separate PME stream of the CUDA
+platform (`test_centered_drag_sees_all_forces`).
+- Fc is read from OpenMM's fixed point force buffer. The OpenCL platform also has floating point force
+  buffers, which it adds to the fixed point one only after the post-computations: they are read too. On one
+  device OpenMM's own forces do not write them during the evaluation (OpenMM 8.3 to 8.6), but forces of
+  other plugins may.
+- When the neighbor list of a nonbonded force has overflowed, OpenMM has already marked the evaluation as
+  invalid when the post-computation runs, and will repeat it: the other forces are then incomplete, and the
+  post-computation does nothing. The lattice step is done in the repeated evaluation, with the complete
+  forces (`testCenteredRepeatedEvaluation`).
+- The arithmetic is that of the Reference platform: one thread per particle computes v~_k, its random force
+  and its key node*N + k; the keys are sorted with OpenMM's `ComputeSort`; the first key of each node solves
+  the node and writes the forces of its particles and the reaction -S.
 
 **Which velocity has the right temperature.** Consider the particles of a node and their cell alone,
 without other forces, streaming and viscosity (a closed system with a fluctuation-dissipation balance). Its

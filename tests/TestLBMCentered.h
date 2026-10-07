@@ -49,6 +49,14 @@ System* createCenteredSystem(LBMForce*& force, const vector<double>& masses, con
     return system;
 }
 
+/**
+ * Tolerance of a velocity after one step.  The GPU platforms add the forces in fixed point, with a resolution of
+ * 2^-32 kJ/mol/nm: for a particle of 100 Da and a step of 0.01 ps, 2.3e-14 nm/ps of velocity.
+ */
+double getOneStepTolerance(Platform& platform) {
+    return getCouplingTolerance(platform, platform.getName() == "Reference" ? 1e-14 : 5e-14);
+}
+
 /** Total momentum (Da nm/ps) of the fluid. */
 Vec3 fluidMomentum(Context& context, LBMForce* force) {
     vector<double> fluid;
@@ -80,7 +88,7 @@ void testCenteredFirstStep(Platform& platform) {
     State state = context.getState(State::Velocities | State::Forces);
     Vec3 v1 = state.getVelocities()[0];
     double a = 0.5*friction*fluidDt, b = a*couplingMass/(fluidDensity*fluidDx*fluidDx*fluidDx);
-    ASSERT_EQUAL_VEC(v0*((1-a+b)/(1+a+b)), v1, getCouplingTolerance(platform, 1e-14));
+    ASSERT_EQUAL_VEC(v0*((1-a+b)/(1+a+b)), v1, getOneStepTolerance(platform));
     integrator.step(1);
     Vec3 v2 = context.getState(State::Velocities).getVelocities()[0];
     ASSERT_EQUAL_VEC((v2-v1)*(couplingMass/fluidDt), state.getForces()[0], getCouplingTolerance(platform, 1e-12));
@@ -185,7 +193,7 @@ void testCenteredWall(Platform& platform) {
     integrator.step(1);
     Vec3 v1 = context.getState(State::Velocities).getVelocities()[0];
     double a = 0.5*friction*fluidDt;
-    ASSERT_EQUAL_VEC(v0*((1-a)/(1+a)), v1, getCouplingTolerance(platform, 1e-14));
+    ASSERT_EQUAL_VEC(v0*((1-a)/(1+a)), v1, getOneStepTolerance(platform));
     ASSERT_EQUAL_VEC((v0-v1)*(couplingMass/fluidDt), force->getWallForce(context), getCouplingTolerance(platform, 1e-12));
     delete system;
 }
@@ -216,6 +224,39 @@ void testCenteredLargeFriction(Platform& platform) {
     Vec3 p1 = totalMomentum(context, force);
     ASSERT_EQUAL_TOL(0.0, sqrt((p1-p0).dot(p1-p0))/scale, getCouplingTolerance(platform, 1e-11));
     delete system;
+}
+
+/**
+ * When the neighbor list of a GPU platform overflows, OpenMM repeats the force evaluation: with the centred drag the
+ * evaluation that will be repeated, whose other forces are incomplete, does nothing, and the step is done in the
+ * repeated one.  So a step whose evaluation overflows the list gives the same velocities as the same step done
+ * after the list has grown, in an evaluation between steps.  The Reference platform never repeats an evaluation.
+ */
+void testCenteredRepeatedEvaluation(Platform& platform) {
+    if (platform.getName() == "Reference")
+        return;
+    vector<vector<Vec3> > results;
+    for (int grownBefore = 0; grownBefore < 2; grownBefore++) {
+        LBMForce* force;
+        vector<Vec3> positions, velocities;
+        System* system = createOverflowSystem(force, positions, velocities, LBMForce::Centered, 1.0);
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        context.setPositions(positions);
+        context.setVelocities(velocities);
+        integrator.step(5);
+        compressPositions(context);
+        if (grownBefore)
+            context.getState(State::Forces);
+        integrator.step(1);
+        results.push_back(context.getState(State::Velocities).getVelocities());
+        delete system;
+    }
+    double scale = 0;
+    for (Vec3 v : results[0])
+        scale = max(scale, sqrt(v.dot(v)));
+    for (int i = 0; i < (int) results[0].size(); i++)
+        ASSERT_EQUAL_VEC(results[0][i]*(1/scale), results[1][i]*(1/scale), getCouplingTolerance(platform, 1e-12));
 }
 
 /**
@@ -293,6 +334,7 @@ void runCenteredTests(Platform& platform) {
     testCenteredSharedNode(platform);
     testCenteredWall(platform);
     testCenteredLargeFriction(platform);
+    testCenteredRepeatedEvaluation(platform);
     testCenteredRequirements(platform);
     LBMForce::DragScheme drag = LBMForce::Centered;
     testFullStepKineticEnergy(platform, drag);
@@ -302,6 +344,7 @@ void runCenteredTests(Platform& platform) {
     testComoving(platform, drag);
     testPartialCoupling(platform, drag);
     testForceEvaluationsAndSeeds(platform, drag);
+    testRepeatedForceEvaluation(platform, drag);
     testWallMomentumBalance(platform, drag);
     testRestartWithParticles(platform, drag);
     testCheckpointWithRandomForce(platform, drag);

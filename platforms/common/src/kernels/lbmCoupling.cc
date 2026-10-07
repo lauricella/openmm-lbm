@@ -15,7 +15,8 @@
  * with the components at [k*NUM_COUPLED + i].
  *
  * Defines, besides those of lbmFluid.cc: NUM_ATOMS, PADDED_NUM_ATOMS, NUM_COUPLED, DX (lattice spacing, nm),
- * VELOCITY_SCALE (dx/dt) and FORCE_SCALE (m_c dx/dt^2, the force unit of the lattice in kJ/mol/nm).
+ * VELOCITY_SCALE (dx/dt) and FORCE_SCALE (m_c dx/dt^2, the force unit of the lattice in kJ/mol/nm); with the
+ * Centered drag, HAS_FLOAT_FORCE_BUFFERS if the platform also accumulates forces in floating point buffers.
  */
 
 DEVICE mixed4 loadPosition(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection, int index) {
@@ -197,6 +198,145 @@ KERNEL void clearCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL m
         cellReaction[node] = 0;
         cellReaction[NUM_NODES+node] = 0;
         cellReaction[2*NUM_NODES+node] = 0;
+    }
+}
+
+/**
+ * Centred drag, first part, one thread per atom (docs/theory.md, section 2; lattice units, h = 1/2): the velocity
+ * with half the other forces, v~ = v(t - h) + h Fc/m, and the random force sqrt(2 gamma m kT) xi of every coupled
+ * particle, and its sort key node*NUM_COUPLED + i.  Fc is read from OpenMM's fixed point force buffer and, with
+ * HAS_FLOAT_FORCE_BUFFERS, from its floating point buffers, which hold the other forces at the end of the force
+ * evaluation.  The random numbers are handled as in coupleParticles().
+ */
+KERNEL void prepareCenteredDrag(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection,
+        GLOBAL const mixed4* RESTRICT velm, GLOBAL const int* RESTRICT atomIndex, GLOBAL const int* RESTRICT couplingIndex,
+        GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mm_long* RESTRICT longForces, GLOBAL mixed* RESTRICT knownVelocity,
+        GLOBAL mixed* RESTRICT randomForce, GLOBAL mm_long* RESTRICT sortKeys, GLOBAL const float4* RESTRICT random,
+        GLOBAL float4* RESTRICT noise, int randomIndex, int drawNoise, mixed gamma, mixed kT
+#ifdef HAS_FLOAT_FORCE_BUFFERS
+        , GLOBAL const real4* RESTRICT floatForces, int numFloatForces
+#endif
+        ) {
+    const mixed h = 0.5f;
+    const mixed fixedPointScale = 1/(mixed) 0x100000000;
+    for (int j = GLOBAL_ID; j < NUM_ATOMS; j += GLOBAL_SIZE) {
+        int i = couplingIndex[atomIndex[j]];
+        if (i < 0)
+            continue;
+        mixed4 pos = loadPosition(posq, posqCorrection, j);
+        int node = nearestNode(pos);
+        mixed fx = longForces[j]*fixedPointScale;
+        mixed fy = longForces[j+PADDED_NUM_ATOMS]*fixedPointScale;
+        mixed fz = longForces[j+2*PADDED_NUM_ATOMS]*fixedPointScale;
+#ifdef HAS_FLOAT_FORCE_BUFFERS
+        for (int b = 0; b < numFloatForces; b++) {
+            real4 f = floatForces[j+b*PADDED_NUM_ATOMS];
+            fx += f.x;
+            fy += f.y;
+            fz += f.z;
+        }
+#endif
+        mixed4 v = velm[j];
+        mixed m = particleMass[i];
+        mixed scale = h/(m*FORCE_SCALE);
+        knownVelocity[i] = v.x*(1/(mixed) VELOCITY_SCALE) + fx*scale;
+        knownVelocity[NUM_COUPLED+i] = v.y*(1/(mixed) VELOCITY_SCALE) + fy*scale;
+        knownVelocity[2*NUM_COUPLED+i] = v.z*(1/(mixed) VELOCITY_SCALE) + fz*scale;
+        mixed rx = 0, ry = 0, rz = 0;
+        if (kT > 0 && gamma > 0) {
+            mixed sigma = sqrt(2*gamma*m*kT);
+            float4 xi;
+            if (drawNoise) {
+                xi = random[randomIndex+i];
+                noise[i] = xi;
+            }
+            else
+                xi = noise[i];
+            rx = xi.x*sigma;
+            ry = xi.y*sigma;
+            rz = xi.z*sigma;
+        }
+        randomForce[i] = rx;
+        randomForce[NUM_COUPLED+i] = ry;
+        randomForce[2*NUM_COUPLED+i] = rz;
+        sortKeys[i] = ((mm_long) node)*NUM_COUPLED + i;
+    }
+}
+
+/**
+ * Centred drag, second part, after sorting the keys: the first entry of each node solves the particles of that
+ * node together, in particle order, with a = gamma h, M, P~ and R the sums of m_k, m_k v~_k and of the random
+ * forces, and u~ = (j + h rho g)/rho, m_c = rho:
+ *   S = [-gamma (P~ - M u~) + R]/(1 + a + a M/m_c),   u_c(t) = u~ - h S/m_c,
+ *   F_k = [-gamma m_k (v~_k - u_c(t)) + R_k]/(1 + a).
+ * A solid node is a wall at rest of infinite mass: u_c(t) = 0.  It writes the force of every particle of the
+ * segment (one writer per particle) and, in a lattice step (isStep), the reaction -S of the node (one writer per
+ * node); the reaction on a solid node goes to the walls, in wallMomentum of the first particle of the segment.
+ */
+KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const mixed* RESTRICT particleMass,
+        GLOBAL const mixed* RESTRICT knownVelocity, GLOBAL const mixed* RESTRICT randomForce,
+        GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum, GLOBAL mixed* RESTRICT particleForce,
+        GLOBAL mixed* RESTRICT cellReaction, GLOBAL mixed* RESTRICT wallMomentum, int isStep, mixed gamma, mixed gx, mixed gy, mixed gz) {
+    const mixed h = 0.5f;
+    const mixed a = gamma*h;
+    for (int k = GLOBAL_ID; k < NUM_COUPLED; k += GLOBAL_SIZE) {
+        int node = (int) (sortKeys[k]/NUM_COUPLED);
+        if (k > 0 && (int) (sortKeys[k-1]/NUM_COUPLED) == node)
+            continue;
+        int end = k;
+        mixed mass = 0, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0;
+        for (; end < NUM_COUPLED && (int) (sortKeys[end]/NUM_COUPLED) == node; end++) {
+            int i = (int) (sortKeys[end] - ((mm_long) node)*NUM_COUPLED);
+            mixed m = particleMass[i];
+            mass += m;
+            px += knownVelocity[i]*m;
+            py += knownVelocity[NUM_COUPLED+i]*m;
+            pz += knownVelocity[2*NUM_COUPLED+i]*m;
+            rx += randomForce[i];
+            ry += randomForce[NUM_COUPLED+i];
+            rz += randomForce[2*NUM_COUPLED+i];
+        }
+        mixed rho = 1 + densityDeviation[node];
+        mixed ux = 0, uy = 0, uz = 0, sx, sy, sz;
+        if (rho > 0) {
+            mixed kx = (momentum[node] + h*(rho*gx))*(1/rho);
+            mixed ky = (momentum[NUM_NODES+node] + h*(rho*gy))*(1/rho);
+            mixed kz = (momentum[2*NUM_NODES+node] + h*(rho*gz))*(1/rho);
+            mixed scale = 1/(1 + a + a*mass/rho);
+            sx = ((px - kx*mass)*(-gamma) + rx)*scale;
+            sy = ((py - ky*mass)*(-gamma) + ry)*scale;
+            sz = ((pz - kz*mass)*(-gamma) + rz)*scale;
+            ux = kx - sx*(h/rho);
+            uy = ky - sy*(h/rho);
+            uz = kz - sz*(h/rho);
+        }
+        else {
+            mixed scale = 1/(1 + a);
+            sx = (px*(-gamma) + rx)*scale;
+            sy = (py*(-gamma) + ry)*scale;
+            sz = (pz*(-gamma) + rz)*scale;
+        }
+        mixed scale = 1/(1 + a);
+        for (int m = k; m < end; m++) {
+            int i = (int) (sortKeys[m] - ((mm_long) node)*NUM_COUPLED);
+            mixed mi = particleMass[i];
+            particleForce[i] = ((knownVelocity[i] - ux)*(-gamma*mi) + randomForce[i])*scale;
+            particleForce[NUM_COUPLED+i] = ((knownVelocity[NUM_COUPLED+i] - uy)*(-gamma*mi) + randomForce[NUM_COUPLED+i])*scale;
+            particleForce[2*NUM_COUPLED+i] = ((knownVelocity[2*NUM_COUPLED+i] - uz)*(-gamma*mi) + randomForce[2*NUM_COUPLED+i])*scale;
+        }
+        if (isStep) {
+            cellReaction[node] = -sx;
+            cellReaction[NUM_NODES+node] = -sy;
+            cellReaction[2*NUM_NODES+node] = -sz;
+#ifdef HAS_SOLID_NODES
+            if (rho == 0) {
+                int i = (int) (sortKeys[k] - ((mm_long) node)*NUM_COUPLED);
+                wallMomentum[i] -= sx;
+                wallMomentum[NUM_COUPLED+i] -= sy;
+                wallMomentum[2*NUM_COUPLED+i] -= sz;
+            }
+#endif
+        }
     }
 }
 

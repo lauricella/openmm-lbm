@@ -248,48 +248,73 @@ void testForceEvaluationsAndSeeds(Platform& platform, LBMForce::DragScheme drag=
 }
 
 /**
- * The GPU platforms repeat all the force evaluations of a step when the neighbor list of a nonbonded force has to
- * grow: the repeated evaluation must apply the coupling forces of the step again, not those of the next step,
- * otherwise particles and fluid receive different momenta.  8000 particles with a short-range CustomNonbondedForce
- * are compressed into a cube of 2 nm, which overflows the neighbor list in the next step; the total momentum is
- * conserved in that step.  The Reference platform never repeats an evaluation (and would be slow here).
+ * A System of 8000 coupled particles with a short-range CustomNonbondedForce of the given strength, on a lattice of
+ * 40^3 nodes at T = 0, for the tests of the repeated force evaluations: after compressPositions() the neighbor list
+ * of the GPU platforms overflows in the next force evaluation.
  */
-void testRepeatedForceEvaluation(Platform& platform) {
-    if (platform.getName() == "Reference")
-        return;
+System* createOverflowSystem(LBMForce*& force, vector<Vec3>& positions, vector<Vec3>& velocities, LBMForce::DragScheme drag,
+        double strength=1e-3) {
     int n = 40, numParticles = 8000;
     double boxSize = n*fluidDx;
-    System system;
-    system.setDefaultPeriodicBoxVectors(Vec3(boxSize, 0, 0), Vec3(0, boxSize, 0), Vec3(0, 0, boxSize));
-    CustomNonbondedForce* nonbonded = new CustomNonbondedForce("1e-3*(1.2-r)^2");
+    System* system = new System();
+    system->setDefaultPeriodicBoxVectors(Vec3(boxSize, 0, 0), Vec3(0, boxSize, 0), Vec3(0, 0, boxSize));
+    CustomNonbondedForce* nonbonded = new CustomNonbondedForce("strength*(1.2-r)^2");
+    nonbonded->addGlobalParameter("strength", strength);
     nonbonded->setNonbondedMethod(CustomNonbondedForce::CutoffPeriodic);
     nonbonded->setCutoffDistance(1.2);
-    LBMForce* force = new LBMForce();
+    force = new LBMForce();
     force->setGridSize(n, n, n);
     force->setFluidDensity(fluidDensity);
     force->setFriction(10.0);
     force->setTemperature(0.0);
     force->setFluidMomentumRemovalFrequency(0);
     force->setMachCheckFrequency(0);
-    vector<Vec3> positions(numParticles), velocities(numParticles);
+    force->setDragScheme(drag);
+    positions.resize(numParticles);
+    velocities.resize(numParticles);
     for (int i = 0; i < numParticles; i++) {
-        system.addParticle(couplingMass);
+        system->addParticle(couplingMass);
         nonbonded->addParticle();
         force->addParticle(i);
         positions[i] = Vec3(fmod(0.7548777*i, 1.0), fmod(0.5698403*i, 1.0), fmod(0.4114636*i+0.5, 1.0))*boxSize;
         velocities[i] = Vec3(0.5*sin(1.3*i), 0.5*cos(0.7*i), 0.5*sin(0.3*i+1.0));
     }
-    system.addForce(nonbonded);
-    system.addForce(force);
-    VerletIntegrator integrator(fluidDt);
-    Context context(system, integrator, platform);
-    context.setPositions(positions);
-    context.setVelocities(velocities);
-    integrator.step(5);
+    system->addForce(nonbonded);
+    system->addForce(force);
+    return system;
+}
+
+/** Compress the particles of a Context made by createOverflowSystem() into a cube of 2 nm. */
+void compressPositions(Context& context) {
+    Vec3 a, b, c;
+    context.getState(0).getPeriodicBoxVectors(a, b, c);
+    double boxSize = a[0];
     vector<Vec3> current = context.getState(State::Positions).getPositions();
     for (Vec3& r : current)
         r = Vec3(r[0]-floor(r[0]/boxSize)*boxSize, r[1]-floor(r[1]/boxSize)*boxSize, r[2]-floor(r[2]/boxSize)*boxSize)*0.1 + Vec3(1, 1, 1);
     context.setPositions(current);
+}
+
+/**
+ * The GPU platforms repeat all the force evaluations of a step when the neighbor list of a nonbonded force has to
+ * grow: the repeated evaluation must apply the coupling forces of the step again, not those of the next step,
+ * otherwise particles and fluid receive different momenta.  8000 particles with a short-range CustomNonbondedForce
+ * are compressed into a cube of 2 nm, which overflows the neighbor list in the next step; the total momentum is
+ * conserved in that step.  With the centred drag the evaluation that OpenMM will repeat does nothing, and the step
+ * is done in the repeated one.  The Reference platform never repeats an evaluation (and would be slow here).
+ */
+void testRepeatedForceEvaluation(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
+    if (platform.getName() == "Reference")
+        return;
+    LBMForce* force;
+    vector<Vec3> positions, velocities;
+    System* system = createOverflowSystem(force, positions, velocities, drag);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(positions);
+    context.setVelocities(velocities);
+    integrator.step(5);
+    compressPositions(context);
     double scale = 0;
     for (Vec3 v : context.getState(State::Velocities).getVelocities())
         scale += couplingMass*sqrt(v.dot(v));
@@ -297,6 +322,7 @@ void testRepeatedForceEvaluation(Platform& platform) {
     integrator.step(1);
     Vec3 p1 = totalMomentum(context, force);
     ASSERT_EQUAL_TOL(0.0, sqrt((p1-p0).dot(p1-p0))/scale, getCouplingTolerance(platform, 1e-11));
+    delete system;
 }
 
 /**
