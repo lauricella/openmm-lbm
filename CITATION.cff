@@ -75,3 +75,27 @@ references:
     start: 107455
     year: 2020
     doi: 10.1016/j.cpc.2020.107455
+  - type: article
+    title: "Thread-safe lattice Boltzmann for high-performance computing on GPUs"
+    authors:
+      - given-names: Andrea
+        family-names: Montessori
+      - given-names: Marco
+        family-names: Lauricella
+      - given-names: Adriano
+        family-names: Tiribocchi
+      - given-names: Mihir
+        family-names: Durve
+      - given-names: Michele
+        family-names: La Rocca
+      - given-names: Giorgio
+        family-names: Amati
+      - given-names: Fabio
+        family-names: Bonaccorso
+      - given-names: Sauro
+        family-names: Succi
+    journal: "Journal of Computational Science"
+    volume: 74
+    start: 102165
+    year: 2023
+    doi: 10.1016/j.jocs.2023.102165
