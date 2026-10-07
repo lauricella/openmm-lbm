@@ -32,7 +32,7 @@ class CommonCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     CommonCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform, OpenMM::ComputeContext& cc, const OpenMM::System& system) :
             CalcLBMForceKernel(name, platform), cc(cc), system(system), stepPending(false), stepIndex(0), machWarningPrinted(false),
-            hasAdvanced(false), noiseDrawn(false) {
+            hasAdvanced(false), stepForcesCurrent(false), noiseDrawn(false) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
@@ -63,6 +63,9 @@ private:
     bool machWarningPrinted;
     /** True once the fluid has advanced by a step: before that the force on the walls is zero. */
     bool hasAdvanced;
+    /** True from the lattice step until the coupling forces are recomputed or the state is replaced: the forces
+        hold those of the step. */
+    bool stepForcesCurrent;
     /** True if noise holds the random numbers of the next lattice step. */
     bool noiseDrawn;
     /** True if the mixed type is double. */

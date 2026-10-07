@@ -12,6 +12,7 @@
  * TestLBMFluid.h and call runCouplingTests().
  */
 
+#include "openmm/CustomNonbondedForce.h"
 #include "openmm/reference/SimTKOpenMMRealType.h"
 
 /** Mass (Da) of the particles of the coupling tests. */
@@ -244,6 +245,58 @@ void testForceEvaluationsAndSeeds(Platform& platform, LBMForce::DragScheme drag=
         ASSERT_EQUAL_VEC(plain[i], queried[i], 0.0);
     vector<Vec3> first = run(0, false), second = run(0, false);
     ASSERT(first[0][0] != second[0][0]);
+}
+
+/**
+ * The GPU platforms repeat all the force evaluations of a step when the neighbor list of a nonbonded force has to
+ * grow: the repeated evaluation must apply the coupling forces of the step again, not those of the next step,
+ * otherwise particles and fluid receive different momenta.  8000 particles with a short-range CustomNonbondedForce
+ * are compressed into a cube of 2 nm, which overflows the neighbor list in the next step; the total momentum is
+ * conserved in that step.  The Reference platform never repeats an evaluation (and would be slow here).
+ */
+void testRepeatedForceEvaluation(Platform& platform) {
+    if (platform.getName() == "Reference")
+        return;
+    int n = 40, numParticles = 8000;
+    double boxSize = n*fluidDx;
+    System system;
+    system.setDefaultPeriodicBoxVectors(Vec3(boxSize, 0, 0), Vec3(0, boxSize, 0), Vec3(0, 0, boxSize));
+    CustomNonbondedForce* nonbonded = new CustomNonbondedForce("1e-3*(1.2-r)^2");
+    nonbonded->setNonbondedMethod(CustomNonbondedForce::CutoffPeriodic);
+    nonbonded->setCutoffDistance(1.2);
+    LBMForce* force = new LBMForce();
+    force->setGridSize(n, n, n);
+    force->setFluidDensity(fluidDensity);
+    force->setFriction(10.0);
+    force->setTemperature(0.0);
+    force->setFluidMomentumRemovalFrequency(0);
+    force->setMachCheckFrequency(0);
+    vector<Vec3> positions(numParticles), velocities(numParticles);
+    for (int i = 0; i < numParticles; i++) {
+        system.addParticle(couplingMass);
+        nonbonded->addParticle();
+        force->addParticle(i);
+        positions[i] = Vec3(fmod(0.7548777*i, 1.0), fmod(0.5698403*i, 1.0), fmod(0.4114636*i+0.5, 1.0))*boxSize;
+        velocities[i] = Vec3(0.5*sin(1.3*i), 0.5*cos(0.7*i), 0.5*sin(0.3*i+1.0));
+    }
+    system.addForce(nonbonded);
+    system.addForce(force);
+    VerletIntegrator integrator(fluidDt);
+    Context context(system, integrator, platform);
+    context.setPositions(positions);
+    context.setVelocities(velocities);
+    integrator.step(5);
+    vector<Vec3> current = context.getState(State::Positions).getPositions();
+    for (Vec3& r : current)
+        r = Vec3(r[0]-floor(r[0]/boxSize)*boxSize, r[1]-floor(r[1]/boxSize)*boxSize, r[2]-floor(r[2]/boxSize)*boxSize)*0.1 + Vec3(1, 1, 1);
+    context.setPositions(current);
+    double scale = 0;
+    for (Vec3 v : context.getState(State::Velocities).getVelocities())
+        scale += couplingMass*sqrt(v.dot(v));
+    Vec3 p0 = totalMomentum(context, force);
+    integrator.step(1);
+    Vec3 p1 = totalMomentum(context, force);
+    ASSERT_EQUAL_TOL(0.0, sqrt((p1-p0).dot(p1-p0))/scale, getCouplingTolerance(platform, 1e-11));
 }
 
 /**
@@ -639,6 +692,7 @@ void runCouplingTests(Platform& platform) {
     testComoving(platform);
     testPartialCoupling(platform);
     testForceEvaluationsAndSeeds(platform);
+    testRepeatedForceEvaluation(platform);
     testNVEScheme(platform);
     testWallReflection(platform);
     testWallReflectionDirection(platform);

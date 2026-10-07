@@ -35,7 +35,8 @@ namespace LBMPlugin {
 class ReferenceCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     ReferenceCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform) : CalcLBMForceKernel(name, platform),
-            stepPending(false), stepIndex(0), machWarningPrinted(false), noiseDrawn(false), hasStoredGaussian(false), storedGaussian(0) {
+            stepPending(false), stepForcesCurrent(false), stepIndex(0), machWarningPrinted(false), noiseDrawn(false), hasStoredGaussian(false),
+            storedGaussian(0) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
@@ -79,6 +80,9 @@ private:
     std::vector<char> isFluid;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;
+    /** True from the lattice step until the coupling forces are recomputed or the state is replaced: the forces
+        hold those of the step. */
+    bool stepForcesCurrent;
     /** Step count of the Context: set by beginStep() at the start of a lattice step, incremented at its end. */
     long long stepIndex;
     /** True once the debug warning about the Mach number has been printed. */

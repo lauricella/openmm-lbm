@@ -19,6 +19,13 @@ versions the API may still change.
   of the checkpoint header of `LBMForce::createCheckpoint()` (the drag scheme; version 1 is read with the
   explicit drag, and a checkpoint is refused by a Context with the other drag scheme).
 
+### Fixed
+- CUDA, OpenCL and HIP: when OpenMM repeated the force evaluation of a step to enlarge the neighbor list of a
+  nonbonded force (Systems of more than about 1250 atoms), the repeated evaluation applied the coupling force
+  of the next step instead of that of the step, so particles and fluid received different momenta in that
+  step (1.3e-2 of the momentum of the particles in the test that compresses 8000 particles). It now applies
+  the force of the step again (`testRepeatedForceEvaluation`).
+
 ### Changed
 - README: the fluid is described as thread-safe; full name of Luis Enrique Coronas-Serna in README,
   `CITATION.cff` and the examples.

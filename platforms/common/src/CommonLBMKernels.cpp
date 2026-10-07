@@ -302,12 +302,16 @@ double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForce
     // not change the fluid and return the coupling force of the next step, as OpenMM does for every force, so
     // that the kinetic energy of VerletIntegrator is that of the full step.  The random numbers of a step are
     // drawn once.  Before the first step of the Context the coupling force is zero.  The energy is zero.
+    // OpenMM repeats all the force evaluations of a step when it has to enlarge its neighbor list
+    // (finishComputation() returns valid = false); the repeated evaluation comes before the integrator increments
+    // the step count, and it uses the forces of the step again.
     ContextSelector selector(cc);
+    bool repeatedStep = (stepForcesCurrent && context.getStepCount() == stepIndex-1);
     if (stepPending) {
         stepPending = false;
         advanceFluid();
     }
-    else if (includeForces && !lattice.particles.empty() && context.getStepCount() > 0)
+    else if (includeForces && !lattice.particles.empty() && context.getStepCount() > 0 && !repeatedStep)
         computeNextStepForces(context);
     if (includeForces && !lattice.particles.empty())
         applyForcesKernel->execute(cc.getNumAtoms());
@@ -334,6 +338,7 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     if (!lattice.solidNodes.empty())
         bounceBackKernel->execute(lattice.solidNodes.size());
     hasAdvanced = true;
+    stepForcesCurrent = true;
     stepIndex++;
     if (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)
         checkMachNumber();
@@ -343,6 +348,7 @@ void CommonCalcLBMForceKernel::computeNextStepForces(ContextImpl& context) {
     // The coupling of the next lattice step computed on the current fluid, positions and velocities, without its
     // reaction on the fluid.  The step recomputes it, with the same random numbers, after any change of the
     // velocities in between (the reflection at the walls, setVelocities()).
+    stepForcesCurrent = false;
     int numNodes = lattice.getNumNodes();
     computeMomentsKernel->execute(numNodes);
     long long nextStep = context.getStepCount();
@@ -468,6 +474,7 @@ void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<
     if (state.size() != populations.getSize())
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
     populations.upload(state, true);
+    stepForcesCurrent = false;
 }
 
 /** Write the content of an array, as it is on the device, if the array exists. */
@@ -514,6 +521,7 @@ void CommonCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& str
     stream.read((char*) flags, sizeof(flags));
     noiseDrawn = (flags[0] != 0);
     hasAdvanced = (flags[1] != 0);
+    stepForcesCurrent = false;
     readArray(populations, stream);
     readArray(noise, stream);
     readArray(particleWallMomentum, stream);

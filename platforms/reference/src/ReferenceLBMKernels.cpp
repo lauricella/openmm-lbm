@@ -122,11 +122,15 @@ double ReferenceCalcLBMForceKernel::execute(ContextImpl& context, bool includeFo
     // computes from v(t - dt/2) + dt F(t)/(2m) is then that of the full step.  The random numbers of a step are
     // drawn once, by the first evaluation that needs them, so extra evaluations do not change the run.  Before
     // the first step of the Context the coupling force is zero.  The coupling is dissipative: its energy is zero.
+    // The GPU platforms repeat the force evaluations of a step when they enlarge their neighbor list; a repeated
+    // evaluation comes before the integrator increments the step count, and it uses the forces of the step again.
+    // The Reference platform never repeats them, but follows the same rule.
+    bool repeatedStep = (stepForcesCurrent && context.getStepCount() == stepIndex-1);
     if (stepPending) {
         stepPending = false;
         advanceFluid(context);
     }
-    else if (includeForces && !lattice.particles.empty() && context.getStepCount() > 0)
+    else if (includeForces && !lattice.particles.empty() && context.getStepCount() > 0 && !repeatedStep)
         computeNextStepForces(context);
     if (includeForces) {
         vector<Vec3>& forces = extractForces(context);
@@ -145,6 +149,7 @@ void ReferenceCalcLBMForceKernel::advanceFluid(ContextImpl& context) {
     collideAndStream();
     if (!isFluid.empty())
         bounceBack();
+    stepForcesCurrent = true;
     stepIndex++;
     if (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)
         checkMachNumber();
@@ -154,6 +159,7 @@ void ReferenceCalcLBMForceKernel::computeNextStepForces(ContextImpl& context) {
     // The coupling of the next lattice step computed on the current fluid, positions and velocities, without
     // its reaction on the fluid.  The step recomputes it, with the same random numbers, after any change of
     // the velocities in between (the reflection at the walls, setVelocities()).
+    stepForcesCurrent = false;
     computeMoments();
     long long nextStep = context.getStepCount();
     if (lattice.momentumRemovalFrequency > 0 && nextStep%lattice.momentumRemovalFrequency == 0)
@@ -572,6 +578,7 @@ void ReferenceCalcLBMForceKernel::setFluidState(ContextImpl& context, const vect
     if (state.size() != populations.size())
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
     populations = state;
+    stepForcesCurrent = false;
 }
 
 void ReferenceCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& stream) {
@@ -597,6 +604,7 @@ void ReferenceCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream
 
 void ReferenceCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& stream) {
     stream.read((char*) populations.data(), sizeof(double)*populations.size());
+    stepForcesCurrent = false;
     int drawn;
     stream.read((char*) &drawn, sizeof(int));
     noiseDrawn = (drawn != 0);

@@ -187,6 +187,14 @@ without changing the fluid.
   velocities between the evaluations and the step (the reflection at the walls, `setVelocities()`) is
   taken into account. Extra evaluations therefore do not change the trajectory, which is identical with
   and without them.
+- The CUDA, OpenCL and HIP platforms repeat all the force evaluations of a step when the neighbor list of
+  a nonbonded force with a cutoff has to grow (`ContextImpl::calcForcesAndEnergy()`, `finishComputation()`
+  returns valid = false). This needs more than about 1250 atoms: OpenMM first allocates 20 tiles of 32 x 32
+  atoms per block of 32 atoms, which covers every tile of a smaller System. The repeated
+  evaluation comes before the integrator increments the step count, and it applies the coupling forces of
+  the step again. Before version 0.2.0 it applied those of the next step, computed on the fluid that had
+  already received the reaction of the step, so in that step particles and fluid received different momenta
+  (`testRepeatedForceEvaluation`).
 - Before the first step of the Context the coupling forces are zero, so that an energy minimization
   before the dynamics sees only the forces of the other terms.
 - The coupling is dissipative and has no energy.
