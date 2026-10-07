@@ -27,7 +27,8 @@ namespace LBMPlugin {
  * nearest lattice node, plus a random force that satisfies the fluctuation-dissipation theorem at
  * the given temperature (Euler-Maruyama scheme), and the fluid receives the opposite force.  The
  * drag is explicit or centred in time (setDragScheme()).  Drag and noise are part of this force, so
- * the System must be integrated with a VerletIntegrator.
+ * the System must be integrated with a VerletIntegrator.  The fluid can also have thermal fluctuations of its own at
+ * the same temperature (setFluidFluctuations()).
  *
  * The lattice spans the periodic box of the System: the box must be rectangular and the lattice
  * cells must be cubic, that is, the box lengths divided by the grid sizes must be equal.  The
@@ -119,11 +120,13 @@ public:
      */
     void setFriction(double friction);
     /**
-     * Get the temperature of the random force on the coupled particles, measured in K.
+     * Get the temperature of the random force on the coupled particles and, with fluid fluctuations, of the
+     * fluid, measured in K.
      */
     double getTemperature() const;
     /**
-     * Set the temperature of the random force on the coupled particles, measured in K.
+     * Set the temperature of the random force on the coupled particles and, with fluid fluctuations
+     * (setFluidFluctuations()), of the fluid, measured in K.  Particles and fluid share a single heat bath.
      */
     void setTemperature(double temperature);
     /**
@@ -145,6 +148,22 @@ public:
      */
     void setDragScheme(DragScheme scheme);
     /**
+     * Get whether the fluid has thermal fluctuations of its own.  See setFluidFluctuations().
+     */
+    bool getFluidFluctuations() const;
+    /**
+     * Set whether the fluid has thermal fluctuations of its own (ghost-mode filtered fluctuating lattice Boltzmann
+     * model, docs/theory.md, section 7).  With fluctuations, every collision adds to the populations of each node a
+     * random part that leaves its density and momentum unchanged and gives the stress and the higher moments the
+     * equilibrium fluctuations at the temperature set with setTemperature(), the temperature of the random force on
+     * the particles.  The fluid fluctuates with both coupling schemes: with NVE the particles are thermalized only
+     * through the fluid.  The random numbers of the fluid are drawn from the random number seed
+     * (setRandomNumberSeed()).  The default is false: the fluid has no fluctuations of its own and receives thermal
+     * energy only from the random forces on the coupled particles.  It is fixed when a Context is created:
+     * updateParametersInContext() cannot change it.  At present only the Reference platform supports it.
+     */
+    void setFluidFluctuations(bool fluctuations);
+    /**
      * Get the random number seed.  See setRandomNumberSeed() for details.
      */
     int getRandomNumberSeed() const;
@@ -156,7 +175,8 @@ public:
      * seed.
      *
      * If seed is set to 0 (which is the default value assigned), a unique seed is chosen when a
-     * Context is created from this Force.
+     * Context is created from this Force.  The seed also determines the random numbers of the fluid, when it
+     * fluctuates (setFluidFluctuations()).
      */
     void setRandomNumberSeed(int seed);
     /**
@@ -330,8 +350,9 @@ public:
      * Update the parameters of a Context to match those stored in this Force object: the friction,
      * the temperature, the coupling scheme, the body acceleration, the frequency of the removal of the
      * fluid momentum, and the frequency and limit of the Mach number check.  The grid, the fluid density
-     * and viscosity, the solid nodes, the set of coupled particles and the drag scheme cannot be changed
-     * this way, and an exception is thrown if they differ.  The initial fluid velocity and the random
+     * and viscosity, the solid nodes, the set of coupled particles, the drag scheme and the fluid fluctuations
+     * cannot be changed this way, and an exception is thrown if they differ.  With fluid fluctuations the new
+     * temperature applies to the fluid as well.  The initial fluid velocity and the random
      * number seed are used only when a Context is created.  The fluid itself is not modified.
      */
     void updateParametersInContext(OpenMM::Context& context);
@@ -349,6 +370,7 @@ private:
     double density, viscosity, friction, temperature, machNumberLimit;
     CouplingScheme couplingScheme;
     DragScheme dragScheme;
+    bool fluidFluctuations;
     OpenMM::Vec3 bodyAcceleration, initialVelocity;
     std::vector<int> particles, solidNodes;
 };

@@ -102,6 +102,10 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     if (force.getDragScheme() != LBMForce::Explicit && force.getDragScheme() != LBMForce::Centered)
         throw OpenMMException("LBMForce: unknown drag scheme");
     lattice.dragScheme = force.getDragScheme();
+    // The fluid fluctuates at the temperature of the force also with the NVE scheme, whose particles are then
+    // thermalized only through the fluid.
+    lattice.fluidFluctuations = force.getFluidFluctuations();
+    lattice.fluidKT = (lattice.fluidFluctuations ? BOLTZ*force.getTemperature() : 0.0);
     lattice.randomNumberSeed = force.getRandomNumberSeed();
     lattice.momentumRemovalFrequency = force.getFluidMomentumRemovalFrequency();
     set<int> seen;
@@ -209,6 +213,8 @@ void LBMForceImpl::updateParametersInContext(ContextImpl& context) {
         throw OpenMMException("updateParametersInContext: the solid nodes cannot be changed");
     if (updated.dragScheme != lattice.dragScheme)
         throw OpenMMException("updateParametersInContext: the drag scheme cannot be changed");
+    if (updated.fluidFluctuations != lattice.fluidFluctuations)
+        throw OpenMMException("updateParametersInContext: the fluid fluctuations cannot be switched on or off");
     lattice = updated;
     kernel.getAs<CalcLBMForceKernel>().copyParametersToContext(context, lattice);
 }
@@ -227,11 +233,12 @@ void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& sta
 
 /**
  * A checkpoint starts with a header that identifies it: a tag, the format version, the platform, the grid size,
- * the number of coupled particles and (from version 2) the drag scheme.  The kernel writes the rest, which is the
- * same in both versions.  Version 1 was written before the drag scheme existed, with the explicit drag.
+ * the number of coupled particles, (from version 2) the drag scheme and (from version 3) whether the fluid
+ * fluctuates.  The kernel writes the rest, which is the same in all versions.  Version 1 was written before the
+ * drag scheme existed, with the explicit drag, and versions 1 and 2 before the fluid fluctuations, without them.
  */
 static const char checkpointTag[8] = {'L', 'B', 'M', 'C', 'K', 'P', 'T', '1'};
-static const int checkpointVersion = 2;
+static const int checkpointVersion = 3;
 
 void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     stream.write(checkpointTag, sizeof(checkpointTag));
@@ -240,7 +247,8 @@ void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     int length = platform.size();
     stream.write((const char*) &length, sizeof(int));
     stream.write(platform.c_str(), length);
-    int header[5] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme};
+    int header[6] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme,
+                     (int) lattice.fluidFluctuations};
     stream.write((const char*) header, sizeof(header));
     kernel.getAs<CalcLBMForceKernel>().createCheckpoint(context, stream);
     if (!stream)
@@ -264,13 +272,16 @@ void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
     if (platform != context.getPlatform().getName())
         throw OpenMMException("LBMForce: the checkpoint was written on the platform " + platform + ", not on " +
                 context.getPlatform().getName());
-    int header[5] = {0, 0, 0, 0, (int) LBMForce::Explicit};
-    stream.read((char*) header, (version == 1 ? 4 : 5)*sizeof(int));
+    int header[6] = {0, 0, 0, 0, (int) LBMForce::Explicit, 0};
+    stream.read((char*) header, (version+3)*sizeof(int));
     if (!stream || header[0] != lattice.nx || header[1] != lattice.ny || header[2] != lattice.nz ||
             header[3] != (int) lattice.particles.size())
         throw OpenMMException("LBMForce: the checkpoint was written for a different grid size or number of coupled particles");
     if (header[4] != (int) lattice.dragScheme)
         throw OpenMMException("LBMForce: the checkpoint was written with a different drag scheme");
+    if (header[5] != (int) lattice.fluidFluctuations)
+        throw OpenMMException(string("LBMForce: the checkpoint was written ") + (header[5] ? "with" : "without") +
+                " fluid fluctuations, and this Context has them " + (lattice.fluidFluctuations ? "on" : "off"));
     kernel.getAs<CalcLBMForceKernel>().loadCheckpoint(context, stream);
     if (!stream)
         throw OpenMMException("LBMForce: the checkpoint is truncated");

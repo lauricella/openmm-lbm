@@ -14,7 +14,7 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform (on OpenCL its subclass `OpenCLCalcLBMForceKernel`, step 3 below), and the tests |
-| `serialization/` | XML proxy of `LBMForce` (parameters only; version 4, which reads versions 1 to 3) |
+| `serialization/` | XML proxy of `LBMForce` (parameters only; version 5, which reads versions 1 to 4) |
 | `python/` | SWIG wrapper `openmmlbm`, with the Python helpers `LBMTemperatureReporter`, `saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter`, and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
 | `examples/` | example scripts, ports of the examples of the DragOpenMM plugin (`examples/README.md`) |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
@@ -46,8 +46,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    Then
    `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
    kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
-   step (moments, momentum removal, coupling of the particles, collision and streaming, bounce-back at
-   solid nodes; see `docs/theory.md` sections 1 and 2) and adds the coupling forces of the step to the
+   step (moments, momentum removal, coupling of the particles, collision, with the random part of a
+   fluctuating fluid, and streaming, bounce-back at solid nodes; see `docs/theory.md` sections 1, 2 and 7) and adds the coupling forces of the step to the
    particles. The other force evaluations (`getState()`, for example) do not advance the fluid: they add the
    coupling forces of the next step, computed on the current fluid without its reaction, as OpenMM does for
    every force. The random numbers of a step are drawn once, by the first evaluation that needs them, and
@@ -109,8 +109,9 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    group is not requested, or if OpenMM has marked the evaluation as invalid (neighbor list overflow): the
    repeated evaluation then does the step.
 4. **Checkpoints.** `LBMForce::createCheckpoint()` and `loadCheckpoint()` go through `LBMForceImpl`, which
-   writes and checks a header (tag, version, platform, grid size, number of coupled particles and, from
-   version 2, drag scheme; version 1 is read as the explicit drag), to the kernel, which writes its state as
+   writes and checks a header (tag, version, platform, grid size, number of coupled particles, from
+   version 2 the drag scheme and from version 3 the switch of the fluid fluctuations; version 1 is read as the
+   explicit drag, versions 1 and 2 as without fluctuations), to the kernel, which writes its state as
    it is. The common kernel writes the size of its floating point type (a checkpoint is refused in another
    precision), whether the random numbers of the next step are already drawn and whether the fluid has
    advanced, then the populations, those random numbers and the wall momentum of the particles and of the

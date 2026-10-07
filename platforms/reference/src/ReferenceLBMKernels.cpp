@@ -455,10 +455,18 @@ void ReferenceCalcLBMForceKernel::collideAndStream() {
     //   f_q(x + c_q) = feq_q(rho, u) + (1 - omega) fneq_q(Pi_neq) + S_q(u, F)/2,  u = (j + F/2)/rho,
     // written in push form: each population is computed from the moments of its own node only.  The stored
     // deviation f_q - w_q uses the deviation of the equilibrium, feq_q - w_q.
+    // A fluctuating fluid (docs/theory.md, section 7) adds the random part xi_q of D3Q19::fluctuation(), with the
+    // amplitudes sqrt(mu rho omega (2 - omega)) on the stress modes and sqrt(mu rho) on the ghost modes, which
+    // relax with rate 1, and mu = kT/cs^2 in lattice units.  The 15 normal numbers of a node are drawn from the
+    // generator of the force, node after node in index order.
     int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
     int numNodes = lattice.getNumNodes();
     double omega = lattice.omega;
     double dfeq[D3Q19::numVelocities], fneq[D3Q19::numVelocities], s[D3Q19::numVelocities];
+    double xi[D3Q19::numVelocities], normal[15];
+    bool fluctuate = (lattice.fluidFluctuations && lattice.fluidKT > 0);
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    double mu = 3.0*lattice.fluidKT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
     for (int k = 0; k < nz; k++)
         for (int j = 0; j < ny; j++)
             for (int i = 0; i < nx; i++) {
@@ -473,11 +481,19 @@ void ReferenceCalcLBMForceKernel::collideAndStream() {
                 D3Q19::equilibriumDeviation(densityDeviation[node], ux, uy, uz, dfeq);
                 D3Q19::regularizedNonEquilibrium(&piNeq[6*node], fneq);
                 D3Q19::guoForcing(ux, uy, uz, F[0], F[1], F[2], s);
+                if (fluctuate) {
+                    for (int m = 0; m < 15; m++)
+                        normal[m] = getGaussianRandom();
+                    D3Q19::fluctuation(normal, sqrt(mu*r*omega*(2.0-omega)), sqrt(mu*r), xi);
+                }
                 for (int q = 0; q < D3Q19::numVelocities; q++) {
                     int di = (i + D3Q19::cx[q] + nx)%nx;
                     int dj = (j + D3Q19::cy[q] + ny)%ny;
                     int dk = (k + D3Q19::cz[q] + nz)%nz;
-                    populations[q*numNodes + di + nx*(dj + ny*dk)] = dfeq[q] + (1.0-omega)*fneq[q] + 0.5*s[q];
+                    double value = dfeq[q] + (1.0-omega)*fneq[q] + 0.5*s[q];
+                    if (fluctuate)
+                        value += xi[q];
+                    populations[q*numNodes + di + nx*(dj + ny*dk)] = value;
                 }
             }
 }

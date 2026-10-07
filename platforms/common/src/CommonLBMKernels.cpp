@@ -79,6 +79,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
+    if (lattice.fluidFluctuations)
+        throw OpenMMException("LBMForce: fluid fluctuations are not yet available on the " + getPlatform().getName() +
+                " platform; use the Reference platform");
     this->lattice = lattice;
     forceGroup = force.getForceGroup();
     bool centered = (lattice.dragScheme == LBMForce::Centered);

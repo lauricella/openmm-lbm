@@ -561,10 +561,11 @@ so it is rejected.
   to the walls in the last step and, on the Reference platform, the random number generator of the force
   (on the GPU platforms it is OpenMM's, which the OpenMM checkpoint contains). With both checkpoints a run
   continues bit for bit (`testCheckpointWithRandomForce`). `LBMForceImpl` writes a header before the data
-  of the kernel: a tag, the format version (2), the platform, the grid size, the number of coupled particles
-  and the drag scheme. A checkpoint is refused on another platform, with another grid, number of coupled
-  particles or drag scheme, and on the GPU platforms with another precision; a checkpoint of version 1
-  (plugin version 0.1.0) is read as one of the explicit drag.
+  of the kernel: a tag, the format version (3), the platform, the grid size, the number of coupled particles,
+  the drag scheme and whether the fluid fluctuates. A checkpoint is refused on another platform, with another
+  grid, number of coupled particles, drag scheme or switch of the fluid fluctuations, and on the GPU platforms
+  with another precision; a checkpoint of version 1 (plugin version 0.1.0) is read as one of the explicit drag,
+  and those of versions 1 and 2 (plugin versions 0.1 and 0.2) as ones without fluid fluctuations.
 - **Fluid state.** `getFluidState()` returns the deviations df_q in this layout, in lattice units: a
   population is the value plus w_q. Saving and restoring them is exact, so a restarted run is identical
   to an uninterrupted one.
@@ -625,6 +626,89 @@ and dt = 0.01 ps gives Ma = 5e-3.
 spacing, the lattice time step and the relaxation time, in the style of
 `NonbondedForce::getPMEParametersInContext()`.
 
+## 7. Fluctuating fluid (implemented on the Reference platform; CUDA, OpenCL and HIP to come)
+
+Without fluctuations the fluid receives thermal energy only from the reaction to the random forces on the
+coupled particles. The particles then miss the thermal motion of the solvent: their diffusion coefficient is
+about kT/(m gamma) instead of containing the hydrodynamic contribution, and they are colder than the bath, more
+so with the centred drag (section 2). `setFluidFluctuations(true)` gives the fluid thermal fluctuations of its
+own, at the temperature of `setTemperature()`: particles and fluid share one heat bath. It works with both
+coupling schemes; with `NVE` the particles have no random force and are thermalized only by the fluid. The
+default is off, and then nothing changes: the run is identical, bit for bit, to that of version 0.2.
+
+**Model: ghost-mode filtered fluctuating lattice Boltzmann (GMF-FLBM, reference 17).** The regularized
+collision of section 1 is already its deterministic part: it rebuilds the non-equilibrium populations from
+the second moment alone, so the ghost moments (those above the stress) leave the collision at zero, as if they
+relaxed with rate 1, and they carry no deterministic memory. The fluctuating model adds to the post-collision
+populations of each fluid node, before streaming, the random part
+
+    xi_q = w_q sum_{k=4..18} e_k(c_q)/b_k phi_k r_k,
+    phi_k = sqrt(mu rho b_k omega (2 - omega))   for the six stress modes, k = 4...9,
+    phi_k = sqrt(mu rho b_k)                     for the nine ghost modes, k = 10...18,
+
+with r_k fifteen independent normal numbers N(0, 1), rho the density of the node, omega = 1/tau and
+mu = kT/c_s^2 in lattice units. The e_k are the polynomials of the orthogonal D3Q19 basis of Lulli et al.
+(reference 18), orthogonal with the weights w_q, sum_q w_q e_k(c_q) e_l(c_q) = b_k delta_kl:
+
+| k | e_k(c) | b_k |
+|---|---|---|
+| 0 | 1 | 1 |
+| 1-3 | c_x, c_y, c_z | 1/3 |
+| 4-6 | c_x^2 - 1/3, c_y^2 - 1/3, c_z^2 - 1/3 | 2/9 |
+| 7-9 | c_x c_y, c_x c_z, c_y c_z | 1/9 |
+| 10-12 | c_y (c_x^2 - 1/3), c_z (c_x^2 - 1/3), c_x (c_y^2 - 1/3) | 2/27 |
+| 13 | c_x (c_y^2 + 2 c_z^2 - 1)/2 | 1/18 |
+| 14 | c_y (c_x^2 + 2 c_z^2 - 1)/2 | 1/18 |
+| 15 | c_z (c_x^2 + 2 c_y^2 - 1)/2 | 1/18 |
+| 16 | c_x^2 c_y^2 - c_x^2/3 - c_y^2/3 + c_z^2/6 + 1/18 | 7/162 |
+| 17 | 2/7 c_x^2 c_y^2 + c_x^2 c_z^2 - 3/7 c_x^2 + c_y^2/14 - 2/7 c_z^2 + 1/14 | 5/126 |
+| 18 | 2/5 c_x^2 c_y^2 + 2/5 c_x^2 c_z^2 + c_y^2 c_z^2 - c_x^2/10 - 2/5 c_y^2 - 2/5 c_z^2 + 1/10 | 1/30 |
+
+Each moment m_k = sum_q e_k(c_q) f_q receives phi_k r_k. The polynomials are evaluated on the velocities, so
+they do not depend on the ordering of the populations (`D3Q19::mode()` and `D3Q19::fluctuation()` in
+`openmmapi/include/internal/D3Q19.h`).
+
+**Why these amplitudes.** In equilibrium the populations of a node fluctuate independently, with
+<delta f_q delta f_r> = mu rho w_q delta_qr, so a moment has the variance <delta m_k^2> = mu rho b_k: density
+mu rho, momentum rho kT per component (equipartition for the mass rho of the node). A stress mode relaxes as
+m_k -> (1 - omega) m_k + phi_k r_k, whose stationary variance is mu rho b_k only if
+phi_k^2 = mu rho b_k [1 - (1 - omega)^2] = mu rho b_k omega (2 - omega); a ghost mode is replaced by phi_k r_k,
+so phi_k^2 = mu rho b_k (Dünweg, Schiller and Ladd, reference 19). The density and the momentum (k = 0...3)
+receive nothing: by orthogonality sum_q xi_q = 0 and sum_q c_q xi_q = 0, so the noise conserves the mass and
+the momentum of every node exactly, and the removal of the fluid momentum and the Mach number check are
+unchanged. They fluctuate through the stress, which streaming couples to them.
+
+**Units.** mu = kT/c_s^2 = 3 kT, with kT in lattice units kT dt^2/(m_c dx^2) and m_c = rho0 dx^3 the mass of a
+cell (section 3). For water at 300 K, dx = 0.5 nm and dt = 0.01 ps: m_c = 75.3 Da, kT = 1.3e-5 in lattice units
+and a thermal Mach number sqrt(kT)/c_s = 0.006. The populations are stored as deviations f - w (section 4), so
+fluctuations of order 1e-3 keep their precision.
+
+**Random numbers.** On the Reference platform the fifteen normal numbers of a node come from the generator of
+the force (OpenMM's SFMT, seeded with `setRandomNumberSeed()`, which also draws the random forces on the
+particles), node after node in index order, after the coupling of the step. The force evaluations between
+steps draw only the random forces of the next step, which come after the fluid numbers of the current step in
+any case, so they do not change the sequence. The checkpoint of the force (`createCheckpoint()`) contains the
+state of the generator, so a restarted run is identical to an uninterrupted one. The GPU platforms will draw
+the numbers of the fluid from OpenMM's random numbers of the Context, as they do for the particles; until then
+they refuse the fluctuations with an error when the Context is created.
+
+**Walls.** The halfway bounce-back of the solid nodes (section 1) is a permutation of populations: it neither
+dissipates nor needs noise, and it is unchanged. Walls that also exchange thermal fluctuations with the fluid
+(walls at the temperature of the bath, with a thermal accommodation coefficient) are a planned extension.
+
+**Tests** (`tests/TestLBMFluctuations.h`).
+- A lattice of a single node, which streams every population back to itself: mass and momentum stay those of the
+  start to 1e-15, and over 20000 steps the moments k = 4...18 have the variance mu b_k within 5% and are
+  uncorrelated with each other, for tau = 1 (new values at every step) and tau = 0.8 (stress modes with
+  memory).
+- A fluid at rest on an 8x8x8 lattice, after 300 steps: the variances of the density, of the momentum and of
+  the moments k = 4...18 of a node are mu rho, rho kT and mu rho b_k within 5%, for tau = 0.8 and 2.5; the total
+  mass and momentum are conserved to 1e-13.
+- With the fluctuations switched on at zero temperature the run is identical, bit for bit, to the run without
+  them; runs with the same seed are identical, also with force evaluations between steps; a different seed
+  gives a different run; a run restarted from the checkpoints is identical to the uninterrupted one; with the
+  `NVE` scheme a fluctuating fluid sets particles at rest in motion.
+
 ## References
 
 1. J. Latt and B. Chopard, Math. Comput. Simul. 72, 165 (2006): regularized collision.
@@ -651,3 +735,9 @@ spacing, the lattice time step and the relaxation time, in the style of
     integrators for Langevin equations.
 16. A. Kassen, V. Shankar and A. L. Fogelson, Int. J. High Perform. Comput. Appl. 36, 443 (2022): a
     fine-grained parallelization of the immersed boundary method.
+17. M. Lauricella, A. Montessori, A. Tiribocchi and S. Succi, J. Chem. Phys. 164, 194905 (2026): ghost-mode
+    filtered fluctuating lattice Boltzmann method.
+18. M. Lulli, L. Biferale, G. Falcucci, M. Sbragaglia, D. Yang and X. Shan, Phys. Rev. E 109, 045304 (2024):
+    orthogonal basis of D3Q19.
+19. B. Dünweg, U. D. Schiller and A. J. C. Ladd, Phys. Rev. E 76, 036704 (2007): statistical mechanics of the
+    fluctuating lattice Boltzmann equation.

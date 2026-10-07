@@ -183,6 +183,8 @@ public:
     void setCouplingScheme(CouplingScheme scheme);
     DragScheme getDragScheme() const;
     void setDragScheme(DragScheme scheme);
+    bool getFluidFluctuations() const;
+    void setFluidFluctuations(bool fluctuations);
     int getRandomNumberSeed() const;
     void setRandomNumberSeed(int seed);
     OpenMM::Vec3 getBodyAcceleration() const;

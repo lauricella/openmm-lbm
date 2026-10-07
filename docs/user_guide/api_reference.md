@@ -39,6 +39,7 @@ has units.
 | `addParticle(particle)`, `setParticle(index, particle)` | particle indices | none | no |
 | `setCouplingScheme(scheme)` | | `EulerMaruyama` | yes |
 | `setDragScheme(scheme)` | | `Explicit` | no |
+| `setFluidFluctuations(fluctuations)` | | `False` | no |
 | `setFriction(friction)` | 1/ps | 1.0 | yes |
 | `setTemperature(temperature)` | K | 300 | yes |
 | `setRandomNumberSeed(seed)` | | 0 | used only at creation |
@@ -260,6 +261,25 @@ reporter = LBMTemperatureReporter('temperature.txt', 1000, force)
 # simulation.reporters.append(reporter)
 ```
 
+### `setFluidFluctuations(fluctuations)`, `getFluidFluctuations()`
+
+Whether the fluid has thermal fluctuations of its own, at the temperature of
+[`setTemperature()`](#settemperaturetemperature-gettemperature). The default is `False`: the fluid receives
+thermal energy only from the reaction to the random forces on the coupled particles
+([limitations](README.md#limitations-of-the-model)). With `True`, every collision adds to the populations of
+each node a random part that conserves its mass and momentum and gives the stress and the higher moments their
+equilibrium fluctuations (ghost-mode filtered fluctuating lattice Boltzmann,
+[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-the-reference-platform-cuda-opencl-and-hip-to-come),
+section 7). It works with both coupling schemes: with `NVE` the particles have no random force and are
+thermalized by the fluid only. The random numbers of the fluid come from the seed of
+[`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed). It is fixed when the Context is
+created. **For now only the Reference platform supports it**: the CUDA, OpenCL and HIP platforms raise an
+error when the Context is created.
+
+```python
+force.setFluidFluctuations(True)
+```
+
 ### `setFriction(friction)`, `getFriction()`
 
 Friction coefficient gamma of the coupling, in 1/ps. The default is 1/ps. It must not be negative.
@@ -267,12 +287,14 @@ Typical values for coarse-grained beads are 1 to 10/ps; keep friction*dt well be
 
 ### `setTemperature(temperature)`, `getTemperature()`
 
-Temperature of the random force on the coupled particles, in K. The default is 300 K. It must not be
-negative.
+Temperature of the random force on the coupled particles and, with
+[fluid fluctuations](#setfluidfluctuationsfluctuations-getfluidfluctuations), of the fluid, in K: particles and
+fluid share one heat bath. The default is 300 K. It must not be negative.
 
 ### `setRandomNumberSeed(seed)`, `getRandomNumberSeed()`
 
-Seed of the random force. With 0, the default, a different seed is chosen for every Context. Two
+Seed of the random force, and of the fluctuations of the fluid when they are switched on. With 0, the
+default, a different seed is chosen for every Context. Two
 simulations with different seeds have different random forces. On the Reference platform the random
 force has its own generator, so the same seed reproduces a simulation. On the CUDA, OpenCL and HIP
 platforms it uses OpenMM's generator, which has a single seed per Context: a component that uses it with a
@@ -358,10 +380,11 @@ bytes b'LBMCKPT1'
 ```
 
 Errors: a checkpoint written on another platform, with another precision, for a different grid size,
-number of coupled particles or drag scheme, by a newer version of the plugin, or data that are not a
+number of coupled particles, drag scheme or switch of the fluid fluctuations, by a newer version of the plugin, or data that are not a
 checkpoint or are damaged or truncated, make `loadCheckpoint()` raise an exception
 ([troubleshooting](troubleshooting.md)). A checkpoint of version 0.1.0 has no drag scheme in its header,
-and loads only in a Context with the explicit drag.
+and loads only in a Context with the explicit drag; checkpoints of versions 0.1 and 0.2 load only in a Context
+without fluid fluctuations.
 
 ### `openmmlbm.saveCheckpoint(file, context, force)`, `openmmlbm.loadCheckpoint(file, context, force)`
 
@@ -392,12 +415,12 @@ force.updateParametersInContext(context)
 It updates:
 
 - the body acceleration;
-- the friction, the temperature and the coupling scheme;
+- the friction, the temperature (also of a fluctuating fluid) and the coupling scheme;
 - the frequency of the removal of the fluid momentum;
 - the frequency and the limit of the Mach number check.
 
-The grid size, the fluid density and viscosity, the solid nodes, the set of coupled particles and the
-drag scheme cannot be changed this way: the method raises an error if they differ from those of the Context. The
+The grid size, the fluid density and viscosity, the solid nodes, the set of coupled particles, the
+drag scheme and the fluid fluctuations cannot be changed this way: the method raises an error if they differ from those of the Context. The
 initial velocity and the random seed are used only when the Context is created. To change any of
 these, create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()` if
 the grid is the same. `Context.reinitialize()` also restarts the fluid from its initial state.
@@ -427,9 +450,10 @@ that the integrator evaluates; by default the integrator evaluates all groups.
 
 `openmm.XmlSerializer` saves and loads an `LBMForce`, alone or as part of a System, with all its
 parameters: grid, fluid properties, friction, temperature, random number seed, body acceleration, initial
-velocity, frequencies, Mach limit, coupling and drag schemes, solid nodes, coupled particles, force group
-and name. The fluid of a Context is not part of it. The XML has version 4; the versions 1 to 3 written by
-version 0.1.0 load with the explicit drag, while version 0.1.0 cannot read version 4. Import `openmmlbm` before
+velocity, frequencies, Mach limit, coupling and drag schemes, fluid fluctuations, solid nodes, coupled
+particles, force group and name. The fluid of a Context is not part of it. The XML has version 5; the
+versions 1 to 3 written by version 0.1.0 load with the explicit drag, and versions 1 to 4 (versions 0.1 and
+0.2 of the plugin) without fluid fluctuations, while older versions of the plugin cannot read newer XML. Import `openmmlbm` before
 deserializing. A force deserialized on its own is returned as a generic `openmm.Force`; obtain the
 `LBMForce` with `LBMForce.cast()` (see the [serialization example](examples.md#serialization)).
 

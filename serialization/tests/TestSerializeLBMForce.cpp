@@ -37,6 +37,7 @@ void testSerialization() {
     force.setMachNumberLimit(0.2);
     force.setCouplingScheme(LBMForce::NVE);
     force.setDragScheme(LBMForce::Centered);
+    force.setFluidFluctuations(true);
     force.setSolidNodes(vector<int>({0, 7, 42}));
     force.setBodyAcceleration(Vec3(0.1, 0.2, 0.3));
     force.setInitialFluidVelocity(Vec3(-0.1, 0.0, 0.05));
@@ -71,6 +72,7 @@ void testSerialization() {
     ASSERT_EQUAL(force.getMachNumberLimit(), force2.getMachNumberLimit());
     ASSERT_EQUAL(force.getCouplingScheme(), force2.getCouplingScheme());
     ASSERT_EQUAL(force.getDragScheme(), force2.getDragScheme());
+    ASSERT_EQUAL(force.getFluidFluctuations(), force2.getFluidFluctuations());
     vector<int> solid1, solid2;
     force.getSolidNodes(solid1);
     force2.getSolidNodes(solid2);
@@ -82,18 +84,31 @@ void testSerialization() {
         ASSERT_EQUAL(force.getParticle(i), force2.getParticle(i));
     delete copy;
 
-    // A force written before the drag scheme existed (version 3) has the explicit drag.
+    // A force written before the fluid fluctuations existed (version 4) has none, and one written before the drag
+    // scheme existed (version 3) has the explicit drag.
 
     string xml = buffer.str();
-    size_t version = xml.find("version=\"4\"");
+    size_t fluctuations = xml.find(" fluidFluctuations=\"1\"");
+    ASSERT(fluctuations != string::npos);
+    xml.erase(fluctuations, 22);
+    size_t version = xml.find("version=\"5\"");
     ASSERT(version != string::npos);
-    xml.replace(version, 11, "version=\"3\"");
+    xml.replace(version, 11, "version=\"4\"");
+    stringstream buffer4(xml);
+    LBMForce* copy4 = XmlSerializer::deserialize<LBMForce>(buffer4);
+    ASSERT(!copy4->getFluidFluctuations());
+    ASSERT_EQUAL(LBMForce::Centered, copy4->getDragScheme());
+    delete copy4;
     size_t drag = xml.find(" dragScheme=\"1\"");
     ASSERT(drag != string::npos);
     xml.erase(drag, 15);
+    version = xml.find("version=\"4\"");
+    ASSERT(version != string::npos);
+    xml.replace(version, 11, "version=\"3\"");
     stringstream oldBuffer(xml);
     LBMForce* oldCopy = XmlSerializer::deserialize<LBMForce>(oldBuffer);
     ASSERT_EQUAL(LBMForce::Explicit, oldCopy->getDragScheme());
+    ASSERT(!oldCopy->getFluidFluctuations());
     ASSERT_EQUAL(force.getCouplingScheme(), oldCopy->getCouplingScheme());
     delete oldCopy;
 }

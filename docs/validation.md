@@ -158,6 +158,27 @@ samples of the same system (seed 7) it gives 293.98 K, the same as the full-step
 (`testFullStepKineticEnergy` checks it on every platform; `docs/theory.md`, section 2). Before the change of
 the coupling forces between steps to those of the next step it read 359 K.
 
+## Fluctuating fluid (`tests/TestLBMFluctuations.h`, Reference platform)
+
+The GPU platforms do not support the fluctuations yet; their test checks that they refuse them when the Context
+is created. mu = 3 kT in lattice units (`docs/theory.md`, section 7); T = 300 K, dx = 0.5 nm, dt = 0.01 ps and
+the density of water give kT = 1.3e-5.
+
+| Test | Checks | Tolerance |
+|---|---|---|
+| Basis | the polynomials e_k of the test, written independently of the plugin, are orthogonal with the norms b_k | 1e-15 |
+| Single node | a 1x1x1 lattice streams every population back to its node, so the state is the post-collision state: density and momentum unchanged at every step; over 20000 steps the moments k = 4...18 have the variance mu b_k and are uncorrelated, for tau = 1 and 0.8 | 1e-15; 0.05 (statistical error 0.01) |
+| Equilibrium | fluid at rest, 8x8x8, 300 steps of transient, 300 samples every 5 steps: variances of density, momentum and moments k = 4...18 of a node equal to mu rho, rho kT and mu rho b_k, for tau = 0.8 and 2.5; total mass and momentum conserved | 0.05; 1e-13 |
+| Zero temperature | with walls, body force and particles with the NVE scheme, the run with the fluctuations switched on at T = 0 equals the run without them | bitwise |
+| Reproducibility | same seed: identical runs, also with force evaluations between steps; another seed: a different run | bitwise |
+| Restart | with coupled particles at 300 K and seed 0, a run restarted from the checkpoints of OpenMM and of the force equals the uninterrupted run | bitwise |
+| NVE | with the NVE scheme, particles at rest are set in motion by a fluctuating fluid, and stay at rest without fluctuations | exact |
+| Parameters | `updateParametersInContext()` changes the temperature and refuses to switch the fluctuations; a checkpoint is refused by a Context with the fluctuations switched differently | exceptions |
+
+**Measured** (Reference, OpenMM 8.6.1): all pass. Without fluctuations, and with fluctuations at zero
+temperature, the fluid, positions and velocities after 40 steps with walls, body force and six coupled particles
+(explicit and centred drag, EM and NVE) are identical, bit for bit, to those of commit `85029a7` (version 0.2.1 with a change of the build only).
+
 ## Equivalence with the reference implementation: coupled particles (E0)
 
 The Reference platform was compared with the validation campaign of the reference CUDA library (version

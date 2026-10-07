@@ -43,6 +43,10 @@ public:
     double friction, kT;
     /** Time discretization of the drag, fixed when the Context is created. */
     LBMForce::DragScheme dragScheme;
+    /** True if the fluid has thermal fluctuations, fixed when the Context is created, and their thermal energy kT
+        (kJ/mol): the temperature of the force with fluctuations, also with the NVE scheme, and 0 without. */
+    bool fluidFluctuations;
+    double fluidKT;
     int randomNumberSeed, momentumRemovalFrequency;
     /** Frequency (steps) of the Mach number check, 0 to disable, and the largest Mach number allowed. */
     int machCheckFrequency;

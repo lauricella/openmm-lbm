@@ -74,8 +74,10 @@ so that the fluid as a whole stays at rest ([lattice](lattice.md#removal-of-the-
 **System.** In OpenMM, the description of what is simulated: particles with their masses, the periodic
 box, and the forces.
 
-**Temperature of the fluid.** The fluid of this plugin has no thermal fluctuations of its own: only the
-coupled particles receive a random force ([limitations](README.md#limitations-of-the-model)).
+**Temperature of the fluid.** By default the fluid of this plugin has no thermal fluctuations of its own: only
+the coupled particles receive a random force ([limitations](README.md#limitations-of-the-model)). With
+`setFluidFluctuations(True)` (for now on the Reference platform only) the fluid fluctuates at the temperature of
+the force.
 
 **Time step (dt).** The step of the integrator, which is also the step of the lattice: the fluid advances
 once per integration step.

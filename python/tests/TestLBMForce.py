@@ -197,6 +197,36 @@ def test_serialization():
     assert force2.getNumParticles() == 10
 
 
+def test_fluid_fluctuations():
+    # Off by default; switched on, the fluid at rest starts to move, and the setting survives serialization.
+    import numpy as np
+    system, force, positions = create_system(num_particles=1)
+    assert not force.getFluidFluctuations()
+    force.setFluidFluctuations(True)
+    assert force.getFluidFluctuations()
+    copy = LBMForce.cast(mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(force)))
+    assert copy.getFluidFluctuations()
+    integrator = mm.VerletIntegrator(0.01)
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+    context.setPositions(positions[:1])
+    integrator.step(5)
+    density, velocity = force.getFluidFields(context)
+    assert np.std([v.value_in_unit(unit.nanometer/unit.picosecond) for v in velocity]) > 0
+
+
+@pytest.mark.parametrize('name', ['CUDA', 'OpenCL', 'HIP'])
+def test_fluid_fluctuations_refused(name):
+    # The GPU platforms refuse the fluid fluctuations until they support them.
+    try:
+        platform = mm.Platform.getPlatformByName(name)
+    except Exception:
+        pytest.skip('the %s platform is not available' % name)
+    system, force, positions = create_system(num_particles=1)
+    force.setFluidFluctuations(True)
+    with pytest.raises(mm.OpenMMException, match='not yet available'):
+        mm.Context(system, mm.VerletIntegrator(0.01), platform)
+
+
 @pytest.mark.parametrize('name,precision,walls', [(name, precision, walls) for name in ('CUDA', 'OpenCL', 'HIP')
                                                   for precision in ('mixed', 'double') for walls in (False, True)],
                          ids=lambda value: {False: 'periodic', True: 'walls'}.get(value, value))

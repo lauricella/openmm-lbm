@@ -19,7 +19,8 @@ namespace LBMPlugin {
 
 /**
  * The Reference implementation of the lattice Boltzmann fluid and of its coupling to the particles: plain
- * loops in double precision.  It is the correctness reference for the other platforms.
+ * loops in double precision.  It is the correctness reference for the other platforms.  The random numbers of the
+ * particles and of the fluctuating fluid come from one generator owned by the kernel.
  *
  * One lattice step (advanceFluid) has the same structure as on the other platforms:
  *  1. moments: density, momentum, non-equilibrium second moment and body force at every node;
@@ -101,7 +102,9 @@ private:
     OpenMM::Vec3 wallMomentum;
     /** Reaction of the coupled particles on each node (3 per node), in lattice units. */
     std::vector<double> reaction;
-    /** Generator of the random force, owned by the kernel so that its sequence does not depend on other forces. */
+    /** Generator of the random force and of the fluctuations of the fluid, owned by the kernel so that its sequence
+        does not depend on other forces.  In a step the fluid draws its numbers after the coupling, so the sequence
+        does not depend on the force evaluations between steps either. */
     OpenMM_SFMT::SFMT sfmt;
     /** The Box-Muller transform yields two Gaussian numbers: the second is kept for the next call. */
     bool hasStoredGaussian;
