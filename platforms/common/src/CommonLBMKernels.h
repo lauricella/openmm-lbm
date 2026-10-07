@@ -116,6 +116,9 @@ private:
     /** Centered drag: velocity of every coupled particle with half the other forces, v(t - dt/2) + dt Fc/(2m), and
         its random force (lattice units, 3 components of numCoupled each). */
     OpenMM::ComputeArray knownVelocity, randomForce;
+    /** Fluctuating fluid: the 19x15 coefficients w_q e_k(c_q)/sqrt(b_k), k = 4...18, that turn the normal numbers of
+        a node into the random part of its populations (docs/theory.md, section 7). */
+    OpenMM::ComputeArray fluctuationBasis;
     OpenMM::ComputeSort sort;
     OpenMM::ComputeKernel computeMomentsKernel, sumMomentumKernel, centerVelocityKernel, removeMomentumKernel;
     OpenMM::ComputeKernel collideKernel, bounceBackKernel, maxSpeedKernel;

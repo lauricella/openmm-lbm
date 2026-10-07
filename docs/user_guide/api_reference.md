@@ -273,8 +273,8 @@ equilibrium fluctuations (ghost-mode filtered fluctuating lattice Boltzmann,
 section 7). It works with both coupling schemes: with `NVE` the particles have no random force and are
 thermalized by the fluid only. The random numbers of the fluid come from the seed of
 [`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed). It is fixed when the Context is
-created. **For now only the Reference platform supports it**: the CUDA, OpenCL and HIP platforms raise an
-error when the Context is created.
+created. On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's generator, which needs
+64 bytes per lattice node; a step costs about 30% to 40% more on an NVIDIA A100.
 
 ```python
 force.setFluidFluctuations(True)

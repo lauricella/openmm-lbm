@@ -216,8 +216,8 @@ velocity ([validation](../validation.md)):
 With a fluid much heavier than the particles both give T
 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), temperature with a fluid
 without fluctuations). A fluid with thermal fluctuations
-([`setFluidFluctuations()`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations), for now on
-the Reference platform only) should give T with both; its validation with particles is to come.
+([`setFluidFluctuations()`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)) should give
+T with both; its validation with particles is to come.
 
 ## Velocity of the fluid
 

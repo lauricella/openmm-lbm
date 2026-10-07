@@ -6,14 +6,14 @@ versions the API may still change.
 ## Unreleased
 
 ### Added
-- Thermal fluctuations of the fluid, `setFluidFluctuations(true)`, off by default, on the Reference platform (the
-  CUDA, OpenCL and HIP platforms refuse them for now): the ghost-mode filtered fluctuating lattice Boltzmann
+- Thermal fluctuations of the fluid, `setFluidFluctuations(true)`, off by default, on all platforms: the ghost-mode filtered fluctuating lattice Boltzmann
   model (J. Chem. Phys. 164, 194905, 2026) on the orthogonal D3Q19 basis of Lulli et al. (Phys. Rev. E 109,
   045304, 2024). Every collision adds to the populations of each node a random part that conserves its mass and
   momentum, with the equilibrium variance on the six stress modes, which relax with omega, and on the nine ghost
   modes, which relax with rate 1. The fluid fluctuates at the temperature of `setTemperature()`, also with the
-  `NVE` scheme. Without fluctuations, or at zero temperature, the run is identical, bit for bit, to that of
-  version 0.2.1. Serialization version 5 and checkpoint version 3 record the switch; older files are read
+  `NVE` scheme. The random numbers come from the generator of the force on the Reference platform and from
+  OpenMM's generator on the CUDA, OpenCL and HIP platforms (64 bytes per node). Without fluctuations, or at zero
+  temperature, the run is identical, bit for bit, to that of version 0.2.1. Serialization version 5 and checkpoint version 3 record the switch; older files are read
   without fluctuations. `docs/theory.md`, section 7.
 
 ### Changed

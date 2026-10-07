@@ -162,12 +162,17 @@ KERNEL void removeFluidMomentum(GLOBAL const mixed* RESTRICT densityDeviation, G
  * Regularized collision with Guo forcing and push streaming,
  *   f_q(x + c_q) = feq_q(rho, u) + (1 - omega) fneq_q(Pi_neq) + S_q(u, F)/2,  u = (j + F/2)/rho,
  * with F = rho*g plus, with coupled particles (HAS_COUPLED_PARTICLES), the reaction of the particles of the node,
- * stored as the deviation f_q - w_q.  Each population is computed from the moments of its own node only, so the
+ * stored as the deviation f_q - w_q.  A fluctuating fluid (FLUID_FLUCTUATIONS) adds a random part that conserves
+ * the mass and momentum of the node.  Each population is computed from the moments of its own node only, so the
  * populations can be overwritten in place: every (q, target node) is written by exactly one thread.
  */
 KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT isFluid, GLOBAL const mixed* RESTRICT densityDeviation,
         GLOBAL const mixed* RESTRICT momentum, GLOBAL const mixed* RESTRICT piNeq, GLOBAL const mixed* RESTRICT cellReaction,
-        mixed omega, mixed gx, mixed gy, mixed gz) {
+        mixed omega, mixed gx, mixed gy, mixed gz
+#ifdef FLUID_FLUCTUATIONS
+        , GLOBAL const float4* RESTRICT random, GLOBAL const mixed* RESTRICT fluctuationBasis, mixed mu, int randomIndex
+#endif
+        ) {
     DECLARE_D3Q19_VELOCITIES
     for (int node = GLOBAL_ID; node < NUM_NODES; node += GLOBAL_SIZE) {
 #ifdef HAS_SOLID_NODES
@@ -190,6 +195,31 @@ KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRIC
         mixed uf = ux*fx + uy*fy + uz*fz;
         mixed pxx = piNeq[node], pyy = piNeq[NUM_NODES+node], pzz = piNeq[2*NUM_NODES+node];
         mixed pxy = piNeq[3*NUM_NODES+node], pxz = piNeq[4*NUM_NODES+node], pyz = piNeq[5*NUM_NODES+node];
+#ifdef FLUID_FLUCTUATIONS
+        // Random part xi_q = sum_m fluctuationBasis[q*15 + m] a_m r_m (docs/theory.md, section 7): the normal numbers
+        // r_m of the node are the 16 components of random[randomIndex + 4*node ... + 3], of which the first 6 go to
+        // the stress modes, with amplitude sqrt(mu rho omega (2 - omega)), and the next 9 to the ghost modes, with
+        // amplitude sqrt(mu rho).  At zero temperature (mu = 0) nothing is added and no numbers are drawn.
+        bool fluctuate = (mu > 0);
+        mixed xi[19];
+        for (int q = 0; q < 19; q++)
+            xi[q] = 0;
+        if (fluctuate) {
+            mixed stressAmplitude = sqrt(mu*rho*omega*(2-omega)), ghostAmplitude = sqrt(mu*rho);
+            for (int b = 0; b < 4; b++) {
+                float4 r4 = random[randomIndex + 4*node + b];
+                float r[4] = {r4.x, r4.y, r4.z, r4.w};
+                for (int c = 0; c < 4; c++) {
+                    int m = 4*b + c;
+                    if (m < 15) {
+                        mixed a = (m < 6 ? stressAmplitude : ghostAmplitude)*r[c];
+                        for (int q = 0; q < 19; q++)
+                            xi[q] += fluctuationBasis[q*15+m]*a;
+                    }
+                }
+            }
+        }
+#endif
         for (int q = 0; q < 19; q++) {
             mixed w = latticeWeight(q);
             mixed cu = cx[q]*ux + cy[q]*uy + cz[q]*uz;
@@ -199,7 +229,12 @@ KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRIC
             mixed cf = cx[q]*fx + cy[q]*fy + cz[q]*fz;
             mixed s = w*(3.0f*(cf - uf) + 9.0f*cu*cf);
             int target = (i+cx[q]+NX)%NX + NX*((j+cy[q]+NY)%NY + NY*((k+cz[q]+NZ)%NZ));
-            f[q*NUM_NODES+target] = dfeq + (1-omega)*fneq + 0.5f*s;
+            mixed value = dfeq + (1-omega)*fneq + 0.5f*s;
+#ifdef FLUID_FLUCTUATIONS
+            if (fluctuate)
+                value += xi[q];
+#endif
+            f[q*NUM_NODES+target] = value;
         }
     }
 }

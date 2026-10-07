@@ -158,10 +158,11 @@ samples of the same system (seed 7) it gives 293.98 K, the same as the full-step
 (`testFullStepKineticEnergy` checks it on every platform; `docs/theory.md`, section 2). Before the change of
 the coupling forces between steps to those of the next step it read 359 K.
 
-## Fluctuating fluid (`tests/TestLBMFluctuations.h`, Reference platform)
+## Fluctuating fluid (`tests/TestLBMFluctuations.h`, all platforms)
 
-The GPU platforms do not support the fluctuations yet; their test checks that they refuse them when the Context
-is created. mu = 3 kT in lattice units (`docs/theory.md`, section 7); T = 300 K, dx = 0.5 nm, dt = 0.01 ps and
+The platforms draw different random numbers (the generator of the force on the Reference platform, OpenMM's
+on the others), so they are compared through the statistics; the tolerances of mass and momentum follow the
+precision (1e-15 and 1e-13 in double and mixed precision, 2e-6 and 1e-5 in single). mu = 3 kT in lattice units (`docs/theory.md`, section 7); T = 300 K, dx = 0.5 nm, dt = 0.01 ps and
 the density of water give kT = 1.3e-5.
 
 | Test | Checks | Tolerance |
@@ -175,7 +176,13 @@ the density of water give kT = 1.3e-5.
 | NVE | with the NVE scheme, particles at rest are set in motion by a fluctuating fluid, and stay at rest without fluctuations | exact |
 | Parameters | `updateParametersInContext()` changes the temperature and refuses to switch the fluctuations; a checkpoint is refused by a Context with the fluctuations switched differently | exceptions |
 
-**Measured** (Reference, OpenMM 8.6.1): all pass. Without fluctuations, and with fluctuations at zero
+**Measured** (OpenMM 8.6.1 and 8.3.1; Reference, and CUDA and OpenCL on an NVIDIA A100 in the three
+precisions): all pass. A first version of the GPU kernel enlarged OpenMM's buffer of random numbers in the first
+step: with OpenMM 8.3.1 the restart test then failed on CUDA and OpenCL in all precisions (the restarted fluid
+was a different realization, with populations such as 5.4e-3 against 5.2e-4), because OpenMM's checkpoint reads the buffer back with the size it has in the
+new Context; with 8.6.1 it passed. The buffer is now enlarged when the Context is created
+(`docs/theory.md`, section 7). Cost of the fluctuations on the A100 (CUDA, mixed precision): 59.8 -> 76.6,
+168.9 -> 240.4 and 1115.8 -> 1590.4 us per step on 32^3, 64^3 and 128^3 nodes. Without fluctuations, and with fluctuations at zero
 temperature, the fluid, positions and velocities after 40 steps with walls, body force and six coupled particles
 (explicit and centred drag, EM and NVE) are identical, bit for bit, to those of commit `85029a7` (version 0.2.1 with a change of the build only).
 

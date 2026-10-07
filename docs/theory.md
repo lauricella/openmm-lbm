@@ -626,7 +626,7 @@ and dt = 0.01 ps gives Ma = 5e-3.
 spacing, the lattice time step and the relaxation time, in the style of
 `NonbondedForce::getPMEParametersInContext()`.
 
-## 7. Fluctuating fluid (implemented on the Reference platform; CUDA, OpenCL and HIP to come)
+## 7. Fluctuating fluid (implemented on all platforms)
 
 Without fluctuations the fluid receives thermal energy only from the reaction to the random forces on the
 coupled particles. The particles then miss the thermal motion of the solvent: their diffusion coefficient is
@@ -688,22 +688,34 @@ the force (OpenMM's SFMT, seeded with `setRandomNumberSeed()`, which also draws 
 particles), node after node in index order, after the coupling of the step. The force evaluations between
 steps draw only the random forces of the next step, which come after the fluid numbers of the current step in
 any case, so they do not change the sequence. The checkpoint of the force (`createCheckpoint()`) contains the
-state of the generator, so a restarted run is identical to an uninterrupted one. The GPU platforms will draw
-the numbers of the fluid from OpenMM's random numbers of the Context, as they do for the particles; until then
-they refuse the fluctuations with an error when the Context is created.
+state of the generator, so a restarted run is identical to an uninterrupted one. The CUDA, OpenCL and HIP
+platforms draw them from OpenMM's random numbers of the Context, as they do for the particles: in every step,
+after those of the particles, four float4 per node (`IntegrationUtilities::prepareRandomNumbers(4*numNodes)`,
+16 normal numbers of which 15 are used, in single precision whatever the precision of the platform), with the
+coefficients w_q e_k(c_q)/sqrt(b_k) in an array of the kernel; OpenMM's checkpoints contain the state of that
+generator. The buffer of the random numbers grows to 64 bytes per node, already when the Context is created:
+OpenMM's checkpoints write the buffer as it is but read it back with the size it has in the Context that loads
+them, so a Context created for a restart must have the full size before the first step (with OpenMM 8.3.1, a
+buffer grown only in the first step made the restart differ from the uninterrupted run; with 8.6.1 it did not).
+At zero temperature no numbers are drawn and nothing is added. Cost on an NVIDIA A100 (CUDA, mixed precision,
+fluid with one coupled particle): 60, 169 and 1116 us per step without fluctuations and 77, 240 and 1590 us with
+them on lattices of 32^3, 64^3 and 128^3 nodes, that is 28% to 43% more; most of it is the generation, writing
+and reading of the random numbers in OpenMM's buffer. The platforms therefore draw different numbers, as for the particles: they agree
+with each other through the statistics of the tests below, and without fluctuations or at zero temperature to
+rounding.
 
 **Walls.** The halfway bounce-back of the solid nodes (section 1) is a permutation of populations: it neither
 dissipates nor needs noise, and it is unchanged. Walls that also exchange thermal fluctuations with the fluid
 (walls at the temperature of the bath, with a thermal accommodation coefficient) are a planned extension.
 
-**Tests** (`tests/TestLBMFluctuations.h`).
+**Tests** (`tests/TestLBMFluctuations.h`, all platforms and precisions).
 - A lattice of a single node, which streams every population back to itself: mass and momentum stay those of the
-  start to 1e-15, and over 20000 steps the moments k = 4...18 have the variance mu b_k within 5% and are
+  start to 1e-15 (2e-6 in single precision, the resolution of the stored populations), and over 20000 steps the moments k = 4...18 have the variance mu b_k within 5% and are
   uncorrelated with each other, for tau = 1 (new values at every step) and tau = 0.8 (stress modes with
   memory).
 - A fluid at rest on an 8x8x8 lattice, after 300 steps: the variances of the density, of the momentum and of
   the moments k = 4...18 of a node are mu rho, rho kT and mu rho b_k within 5%, for tau = 0.8 and 2.5; the total
-  mass and momentum are conserved to 1e-13.
+  mass and momentum are conserved to 1e-13 (1e-5 in single precision).
 - With the fluctuations switched on at zero temperature the run is identical, bit for bit, to the run without
   them; runs with the same seed are identical, also with force evaluations between steps; a different seed
   gives a different run; a run restarted from the checkpoints is identical to the uninterrupted one; with the

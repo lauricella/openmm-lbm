@@ -23,9 +23,9 @@ Know these before using the plugin for a study:
   below the set temperature: with the explicit drag (the default) 1-2% with friction x dt = 0.1, about 13%
   with a very large friction (100/ps); with the centred drag more, 7% for SOD1 at friction x dt = 0.1
   ([choosing the drag](lattice.md#choosing-the-drag)). See [validation.md](../validation.md). A fluctuating lattice Boltzmann fluid, which removes
-  these limits, is available on the Reference platform with
+  these limits, is available with
   [`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations);
-  on the CUDA, OpenCL and HIP platforms it is in progress, and its validation with particles is to come.
+  its validation with particles is to come.
 - **Nearest-node coupling.** Each particle is coupled to the nearest lattice node, so the forces jump when
   a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
   lattice spacing and on tau.
@@ -67,12 +67,11 @@ Know these before using the plugin for a study:
 | Solid nodes (`setSolidNodes()`) and the force of the fluid on the walls (`getWallForce()`) | yes | yes |
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
-| Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | not yet: error at Context creation |
+| Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |
 
-Every feature runs on every platform, except the fluctuations of the fluid, which are being ported to the GPU
-platforms. The random forces of the Reference platform come from a generator of
-the force, those of the GPU platforms from OpenMM's generator: with the same seed the two are different
-sequences with the same statistics. The coupling is dissipative: on every platform it adds no energy.
+Every feature runs on every platform. The random forces of the Reference platform, and the fluctuations of the fluid, come from a
+generator of the force, those of the GPU platforms from OpenMM's generator: with the same seed the two are
+different sequences with the same statistics. The coupling is dissipative: on every platform it adds no energy.
 
 ## Conventions
 

@@ -9,8 +9,9 @@
  * Tests of the fluctuating fluid (setFluidFluctuations(), docs/theory.md, section 7): the random part of the
  * collision conserves mass and momentum and gives every moment its equilibrium variance, on a single node and in a
  * fluid at rest; without fluctuations or at zero temperature nothing changes; runs are reproducible and restart
- * exactly; the NVE scheme with a fluctuating fluid; parameters and checkpoints.  Include after TestLBMFluid.h and
- * TestLBMCoupling.h.
+ * exactly; the NVE scheme with a fluctuating fluid; parameters and checkpoints.  The platforms draw different random
+ * numbers (the generator of the force on the Reference platform, OpenMM's on the others), so they are compared
+ * through the statistics.  Include after TestLBMFluid.h and TestLBMCoupling.h.
  */
 
 /**
@@ -93,7 +94,7 @@ void testFluctuationsSingleNode(Platform& platform, double tau) {
         double modes[19];
         nodeModes(state, 0, modes);
         for (int k = 0; k < 4; k++)
-            ASSERT_EQUAL_TOL(0.0, modes[k], 1e-15);
+            ASSERT_EQUAL_TOL(0.0, modes[k], getFluidTolerance(platform, 1e-15));
         if (step < numWarmup)
             continue;
         for (int k = 4; k < 19; k++)
@@ -140,8 +141,8 @@ void testFluctuationsEquilibrium(Platform& platform, double tau) {
     double mass;
     Vec3 momentum;
     totalMoments(state, mass, momentum);
-    ASSERT_EQUAL_TOL((double) numNodes, mass, 1e-13);
-    ASSERT_EQUAL_VEC(Vec3(), momentum, 1e-13);
+    ASSERT_EQUAL_TOL((double) numNodes, mass, getFluidTolerance(platform, 1e-13, 1e-5));
+    ASSERT_EQUAL_VEC(Vec3(), momentum, getFluidTolerance(platform, 1e-13, 1e-5));
     double count = (double) numSamples*numNodes;
     ASSERT_EQUAL_TOL(1.0, sum2[0]/(count*mu), 0.05);
     for (int k = 1; k < 4; k++)
@@ -326,29 +327,8 @@ void testFluctuationsParameters(Platform& platform) {
     delete system2;
 }
 
-/** A platform that does not support the fluctuations yet refuses them when the Context is created. */
-void testFluctuationsUnsupported(Platform& platform) {
-    LBMForce* force;
-    System* system = createFluidSystem(force, 4, 4, 4, 0.8);
-    force->setFluidFluctuations(true);
-    VerletIntegrator integrator(fluidDt);
-    bool thrown = false;
-    try {
-        Context context(*system, integrator, platform);
-    }
-    catch (OpenMMException& e) {
-        thrown = true;
-    }
-    ASSERT(thrown);
-    delete system;
-}
-
 void runFluctuationTests(Platform& platform) {
     testFluctuationBasis();
-    if (platform.getName() != "Reference") {
-        testFluctuationsUnsupported(platform);
-        return;
-    }
     testFluctuationsSingleNode(platform, 1.0);
     testFluctuationsSingleNode(platform, 0.8);
     testFluctuationsEquilibrium(platform, 0.8);

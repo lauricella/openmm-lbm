@@ -79,9 +79,6 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
-    if (lattice.fluidFluctuations)
-        throw OpenMMException("LBMForce: fluid fluctuations are not yet available on the " + getPlatform().getName() +
-                " platform; use the Reference platform");
     this->lattice = lattice;
     forceGroup = force.getForceGroup();
     bool centered = (lattice.dragScheme == LBMForce::Centered);
@@ -175,6 +172,25 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         cc.getIntegrationUtilities().initRandomNumberGenerator((unsigned int) lattice.randomNumberSeed);
     }
 
+    // A fluctuating fluid (docs/theory.md, section 7) draws four float4 of normal numbers per node and step from
+    // OpenMM's generator, after those of the particles, and turns 15 of them into the random part of the
+    // populations with the coefficients w_q e_k(c_q)/sqrt(b_k) of the orthogonal basis, k = 4...18.
+
+    if (lattice.fluidFluctuations) {
+        cc.getIntegrationUtilities().initRandomNumberGenerator((unsigned int) lattice.randomNumberSeed);
+        vector<double> basis(D3Q19::numVelocities*15);
+        for (int q = 0; q < D3Q19::numVelocities; q++)
+            for (int m = 0; m < 15; m++)
+                basis[q*15+m] = D3Q19::w[q]*D3Q19::mode(m+4, q)/sqrt(D3Q19::modeNorm[m+4]);
+        fluctuationBasis.initialize(cc, basis.size(), elementSize, "lbmFluctuationBasis");
+        fluctuationBasis.upload(basis, true);
+
+        // The buffer of the random numbers grows to the numbers of a step now, rather than in the first step.  The
+        // checkpoints of OpenMM write the buffer as it is but read it back with the size it has in the Context that
+        // loads them (OpenMM 8.3), so a Context created to load a checkpoint must already have the same size.
+        cc.getIntegrationUtilities().prepareRandomNumbers(4*numNodes);
+    }
+
     // Compile the kernels.
 
     map<string, string> defines;
@@ -193,6 +209,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     }
     if (numCoupled > 0)
         defines["HAS_COUPLED_PARTICLES"] = "1";
+    if (lattice.fluidFluctuations)
+        defines["FLUID_FLUCTUATIONS"] = "1";
     ComputeProgram program = cc.compileProgram(CommonLBMKernelSources::lbmFluid, defines);
     computeMomentsKernel = program->createKernel("computeFluidMoments");
     computeMomentsKernel->addArg(populations);
@@ -221,6 +239,12 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     collideKernel->addArg(cellReaction);
     for (int i = 0; i < 4; i++)
         collideKernel->addArg();        // omega and the body acceleration, set by setFluidParameters()
+    if (lattice.fluidFluctuations) {
+        collideKernel->addArg(cc.getIntegrationUtilities().getRandom());
+        collideKernel->addArg(fluctuationBasis);
+        collideKernel->addArg();        // mu = kT/cs^2, set by setFluidParameters()
+        collideKernel->addArg(0);       // index of the random numbers, set in every step
+    }
     if (numSolidNodes > 0) {
         bounceBackKernel = program->createKernel("bounceBack");
         bounceBackKernel->addArg(populations);
@@ -337,6 +361,13 @@ void CommonCalcLBMForceKernel::setFluidParameters() {
         else
             collideKernel->setArg(6+i, (float) values[i]);
     }
+    if (lattice.fluidFluctuations) {
+        double mu = 3.0*lattice.fluidKT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
+        if (useDouble)
+            collideKernel->setArg(12, mu);
+        else
+            collideKernel->setArg(12, (float) mu);
+    }
     if (!lattice.particles.empty()) {
         coupleKernel->setArg(13, 0);       // index of the random numbers, set when they are drawn
         coupleKernel->setArg(14, 0);       // drawNoise
@@ -422,6 +453,10 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     int numCoupled = lattice.particles.size();
     if (numCoupled > 0)
         computeCouplingForces(true);
+    // The numbers of the fluid are drawn after those of the particles, which the force evaluations between steps
+    // may already have drawn: the sequence is the same in both cases.
+    if (lattice.fluidFluctuations && lattice.fluidKT > 0)
+        collideKernel->setArg(13, cc.getIntegrationUtilities().prepareRandomNumbers(4*numNodes));
     collideKernel->execute(numNodes);
     if (numCoupled > 0)
         clearReactionsKernel->execute(numCoupled);

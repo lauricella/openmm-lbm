@@ -215,16 +215,25 @@ def test_fluid_fluctuations():
 
 
 @pytest.mark.parametrize('name', ['CUDA', 'OpenCL', 'HIP'])
-def test_fluid_fluctuations_refused(name):
-    # The GPU platforms refuse the fluid fluctuations until they support them.
+def test_fluid_fluctuations_gpu(name):
+    # On the GPU platforms a fluctuating fluid at rest starts to move, and the noise conserves mass and momentum.
+    import numpy as np
     try:
         platform = mm.Platform.getPlatformByName(name)
     except Exception:
         pytest.skip('the %s platform is not available' % name)
     system, force, positions = create_system(num_particles=1)
     force.setFluidFluctuations(True)
-    with pytest.raises(mm.OpenMMException, match='not yet available'):
-        mm.Context(system, mm.VerletIntegrator(0.01), platform)
+    force.setFluidMomentumRemovalFrequency(0)
+    integrator = mm.VerletIntegrator(0.01)
+    context = mm.Context(system, integrator, platform, {'Precision': 'double'})
+    context.setPositions(positions[:1])
+    integrator.step(10)
+    density, velocity = force.getFluidFields(context)
+    rho = np.array([d.value_in_unit(unit.dalton/unit.nanometer**3) for d in density])
+    u = np.array([v.value_in_unit(unit.nanometer/unit.picosecond) for v in velocity])
+    assert np.std(u) > 0
+    assert rho.sum() == pytest.approx(602.214*rho.size, rel=1e-12)
 
 
 @pytest.mark.parametrize('name,precision,walls', [(name, precision, walls) for name in ('CUDA', 'OpenCL', 'HIP')

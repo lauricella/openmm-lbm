@@ -160,7 +160,7 @@ public:
      * through the fluid.  The random numbers of the fluid are drawn from the random number seed
      * (setRandomNumberSeed()).  The default is false: the fluid has no fluctuations of its own and receives thermal
      * energy only from the random forces on the coupled particles.  It is fixed when a Context is created:
-     * updateParametersInContext() cannot change it.  At present only the Reference platform supports it.
+     * updateParametersInContext() cannot change it.
      */
     void setFluidFluctuations(bool fluctuations);
     /**

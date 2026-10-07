@@ -80,7 +80,7 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    | OpenMM's `ComputeSort` (explicit drag: in a lattice step; centred drag: in every evaluation) | | keys | sorted keys |
    | `sumCellReactions` (explicit drag, in a lattice step) | one per key | sorted keys, forces | the reaction of each node, written by its first key |
    | `solveCenteredDrag` (centred drag) | one per key | sorted keys, v~, random forces, moments of the node, body acceleration | the forces of the particles of each node, written by its first key; in a lattice step also the reaction -S of the node, and at a solid node -S as wall momentum |
-   | `collideAndStream` | one per node (solid nodes do nothing) | moments and reaction of the node | the 19 populations it sends to the neighbours |
+   | `collideAndStream` | one per node (solid nodes do nothing) | moments and reaction of the node; with a fluctuating fluid, four float4 of OpenMM's random numbers per node, drawn after those of the particles, and the coefficients of the basis | the 19 populations it sends to the neighbours |
    | `clearCellReactions` | one per key | sorted keys | zero reaction at the nodes of the step |
    | `bounceBack` (with solid nodes) | one per solid node | populations of the solid node | the populations it returns to the fluid neighbours, and its momentum exchange |
    | `computeMaxFluidSpeed` (when the Mach check is due) | work groups of 64 | populations | one maximum per group, reduced on the host |
