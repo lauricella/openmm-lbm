@@ -15,7 +15,7 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform (on OpenCL its subclass `OpenCLCalcLBMForceKernel`, step 3 below), and the tests |
 | `serialization/` | XML proxy of `LBMForce` (parameters only; version 5, which reads versions 1 to 4) |
-| `python/` | SWIG wrapper `openmmlbm`, with the Python helpers `LBMTemperatureReporter`, `saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter`, and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
+| `python/` | SWIG wrapper `openmmlbm`, with the Python helpers `LBMTemperatureReporter`, `LBMVTKReporter`, `saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter`, and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
 | `examples/` | example scripts, ports of the examples of the DragOpenMM plugin (`examples/README.md`) |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
 | `tests/TestLBMFluid.h` | tests of the fluid on its own, `runFluidTests()`, and of the solid nodes, `runWallTests()`, on every platform (`docs/validation.md`) |

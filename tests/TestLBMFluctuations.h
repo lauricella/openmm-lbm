@@ -327,6 +327,38 @@ void testFluctuationsParameters(Platform& platform) {
     delete system2;
 }
 
+/**
+ * With the fluid fluctuations a warning is printed when the drag is explicit, particles are coupled with the EM scheme
+ * at T > 0 and the friction is not zero (docs/theory.md, section 7): the explicit drag makes them too hot.
+ */
+void testFluctuationDragWarning(Platform& platform) {
+    for (bool fluctuations : {false, true})
+        for (LBMForce::DragScheme drag : {LBMForce::Explicit, LBMForce::Centered})
+            for (LBMForce::CouplingScheme scheme : {LBMForce::EulerMaruyama, LBMForce::NVE}) {
+                LBMForce* force;
+                System* system = createCoupledSystem(force, 2, 10.0, 300.0);
+                force->setFluidFluctuations(fluctuations);
+                force->setDragScheme(drag);
+                force->setCouplingScheme(scheme);
+                VerletIntegrator integrator(fluidDt);
+                stringstream captured;
+                streambuf* original = cerr.rdbuf(captured.rdbuf());
+                try {
+                    Context context(*system, integrator, platform);
+                }
+                catch (...) {
+                    cerr.rdbuf(original);
+                    throw;
+                }
+                cerr.rdbuf(original);
+                bool warned = (captured.str().find("with fluid fluctuations the explicit drag") != string::npos);
+                ASSERT(warned == (fluctuations && drag == LBMForce::Explicit && scheme == LBMForce::EulerMaruyama));
+                if (warned)
+                    ASSERT(captured.str().find("= 6.64") != string::npos);
+                delete system;
+            }
+}
+
 void runFluctuationTests(Platform& platform) {
     testFluctuationBasis();
     testFluctuationsSingleNode(platform, 1.0);
@@ -338,4 +370,5 @@ void runFluctuationTests(Platform& platform) {
     testFluctuationsRestart(platform);
     testFluctuationsWithNVE(platform);
     testFluctuationsParameters(platform);
+    testFluctuationDragWarning(platform);
 }

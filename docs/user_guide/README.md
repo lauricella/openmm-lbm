@@ -70,6 +70,7 @@ Know these before using the plugin for a study:
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |
+| VTK files of the fluid and of the particles for ParaView ([`openmmlbm.LBMVTKReporter`](api_reference.md#openmmlbmlbmvtkreporterprefix-reportinterval-force)) | yes | yes |
 
 Every feature runs on every platform. The random forces of the Reference platform, and the fluctuations of the fluid, come from a
 generator of the force, those of the GPU platforms from OpenMM's generator: with the same seed the two are

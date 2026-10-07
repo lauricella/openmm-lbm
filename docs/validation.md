@@ -175,6 +175,7 @@ the density of water give kT = 1.3e-5.
 | Restart | with coupled particles at 300 K and seed 0, a run restarted from the checkpoints of OpenMM and of the force equals the uninterrupted run | bitwise |
 | NVE | with the NVE scheme, particles at rest are set in motion by a fluctuating fluid, and stay at rest without fluctuations | exact |
 | Parameters | `updateParametersInContext()` changes the temperature and refuses to switch the fluctuations; a checkpoint is refused by a Context with the fluctuations switched differently | exceptions |
+| Warning | with fluid fluctuations a warning is printed only for the explicit drag with the EM scheme at T > 0, with the bound friction*dt*m/(2 m_c) of the heaviest coupled particle | exact |
 
 **Measured** (OpenMM 8.6.1 and 8.3.1; Reference, and CUDA and OpenCL on an NVIDIA A100 in the three
 precisions): all pass. A first version of the GPU kernel enlarged OpenMM's buffer of random numbers in the first
@@ -322,6 +323,24 @@ at 16^3): the fluctuating fluid exceeds the Mach number limit within a few thous
 Without noise, from the same thermal initial state, only tau = 0.5001 and 0.5002 at kT = 1/3000 and 0.5001 at
 kT = 1e-4 are unstable, because the velocities decay. The explanation is in `docs/theory.md`, section 7
 (stability near tau = 1/2). The article of the model, on D3Q27, is stable down to tau = 0.5001 at kT = 1/3000.
+
+## VTK output (`python/tests/TestVTKReporter.py`, Reference)
+
+`openmmlbm.LBMVTKReporter` on 6x5x4 nodes of 0.5 nm with two solid nodes, a body force and four particles, three
+of them coupled, one outside the box:
+
+| Test | Checks | Tolerance |
+|---|---|---|
+| Fluid | the `.vti` file has the extent of the lattice, spacing dx and origin 0; its density and velocity equal those of `getFluidFields()`; the solid nodes are flagged | 1e-6 relative in single precision, exact in double |
+| Particles | the `.vtp` file has the positions of the State wrapped into the box, its velocities, the masses, the indices, the coupled flags and one vertex per particle; with `wrap=False` the position outside the box stays outside | as above |
+| Series | the `.pvd` file lists the fluid and particle files of each report with the time in ps; with `append=True` a new reporter keeps the files already listed | exact |
+| Parts | `fluid=False` and `particles=False` write only the other part | exact |
+| No effect on the run | a run with the reporter equals, bit for bit, the run without it | bitwise |
+
+**Measured** (OpenMM 8.6.1): all pass. The files written by the test were also read with the VTK readers of
+ParaView 5.13 (`vtkXMLImageDataReader`, `vtkXMLPolyDataReader`, the `.pvd` reader): dimensions, spacing, the
+coordinates of the nodes, the fields and the times agree, within 5e-8 relative in single precision and exactly in
+double precision.
 
 ## Equivalence with the reference implementation: coupled particles (E0)
 

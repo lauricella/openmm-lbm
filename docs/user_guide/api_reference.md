@@ -261,6 +261,32 @@ reporter = LBMTemperatureReporter('temperature.txt', 1000, force)
 # simulation.reporters.append(reporter)
 ```
 
+### `openmmlbm.LBMVTKReporter(prefix, reportInterval, force)`
+
+A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps, the fluid of `force` and the
+particles of the System in VTK files, which ParaView and VisIt read. Everything is in OpenMM units, and the files
+of one report have the step in their name:
+
+| File | Content |
+|---|---|
+| `<prefix>_fluid_<step>.vti` | the lattice (VTK XML ImageData): point (i, j, k) is the node at (i dx, j dx, k dx), in nm; `density` in Da/nm^3 and `velocity` in nm/ps, as [`getFluidFields()`](#getfluidfieldscontext) returns them; with solid nodes also `solid`, 1 for a solid node and 0 for a fluid one |
+| `<prefix>_particles_<step>.vtp` | the particles (VTK XML PolyData): positions in nm, `velocity` in nm/ps (the velocities of the State, at the half step), `mass` in Da, `index` in the System, and `coupled`, 1 for the particles coupled to the fluid and 0 for the others |
+| `<prefix>.pvd` | the list of the files written, with their times in ps: open it in ParaView to load the whole series |
+
+Optional arguments: `fluid=False` or `particles=False` to leave one of the two out; `double=True` to write in
+double precision (the default is single precision, which halves the size); `wrap=False` to keep the positions as
+they are, instead of wrapping each molecule into the periodic box (as `getState(enforcePeriodicBox=True)` does) so
+that the particles overlay the lattice; `append=True`, for a run continued from a checkpoint, to keep the files
+already listed in `<prefix>.pvd`. The numbers are binary (raw appended data, little endian). Writing the files
+neither advances the fluid nor draws random numbers, so it does not change the run. A file of the fluid holds
+16 bytes per node in single precision (4 MB for 64^3 nodes).
+
+```python
+from openmmlbm import LBMVTKReporter
+reporter = LBMVTKReporter('run', 1000, force)
+# simulation.reporters.append(reporter)
+```
+
 ### `setFluidFluctuations(fluctuations)`, `getFluidFluctuations()`
 
 Whether the fluid has thermal fluctuations of its own, at the temperature of
@@ -281,7 +307,7 @@ With the fluctuating fluid **use the centred drag**
 [`LBMTemperatureReporter`](#openmmlbmlbmtemperaturereporterfile-reportinterval-force): the coupled particles then
 have the set temperature, their diffusion coefficient contains the hydrodynamic contribution of the thermal
 flows, and the Einstein relation holds. With the explicit drag the particles are too hot, by up to
-friction x dt x m/(2 m_c) (13% for beads of 100 Da with friction 10/ps and dt = 0.02 ps, 56% for beads of
+friction x dt x m/(2 m_c), and a warning on stderr says so when the Context is created (13% for beads of 100 Da with friction 10/ps and dt = 0.02 ps, 56% for beads of
 1000 Da with friction 10/ps and dt = 0.01 ps; [choosing the drag](lattice.md#choosing-the-drag)). Keep tau at
 0.505 or above: closer to 1/2 the fluctuating fluid becomes unstable (at tau <= 0.501 with kT = 1/3000 in
 lattice units, at tau = 0.5001 for water with dx = 0.5 nm and dt = 0.01 ps;
@@ -473,4 +499,5 @@ deserializing. A force deserialized on its own is returned as a generic `openmm.
 Invalid settings raise a Python `Exception` with the messages listed in
 [troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created. Three
 conditions only print a warning on stderr: a relaxation time outside [0.505, 2], and, with coupled
-particles and the explicit drag, tau > 1.7 and friction*dt > 1.
+particles and the explicit drag, tau > 1.7, friction*dt > 1, and fluid fluctuations (the particles are then too
+hot).

@@ -101,6 +101,7 @@ python $EX/cocomo/diffusion.py --preset sod1 --seed 1    # SOD1, 200 ns, about 3
 python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient of the protein
 # with --drag Centered the prefix of the files is sod1_lb_on_centered
 # with a fluctuating fluid use the centred drag: --drag Centered --fluid-fluctuations (prefix sod1_lb_on_centered_fluct)
+# --vtk 10000 writes the fluid and the beads every 10000 steps for ParaView: open sod1_lb_on.pvd
 ```
 
 - `--preset sod1` reproduces the runs of the DragOpenMM project with the folded protein SOD1 (box

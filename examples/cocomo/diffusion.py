@@ -37,6 +37,9 @@ T, production.  Files written, with the prefix given by --output (default <prese
                              input of msd.py, which computes the diffusion coefficient
   <prefix>_final.xml, <prefix>_fluid.npz   final state of the particles and of the fluid
   <prefix>.chk               checkpoint of the whole run, fluid included, every --checkpoint steps
+  <prefix>_fluid_<step>.vti, <prefix>_particles_<step>.vtp, <prefix>.pvd
+                             with --vtk N, every N steps, the fluid and the beads in VTK files for ParaView,
+                             in OpenMM units (openmmlbm.LBMVTKReporter); open <prefix>.pvd for the series
 
 A long run can be split into several jobs: if it stops (the time limit of a job, for example), run the same
 command with --restart.  The run continues from the last checkpoint and stops at --steps, exactly as an
@@ -98,9 +101,13 @@ def parse_arguments():
                         'with --drag Centered, or <preset>_lb_off)')
     parser.add_argument('--checkpoint', type=int,
                         help='steps between checkpoints in <prefix>.chk (default 100 reports, 0 = none)')
+    parser.add_argument('--vtk', type=int, default=0,
+                        help='steps between VTK files of the fluid and of the beads (default 0 = none)')
     parser.add_argument('--restart', action='store_true',
                         help='continue from <prefix>.chk, appending to the output files, up to --steps')
     args = parser.parse_args()
+    if args.vtk > 0 and args.no_lb:
+        parser.error('--vtk writes the fluid of LBMForce, so it cannot be used with --no-lb')
     for key, value in PRESETS[args.preset].items():
         if getattr(args, key) is None:
             setattr(args, key, value)
@@ -282,6 +289,8 @@ def main():
             simulation.reporters.append(app.CheckpointReporter(checkpointFile, args.checkpoint))
         else:
             simulation.reporters.append(openmmlbm.LBMCheckpointReporter(checkpointFile, args.checkpoint, force))
+    if args.vtk > 0:
+        simulation.reporters.append(openmmlbm.LBMVTKReporter(args.output, args.vtk, force, append=args.restart))
     simulation.step(max(0, args.steps - simulation.currentStep))
 
     simulation.saveState(args.output + '_final.xml')

@@ -18,9 +18,14 @@ versions the API may still change.
   centred drag the coupled particles have the set temperature, their velocity autocorrelation equals the
   response to a kick and their diffusion coefficient follows the Einstein relation; the explicit drag makes them
   too hot, by about friction x dt x m/(2 m_c), so the documentation recommends the centred drag with the
-  fluctuating fluid. Close to tau = 1/2 the fluctuating fluid is unstable (tau <= 0.501 at kT = 1/3000 in lattice
+  fluctuating fluid, and a warning on stderr gives this bound when a Context is created with fluid fluctuations,
+  the explicit drag and coupled particles at T > 0. Close to tau = 1/2 the fluctuating fluid is unstable (tau <= 0.501 at kT = 1/3000 in lattice
   units).
 - `examples/cocomo/diffusion.py --fluid-fluctuations`.
+- `openmmlbm.LBMVTKReporter`, a reporter for `openmm.app.Simulation` that writes the fluid (density and
+  velocity, solid nodes) and the particles (positions, velocities, masses, coupled or not) in VTK files for
+  ParaView, in OpenMM units (nm, Da/nm^3, nm/ps), with a `.pvd` file for the series; `--vtk N` in
+  `examples/cocomo/diffusion.py`.
 
 ### Changed
 - Build: the OpenMM library and the platform libraries are linked by their full path in `OPENMM_DIR`, for the

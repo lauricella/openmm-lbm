@@ -50,6 +50,11 @@ of a particle relative to the fluid changes sign at every step, and grows withou
 friction*dt >= 2. Reduce the friction or the time step, or use the centred drag
 (`setDragScheme(LBMForce.Centered)`), which is stable for any friction.
 
+The warning `with fluid fluctuations the explicit drag makes the coupled particles hotter than the set
+temperature, by up to friction*dt*m/(2 m_c) = ...%` is printed on stderr when fluid fluctuations are switched on
+with the explicit drag and coupled particles at T > 0. Use the centred drag (`setDragScheme(LBMForce.Centered)`)
+with the fluctuating fluid; see [choosing the drag](lattice.md#choosing-the-drag).
+
 The warning `the relaxation time tau = ... is outside the range [0.505, 2]` is printed on stderr and
 does not stop the simulation. See [relaxation time](lattice.md#relaxation-time) for how to bring tau
 into the range.
@@ -91,7 +96,8 @@ temperature is that of the half step, which `openmmlbm.LBMTemperatureReporter` r
 
 **With fluid fluctuations the particles are hotter than the set temperature.** With the explicit drag the
 thermal motion of the fluid heats the coupled particles by up to friction*dt*m/(2 m_c), where m_c is the mass of
-fluid in a cell (56% for beads of 1000 Da with friction 10/ps, dt = 0.01 ps and dx = 0.5 nm). Use the centred
+fluid in a cell (56% for beads of 1000 Da with friction 10/ps, dt = 0.01 ps and dx = 0.5 nm); a warning says so
+when the Context is created. Use the centred
 drag with the fluctuating fluid, and measure the temperature with `openmmlbm.LBMTemperatureReporter`
 ([choosing the drag](lattice.md#choosing-the-drag)).
 

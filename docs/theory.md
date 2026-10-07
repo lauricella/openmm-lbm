@@ -596,7 +596,9 @@ range. The plugin checks both.
 - tau > 1/2 holds by construction, since a viscosity that is not positive is an error.
 - A warning is printed on stderr if tau is outside [0.505, 2], the range used by the reference
   implementation.
-- With coupled particles and the explicit drag, warnings for tau > 1.7 and friction*dt > 1 (section 2);
+- With coupled particles and the explicit drag, warnings for tau > 1.7 and friction*dt > 1 (section 2), and,
+  with fluid fluctuations and the EM scheme at T > 0, a warning that the particles will be too hot, with the
+  bound friction*dt*m/(2 m_c) for the heaviest one (section 7);
   with the centred drag, an error if `LBMForce` is not the last force or the System has virtual sites
   (section 2, Solution of the centred drag).
 
@@ -755,7 +757,9 @@ The diffusion coefficient now contains the hydrodynamic contribution of the ther
 both drags, D = kT (1/zeta + y_centred) within 2%: the thermal flows move the particle with the self-mobility of
 the centred drag. With `setFluidFluctuations(true)` the centred drag is therefore the scheme to use, with the
 temperature of the half steps (`LBMTemperatureReporter`); the explicit drag is accurate only when
-gamma dt m/(2 m_c) is small.
+gamma dt m/(2 m_c) is small. When a Context is created with fluid fluctuations, the explicit drag, coupled
+particles, the EM scheme, T > 0 and a friction that is not zero, a warning on stderr gives that bound for the
+heaviest coupled particle.
 
 **Walls.** The halfway bounce-back of the solid nodes (section 1) is a permutation of populations: it neither
 dissipates nor needs noise, and it is unchanged. Walls that also exchange thermal fluctuations with the fluid

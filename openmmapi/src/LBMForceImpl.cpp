@@ -169,6 +169,23 @@ void LBMForceImpl::initialize(ContextImpl& context) {
         cerr << "Warning: LBMForce: friction*dt = " << gammaDt << " > 1: with the explicit drag the velocity of a "
              << "particle relative to the fluid changes sign at every step" << (gammaDt >= 2.0 ? ", and grows without "
              "bound since friction*dt >= 2" : "") << ". Reduce the friction or the time step." << endl;
+
+    // With the fluctuating fluid the explicit drag makes the coupled particles too hot, by about
+    // gamma dt m/(2 m_c (1 + zeta y)), because it misses the response of the cell within the step; the centred drag
+    // gives the right temperature (docs/theory.md, section 7).  The warning gives the bound gamma dt m/(2 m_c) for the
+    // heaviest coupled particle.
+
+    if (!lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.fluidFluctuations &&
+            lattice.kT > 0 && gammaDt > 0) {
+        double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+        double maxMass = 0;
+        for (int particle : lattice.particles)
+            maxMass = max(maxMass, context.getSystem().getParticleMass(particle));
+        cerr << "Warning: LBMForce: with fluid fluctuations the explicit drag makes the coupled particles hotter than "
+             << "the set temperature, by up to friction*dt*m/(2 m_c) = " << 100.0*gammaDt*maxMass/(2.0*cellMass)
+             << "% for the heaviest one (m_c = " << cellMass << " Da is the mass of fluid in a cell). Use the Centered "
+             << "drag scheme with fluid fluctuations." << endl;
+    }
 #ifdef LBM_DEBUG
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     cerr << "LBMForce lattice: dx = " << lattice.dx << " nm, dt = " << lattice.dt << " ps, m_c = " << cellMass

@@ -438,5 +438,158 @@ class LBMTemperatureReporter(object):
         print('%d %.4f %.3f' % (simulation.currentStep, state.getTime().value_in_unit(unit.picosecond), temperature),
               file=self._out)
         self._out.flush()
+
+
+def _writeVTKFile(path, kind, opening, closing, arrays):
+    """Write a VTK XML file whose data arrays are appended in binary (raw, little endian, UInt64 sizes).
+
+    opening and closing are the XML lines before and after the data, with {offset<i>} where the i-th array goes;
+    arrays is the list of numpy arrays, written in that order."""
+    import numpy as np
+    offsets, offset = {}, 0
+    blocks = []
+    for i, array in enumerate(arrays):
+        data = np.ascontiguousarray(array).astype(array.dtype.newbyteorder('<'), copy=False).tobytes()
+        offsets['offset%d' % i] = offset
+        blocks.append(data)
+        offset += 8 + len(data)
+    header = ('<?xml version="1.0"?>\n<VTKFile type="%s" version="1.0" byte_order="LittleEndian" '
+              'header_type="UInt64">\n' % kind) + opening.format(**offsets) + closing + '  <AppendedData encoding="raw">\n_'
+    with open(path, 'wb') as out:
+        out.write(header.encode('ascii'))
+        for data in blocks:
+            out.write(_struct.pack('<Q', len(data)))
+            out.write(data)
+        out.write(b'\n  </AppendedData>\n</VTKFile>\n')
+
+
+class LBMVTKReporter(object):
+    """A reporter for openmm.app.Simulation that writes the fluid of an LBMForce and the particles of the System in
+    VTK files, which ParaView and VisIt read, in OpenMM units.
+
+    Every reportInterval steps it writes, with the given prefix and the step number:
+      <prefix>_fluid_<step>.vti      the fluid (VTK XML ImageData): point (i, j, k) is the lattice node at
+                                     (i dx, j dx, k dx), in nm; "density" in Da/nm^3 and "velocity" in nm/ps, as
+                                     LBMForce.getFluidFields() returns them; with solid nodes also "solid", 1 for a
+                                     solid node and 0 for a fluid one;
+      <prefix>_particles_<step>.vtp  the particles (VTK XML PolyData): positions in nm (with each molecule
+                                     wrapped into the periodic box, as State does with enforcePeriodicBox, unless
+                                     wrap=False), "velocity" in nm/ps (the velocities of the State, at
+                                     the half step of the leapfrog), "mass" in Da, "index" in the System and
+                                     "coupled", 1 for the particles coupled to the fluid and 0 for the others;
+      <prefix>.pvd                   the list of all the files written, with their times in ps: open it in
+                                     ParaView to load the whole series.
+    The numbers are binary, in single precision unless double=True.  The reporter does not change the run: like
+    getState(), getFluidFields() neither advances the fluid nor draws random numbers.
+    """
+
+    def __init__(self, prefix, reportInterval, force, fluid=True, particles=True, double=False, wrap=True, append=False):
+        """
+        Parameters
+        ----------
+        prefix : str
+            prefix of the files, which may contain a directory
+        reportInterval : int
+            steps between reports
+        force : LBMForce
+            the LBMForce of the System of the Simulation
+        fluid : bool
+            write the fluid (default True)
+        particles : bool
+            write the particles (default True)
+        double : bool
+            write in double precision instead of single (default False)
+        wrap : bool
+            wrap the positions of the particles into the periodic box, so that they overlay the lattice (default
+            True)
+        append : bool
+            keep the files already listed in <prefix>.pvd, for a run continued from a checkpoint (default False)
+        """
+        self._prefix = prefix
+        self._reportInterval = reportInterval
+        self._force = force
+        self._fluid = fluid
+        self._particles = particles
+        self._double = double
+        self._wrap = wrap
+        self._datasets = []
+        if append and _os.path.exists(prefix + '.pvd'):
+            with open(prefix + '.pvd') as pvd:
+                self._datasets = [line for line in pvd if '<DataSet ' in line]
+
+    def describeNextReport(self, simulation):
+        steps = self._reportInterval - simulation.currentStep%self._reportInterval
+        include = ['positions', 'velocities'] if self._particles else []
+        return {'steps': steps, 'periodic': (self._wrap if self._particles else None), 'include': include}
+
+    def report(self, simulation, state):
+        import numpy as np
+        real = np.float64 if self._double else np.float32
+        name = 'Float64' if self._double else 'Float32'
+        step = simulation.currentStep
+        time = state.getTime().value_in_unit(unit.picosecond)
+        files = []
+        if self._fluid:
+            nx, ny, nz = self._force.getGridSize()
+            dx = self._force.getLatticeParametersInContext(simulation.context)[0]
+            dx = dx.value_in_unit(unit.nanometer) if unit.is_quantity(dx) else dx
+            density, velocity = self._force.getFluidFields(simulation.context)
+            arrays = [np.asarray(density.value_in_unit(unit.dalton/unit.nanometer**3), dtype=real),
+                      np.asarray(velocity.value_in_unit(unit.nanometer/unit.picosecond), dtype=real).reshape(-1)]
+            solid = list(self._force.getSolidNodes())
+            extent = '0 %d 0 %d 0 %d' % (nx - 1, ny - 1, nz - 1)
+            opening = ('  <ImageData WholeExtent="%s" Origin="0 0 0" Spacing="%.17g %.17g %.17g">\n'
+                       '    <Piece Extent="%s">\n'
+                       '      <PointData Scalars="density" Vectors="velocity">\n'
+                       '        <DataArray type="%s" Name="density" format="appended" offset="{offset0}"/>\n'
+                       '        <DataArray type="%s" Name="velocity" NumberOfComponents="3" format="appended" '
+                       'offset="{offset1}"/>\n' % (extent, dx, dx, dx, extent, name, name))
+            if solid:
+                flags = np.zeros(nx*ny*nz, dtype=np.uint8)
+                flags[solid] = 1
+                arrays.append(flags)
+                opening += '        <DataArray type="UInt8" Name="solid" format="appended" offset="{offset2}"/>\n'
+            closing = '      </PointData>\n    </Piece>\n  </ImageData>\n'
+            path = '%s_fluid_%010d.vti' % (self._prefix, step)
+            _writeVTKFile(path, 'ImageData', opening, closing, arrays)
+            files.append(path)
+        if self._particles:
+            system = simulation.system
+            n = system.getNumParticles()
+            coupled = np.zeros(n, dtype=np.uint8)
+            coupled[[self._force.getParticle(i) for i in range(self._force.getNumParticles())]] = 1
+            positions = state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+            velocities = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)
+            masses = [system.getParticleMass(i).value_in_unit(unit.dalton) for i in range(n)]
+            arrays = [np.asarray(positions, dtype=real).reshape(-1), np.asarray(velocities, dtype=real).reshape(-1),
+                      np.asarray(masses, dtype=real), np.arange(n, dtype=np.int32), coupled,
+                      np.arange(n, dtype=np.int64), np.arange(1, n + 1, dtype=np.int64)]
+            opening = ('  <PolyData>\n'
+                       '    <Piece NumberOfPoints="%d" NumberOfVerts="%d" NumberOfLines="0" NumberOfStrips="0" '
+                       'NumberOfPolys="0">\n'
+                       '      <Points>\n'
+                       '        <DataArray type="%s" NumberOfComponents="3" format="appended" offset="{offset0}"/>\n'
+                       '      </Points>\n'
+                       '      <PointData Vectors="velocity">\n'
+                       '        <DataArray type="%s" Name="velocity" NumberOfComponents="3" format="appended" '
+                       'offset="{offset1}"/>\n'
+                       '        <DataArray type="%s" Name="mass" format="appended" offset="{offset2}"/>\n'
+                       '        <DataArray type="Int32" Name="index" format="appended" offset="{offset3}"/>\n'
+                       '        <DataArray type="UInt8" Name="coupled" format="appended" offset="{offset4}"/>\n'
+                       '      </PointData>\n'
+                       '      <Verts>\n'
+                       '        <DataArray type="Int64" Name="connectivity" format="appended" offset="{offset5}"/>\n'
+                       '        <DataArray type="Int64" Name="offsets" format="appended" offset="{offset6}"/>\n'
+                       '      </Verts>\n' % (n, n, name, name, name))
+            closing = '    </Piece>\n  </PolyData>\n'
+            path = '%s_particles_%010d.vtp' % (self._prefix, step)
+            _writeVTKFile(path, 'PolyData', opening, closing, arrays)
+            files.append(path)
+        for part, path in enumerate(files):
+            self._datasets.append('    <DataSet timestep="%.17g" part="%d" file="%s"/>\n' % (time, part,
+                                                                                        _os.path.basename(path)))
+        with open(self._prefix + '.pvd', 'w') as out:
+            out.write('<?xml version="1.0"?>\n<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">\n'
+                      '  <Collection>\n' + ''.join(self._datasets) + '  </Collection>\n</VTKFile>\n')
 %}
 
