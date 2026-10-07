@@ -20,3 +20,58 @@ authors:
   - given-names: Fabio
     family-names: Sterpone
     affiliation: 'Laboratoire de Biochimie Théorique, Institut de Biologie Physico-Chimique (IBPC), CNRS, Paris, France'
+preferred-citation:
+  type: article
+  title: "openmm-lbm: lattice Boltzmann fluid plugin for OpenMM"
+  status: in-preparation
+  authors:
+    - given-names: Luis Enrique
+      family-names: Coronas-Serna
+    - given-names: Marco
+      family-names: Lauricella
+    - given-names: Andrea
+      family-names: Montessori
+    - given-names: Simone
+      family-names: Melchionna
+    - given-names: Fabio
+      family-names: Sterpone
+references:
+  - type: article
+    title: "Ghost-mode filtered fluctuating lattice Boltzmann method"
+    authors:
+      - given-names: Marco
+        family-names: Lauricella
+      - given-names: Andrea
+        family-names: Montessori
+      - given-names: Adriano
+        family-names: Tiribocchi
+      - given-names: Sauro
+        family-names: Succi
+    journal: "The Journal of Chemical Physics"
+    volume: 164
+    issue: 19
+    start: 194905
+    year: 2026
+    doi: 10.1063/5.0319224
+  - type: article
+    title: "LBsoft: A parallel open-source software for simulation of colloidal systems"
+    authors:
+      - given-names: Fabio
+        family-names: Bonaccorso
+      - given-names: Andrea
+        family-names: Montessori
+      - given-names: Adriano
+        family-names: Tiribocchi
+      - given-names: Giorgio
+        family-names: Amati
+      - given-names: Massimo
+        family-names: Bernaschi
+      - given-names: Marco
+        family-names: Lauricella
+      - given-names: Sauro
+        family-names: Succi
+    journal: "Computer Physics Communications"
+    volume: 256
+    start: 107455
+    year: 2020
+    doi: 10.1016/j.cpc.2020.107455

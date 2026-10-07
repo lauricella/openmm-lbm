@@ -43,6 +43,9 @@ versions the API may still change.
   any friction (`docs/theory.md`, section 2; `testSelfMobilityWarning`, `testFrictionWarning`).
 - README: the fluid is described as thread-safe; full name of Luis Enrique Coronas-Serna in README,
   `CITATION.cff` and the examples.
+- `CITATION.cff`: the preferred citation is the article on openmm-lbm (in preparation), and the references
+  are the ghost-mode filtered fluctuating lattice Boltzmann method (J. Chem. Phys. 164, 194905, 2026) and
+  LBsoft (Comput. Phys. Commun. 256, 107455, 2020).
 - `docs/theory.md` and `CONTRIBUTING.md` cite Kassen, Shankar and Fogelson (2022) for the sorting of keys
   and the segmented reduction of the per-cell reaction.
 - `python/tests/TestEnergyBudget.py` takes the coupling force from the change of velocity of the bead, so
