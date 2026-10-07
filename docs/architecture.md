@@ -47,15 +47,22 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
    kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
    step (moments, momentum removal, coupling of the particles, collision, with the random part of a
-   fluctuating fluid, and streaming, bounce-back at solid nodes; see `docs/theory.md` sections 1, 2 and 7) and adds the coupling forces of the step to the
-   particles. The other force evaluations (`getState()`, for example) do not advance the fluid: they add the
+   fluctuating fluid, and streaming, bounce-back at solid nodes, then, on the Reference platform, the rebuild
+   of the boundary nodes of regularized walls and open faces; see `docs/theory.md` sections 1, 2 and 7) and
+   adds the coupling forces of the step to the particles. The other force evaluations (`getState()`, for example) do not advance the fluid: they add the
    coupling forces of the next step, computed on the current fluid without its reaction, as OpenMM does for
    every force. The random numbers of a step are drawn once, by the first evaluation that needs them, and
    reused by the step. Before the first step of the Context the coupling forces are zero. A repeated
    evaluation of a step (OpenMM repeats all the evaluations of a step when it enlarges the neighbor list of a
    nonbonded force) is recognized because the step count of the Context has not been incremented yet, and
    it adds the forces of the step again. `beginStep()` also reverses the velocity of a coupled particle whose
-   nearest node is solid and that moves into the wall (v.n > 0). Every platform does all of this.
+   nearest node is solid and that moves into the wall (v.n > 0). Every platform does all of this, except the
+   regularized walls and the open faces, which only the Reference platform has for now: the CUDA, OpenCL
+   and HIP kernels refuse them when the Context is created. On the Reference platform `initialize()` lists
+   the boundary nodes once (the fluid nodes next to solid nodes with regularized walls, and the nodes of the
+   open faces), with the bits of their unknown directions and what each one imposes;
+   `applyBoundaries()` rebuilds them after the streaming, each node from its own populations and the solid
+   slots it wrote itself.
    With the centred drag (`LBMForce::Centered`) the coupling needs the other forces on the particles:
    `LBMForceImpl::initialize()` checks that `LBMForce` is the last force of the System and that there are
    no virtual sites. On the Reference platform, when its `execute()` runs, OpenMM's force array already

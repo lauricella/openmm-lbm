@@ -576,6 +576,275 @@ void testWallConservation(Platform& platform) {
     }
 }
 
+/**
+ * Poiseuille flow between regularized walls (setWallScheme(Regularized)): the solid plane j = 0 puts the walls on
+ * the fluid nodes j = 1 and j = ny - 1, at rest, so the channel has the width H = ny - 2.  The steady profile of the
+ * scheme is, in lattice units, exactly
+ *   u(y) = g/(2 nu) (y - 1)(ny - 1 - y) + g (tau - 1)/(tau - 1/2)
+ * at the nodes between the walls, and zero on the walls: the parabola that vanishes on the walls, displaced by a
+ * slip that vanishes at tau = 1 (docs/theory.md, section 1).  The density stays that of the fluid at rest, and in the
+ * steady state the walls carry the whole body force.
+ */
+void testRegularizedPoiseuille(Platform& platform, double tau) {
+    int nx = 2, ny = 12, nz = 2;
+    LBMForce* force;
+    System* system = createFluidSystem(force, nx, ny, nz, tau);
+    double g = 1e-5;                             // lattice units
+    force->setBodyAcceleration(Vec3(g*fluidDx/(fluidDt*fluidDt), 0, 0));
+    force->setSolidNodes(wallPlane(nx, ny, nz));
+    force->setWallScheme(LBMForce::Regularized);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    double nu = (tau-0.5)/3.0, h = ny-2;
+    integrator.step((int) (4*h*h/nu));
+    vector<double> density;
+    vector<Vec3> velocity;
+    force->getFluidFields(context, density, velocity);
+    double umax = g/(2*nu)*(0.5*h)*(0.5*h);
+    double tol = getFluidTolerance(platform, 1e-9, 5e-5);
+    double mass = 0;
+    for (int k = 0; k < nz; k++)
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < nx; i++) {
+                int node = i + nx*(j + ny*k);
+                Vec3 u = velocity[node]*(fluidDt/fluidDx);
+                mass += density[node]*fluidDx*fluidDx*fluidDx;
+                if (j == 0) {
+                    ASSERT_EQUAL(0.0, density[node]);
+                    ASSERT_EQUAL_VEC(Vec3(), u, 0.0);
+                    continue;
+                }
+                ASSERT_EQUAL_TOL(1.0, density[node]/fluidDensity, tol);
+                double exact = (j == 1 || j == ny-1 ? 0.0 : g/(2*nu)*(j-1)*(ny-1-j) + g*(tau-1)/(tau-0.5));
+                ASSERT_EQUAL_VEC(Vec3(exact/umax, 0, 0), u*(1.0/umax), tol);
+            }
+    Vec3 bodyForce(g*fluidDx/(fluidDt*fluidDt)*mass, 0, 0);
+    ASSERT_EQUAL_VEC(bodyForce, force->getWallForce(context), getFluidTolerance(platform, 1e-8, 5e-5));
+    delete system;
+}
+
+/**
+ * Solid nodes of the conservation tests: the plane i = 0, one node thick (with fluid on both sides through the
+ * periodic boundary), and a block of 2x2x2 nodes, so that the fluid nodes i = 1 lie between two walls.
+ */
+vector<int> wallTestNodes(int nx, int ny, int nz) {
+    vector<int> nodes;
+    for (int k = 0; k < nz; k++)
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < nx; i++)
+                if (i == 0 || (i >= 2 && i < 4 && j >= 1 && j < 3 && k >= 1 && k < 3))
+                    nodes.push_back(i + nx*(j + ny*k));
+    return nodes;
+}
+
+/**
+ * With both wall schemes the mass of the fluid is conserved exactly, and the momentum of the fluid changes by the
+ * body force on the fluid minus the momentum given to the walls (getWallForce()): P(t + dt) - P(t) =
+ * (M g - F_wall) dt, at every step.  The fluid starts with a uniform velocity against the walls.
+ */
+void testWallBalance(Platform& platform, LBMForce::WallScheme scheme) {
+    int nx = 6, ny = 5, nz = 4;
+    LBMForce* force;
+    System* system = createFluidSystem(force, nx, ny, nz, 0.7);
+    force->setSolidNodes(wallTestNodes(nx, ny, nz));
+    force->setWallScheme(scheme);
+    force->setInitialFluidVelocity(Vec3(0.02, -0.01, 0.005)*(fluidDx/fluidDt));
+    Vec3 g = Vec3(1e-5, 2e-5, -1e-5)*(fluidDx/(fluidDt*fluidDt));
+    force->setBodyAcceleration(g);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    double cellVolume = fluidDx*fluidDx*fluidDx;
+    auto moments = [&](double& mass, Vec3& p) {
+        vector<double> density;
+        vector<Vec3> velocity;
+        force->getFluidFields(context, density, velocity);
+        mass = 0;
+        p = Vec3();
+        for (int node = 0; node < (int) density.size(); node++) {
+            mass += density[node]*cellVolume;
+            p += velocity[node]*(density[node]*cellVolume);
+        }
+    };
+    double mass0, mass;
+    Vec3 p0, p;
+    moments(mass0, p0);
+    double scale = mass0*0.02*fluidDx/fluidDt;
+    for (int step = 0; step < 30; step++) {
+        integrator.step(1);
+        moments(mass, p);
+        ASSERT_EQUAL_TOL(mass0, mass, getFluidTolerance(platform, 1e-13));
+        Vec3 balance = p - p0 - (g*mass - force->getWallForce(context))*fluidDt;
+        ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, getFluidTolerance(platform, 1e-12));
+        p0 = p;
+    }
+    delete system;
+}
+
+/**
+ * Couette flow between two Velocity faces (setFaceBoundary()): the faces perpendicular to x and y are periodic, the face
+ * ZMin is at rest and the face ZMax moves with the velocity U along x.  The steady profile is exactly linear,
+ * u_x(z) = U z/(nz - 1), with the walls on the nodes of the faces, and the density stays uniform.
+ */
+void testCouette(Platform& platform, double tau) {
+    int nx = 2, ny = 2, nz = 10;
+    LBMForce* force;
+    System* system = createFluidSystem(force, nx, ny, nz, tau);
+    double U = 0.01;                             // lattice units
+    force->setFaceBoundary(LBMForce::ZMin, LBMForce::Velocity);
+    force->setFaceBoundary(LBMForce::ZMax, LBMForce::Velocity);
+    force->setFaceVelocity(LBMForce::ZMax, Vec3(U*fluidDx/fluidDt, 0, 0));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    double nu = (tau-0.5)/3.0, h = nz-1;
+    integrator.step((int) (6*h*h/nu));
+    vector<double> density;
+    vector<Vec3> velocity;
+    force->getFluidFields(context, density, velocity);
+    double tol = getFluidTolerance(platform, 1e-9, 5e-5);
+    for (int node = 0; node < nx*ny*nz; node++) {
+        int k = node/(nx*ny);
+        ASSERT_EQUAL_VEC(Vec3(k/h, 0, 0), velocity[node]*(fluidDt/(fluidDx*U)), tol);
+        ASSERT_EQUAL_TOL(1.0, density[node]/fluidDensity, tol);
+    }
+    delete system;
+}
+
+/**
+ * A uniform flow from a Velocity face (the inlet YMin) to a Density face (the outlet YMax) at the density of the
+ * fluid at rest is steady: the faces leave it unchanged.  The faces perpendicular to x and z are periodic.
+ */
+void testUniformFlowThroughFaces(Platform& platform) {
+    int nx = 3, ny = 8, nz = 3, numNodes = nx*ny*nz;
+    LBMForce* force;
+    System* system = createFluidSystem(force, nx, ny, nz, 0.8);
+    Vec3 u = Vec3(0.0, 0.02, 0.0)*(fluidDx/fluidDt);
+    force->setFaceBoundary(LBMForce::YMin, LBMForce::Velocity);
+    force->setFaceBoundary(LBMForce::YMax, LBMForce::Density);
+    force->setFaceVelocity(LBMForce::YMin, u);
+    force->setInitialFluidVelocity(u);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    integrator.step(50);
+    vector<double> density;
+    vector<Vec3> velocity;
+    force->getFluidFields(context, density, velocity);
+    double tol = getFluidTolerance(platform, 1e-13);
+    for (int node = 0; node < numNodes; node++) {
+        ASSERT_EQUAL_VEC(u*(fluidDt/fluidDx), velocity[node]*(fluidDt/fluidDx), tol);
+        ASSERT_EQUAL_TOL(1.0, density[node]/fluidDensity, tol);
+    }
+    delete system;
+}
+
+/**
+ * Flow in a square duct driven by a difference of density (pressure) between two Density faces: no-slip walls
+ * perpendicular to x and z (the solid planes i = 0 and k = 0 of the periodic box, with bounce-back: a duct of width
+ * H = n - 1 between the walls at 1/2 and n - 1/2), and the faces YMin and YMax at the densities 1.01 and 1 of the fluid
+ * at rest.  The density falls linearly along the duct, and in the middle the velocity is that of the incompressible
+ * flow in a rectangular duct, u = sum over odd m of 4 K H^2/(m pi)^3 (-1)^((m-1)/2) (1 - cosh(m pi z/H)/cosh(m pi/2))
+ * cos(m pi x/H), with K = c_s^2 (rho_in - rho_out)/(L rho nu) and L = ny - 1 the distance between the faces, within
+ * the error of the walls (second order) and the compressibility of the fluid (1 %).  The flow is steady: the
+ * staggered mode (-1)^(y+t) j_y, which the bounce-back walls conserve, is damped by the Density faces.
+ */
+void testPressureDrivenDuct(Platform& platform) {
+    int n = 8, ny = 16;
+    double tau = 1.0;
+    LBMForce* force;
+    System* system = createFluidSystem(force, n, ny, n, tau);
+    vector<int> walls;
+    for (int k = 0; k < n; k++)
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < n; i++)
+                if (i == 0 || k == 0)
+                    walls.push_back(i + n*(j + ny*k));
+    force->setSolidNodes(walls);
+    force->setFaceBoundary(LBMForce::YMin, LBMForce::Density);
+    force->setFaceBoundary(LBMForce::YMax, LBMForce::Density);
+    force->setFaceDensity(LBMForce::YMin, 1.01*fluidDensity);
+    force->setFaceDensity(LBMForce::YMax, fluidDensity);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    double nu = (tau-0.5)/3.0;
+    integrator.step((int) (3*ny*ny/nu));
+    vector<double> density[2];
+    vector<Vec3> velocity[2];
+    for (int run = 0; run < 2; run++) {
+        force->getFluidFields(context, density[run], velocity[run]);
+        integrator.step(1);
+    }
+    int middle = ny/2;
+    double H = n-1, rho = density[0][n/2 + n*(middle + ny*(n/2))]/fluidDensity;
+    ASSERT_EQUAL_TOL(1.0 + 0.01*(ny-1-middle)/(ny-1), rho, 2e-4);
+    double K = (0.01/3.0)/((ny-1)*rho*nu), umax = 0, error = 0, change = 0;
+    for (int k = 1; k < n; k++)
+        for (int i = 1; i < n; i++) {
+            int node = i + n*(middle + ny*k);
+            double x = i - 0.5*n, z = k - 0.5*n, exact = 0;
+            for (int m = 1; m < 200; m += 2) {
+                double a = m*M_PI/H;
+                exact += 4*K*H*H/pow(m*M_PI, 3)*(m%4 == 1 ? 1 : -1)*(1 - cosh(a*z)/cosh(a*H/2))*cos(a*x);
+            }
+            double u = velocity[0][node][1]*fluidDt/fluidDx;
+            umax = max(umax, exact);
+            error = max(error, fabs(u-exact));
+            change = max(change, fabs(velocity[1][node][1]-velocity[0][node][1])*fluidDt/fluidDx);
+        }
+    ASSERT(error < 0.02*umax);
+    ASSERT(change < 1e-9*umax);
+    delete system;
+}
+
+/**
+ * Invalid open faces are rejected when the Context is created: only one face of an axis open, open faces with the
+ * removal of the fluid momentum, and fewer than 3 nodes along an open axis.
+ */
+void testFaceChecks(Platform& platform) {
+    for (int test = 0; test < 3; test++) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, 4, (test == 2 ? 2 : 4), 4, 0.8);
+        force->setFaceBoundary(LBMForce::YMin, LBMForce::Velocity);
+        if (test != 0)
+            force->setFaceBoundary(LBMForce::YMax, LBMForce::Density);
+        if (test == 1)
+            force->setFluidMomentumRemovalFrequency(1);
+        VerletIntegrator integrator(fluidDt);
+        bool thrown = false;
+        try {
+            Context context(*system, integrator, platform);
+        }
+        catch (const OpenMMException& e) {
+            thrown = true;
+        }
+        ASSERT(thrown);
+        delete system;
+    }
+}
+
+/**
+ * The Regularized wall scheme is not yet implemented on the GPU platforms: creating a Context fails.
+ */
+void testRegularizedWallsRefused(Platform& platform) {
+    LBMForce* force;
+    System* system = createFluidSystem(force, 4, 4, 4, 0.8);
+    force->setSolidNodes(wallPlane(4, 4, 4));
+    force->setWallScheme(LBMForce::Regularized);
+    VerletIntegrator integrator(fluidDt);
+    bool thrown = false;
+    try {
+        Context context(*system, integrator, platform);
+    }
+    catch (const OpenMMException& e) {
+        thrown = (string(e.what()).find("Regularized") != string::npos);
+    }
+    ASSERT(thrown);
+    delete system;
+}
+
 void runFluidTests(Platform& platform) {
     testUniformFlowIsSteady(platform);
     testFluidConservation(platform);
@@ -600,4 +869,19 @@ void runWallTests(Platform& platform) {
     testPoiseuille(platform, 0.875);
     testPoiseuille(platform, 1.2);
     testWallConservation(platform);
+    testWallBalance(platform, LBMForce::BounceBack);
+    if (platform.getName() == "Reference") {
+        testRegularizedPoiseuille(platform, 0.7);
+        testRegularizedPoiseuille(platform, 1.0);
+        testRegularizedPoiseuille(platform, 1.5);
+        testWallBalance(platform, LBMForce::Regularized);
+        testCouette(platform, 0.6);
+        testCouette(platform, 1.0);
+        testCouette(platform, 1.5);
+        testUniformFlowThroughFaces(platform);
+        testPressureDrivenDuct(platform);
+        testFaceChecks(platform);
+    }
+    else
+        testRegularizedWallsRefused(platform);
 }

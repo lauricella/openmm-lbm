@@ -324,6 +324,70 @@ Without noise, from the same thermal initial state, only tau = 0.5001 and 0.5002
 kT = 1e-4 are unstable, because the velocities decay. The explanation is in `docs/theory.md`, section 7
 (stability near tau = 1/2). The article of the model, on D3Q27, is stable down to tau = 0.5001 at kT = 1/3000.
 
+## Walls and open faces (`tests/TestLBMFluid.h`, Reference)
+
+Regularized walls (`setWallScheme(Regularized)`) and open faces (`setFaceBoundary()`) exist on the Reference
+platform only, for now; the tests below run there, and on the CUDA, OpenCL and HIP platforms
+`testRegularizedWallsRefused` checks that they are refused. Theory: `docs/theory.md`, section 1.
+
+| Test | What it checks | Tolerance |
+|---|---|---|
+| `testRegularizedPoiseuille` (tau = 0.7, 1, 1.5) | channel between regularized walls on the nodes j = 1 and j = ny - 1, driven by g: u(y) = g/(2 nu)(y - 1)(ny - 1 - y) + g(tau - 1)/(tau - 1/2), u = 0 on the walls, uniform density, wall force = g M | 1e-9 |
+| `testWallBalance` (both wall schemes) | a plate one node thick and a block, a flow against them and a body force: mass conserved and P(t + dt) - P(t) = (M g - F_wall) dt at every step | 1e-13, 1e-12 |
+| `testWallMomentumBalance` (both drags, regularized walls) | particles, fluid and walls: total momentum conserved | 1e-12 |
+| `testCouette` (tau = 0.6, 1, 1.5) | ZMin `Velocity` at rest, ZMax `Velocity` U along x: u_x = U z/(nz - 1), uniform density | 1e-9 |
+| `testUniformFlowThroughFaces` | a uniform flow from a `Velocity` inlet to a `Density` outlet stays unchanged | 1e-13 |
+| `testPressureDrivenDuct` | square duct between bounce-back walls, `Density` faces at 1.01 and 1: linear density, velocity in the middle within 2 % of the incompressible duct solution, steady to 1e-9 between two steps | see text |
+| `testFaceChecks` | one open face on an axis, open faces with momentum removal, fewer than 3 nodes on an open axis: errors | |
+| Python `test_wall_scheme_and_faces` | API with units, serialization, Couette flow | 1e-10 |
+
+**Accuracy of the two walls** (body-force driven channel of width H, largest error over the profile relative
+to the centre-line velocity of the parabola; one solid plane in a periodic lattice):
+
+| tau | 0.55 | 0.6 | 0.7 | 0.8 | 0.875 | 1 | 1.2 | 1.5 | 2.5 |
+|---|---|---|---|---|---|---|---|---|---|
+| bounce-back, H = 8 | 1.35e-2 | 1.15e-2 | 7.3e-3 | 3.1e-3 | 1e-14 | 5.2e-3 | 1.35e-2 | 2.6e-2 | 6.8e-2 |
+| regularized, H = 8 | 1.88e-2 | 1.67e-2 | 1.25e-2 | 8.3e-3 | 5.2e-3 | 1e-14 | 8.3e-3 | 2.1e-2 | 6.25e-2 |
+| bounce-back, H = 16 | 3.4e-3 | 2.9e-3 | 1.8e-3 | 7.8e-4 | 3e-14 | 1.3e-3 | 3.4e-3 | 6.5e-3 | 1.7e-2 |
+| regularized, H = 16 | 4.7e-3 | 4.2e-3 | 3.1e-3 | 2.1e-3 | 1.3e-3 | 3e-14 | 2.1e-3 | 5.2e-3 | 1.6e-2 |
+
+Both are second order (the error falls by 4 when H doubles): |8 tau - 7|/(3 H^2) with bounce-back and
+8 |tau - 1|/(3 H^2) with regularized walls. Two variants of the regularized wall were rejected while
+developing it: the density of eq. 5.3 of Latt (Zou-He), which changed the mass of a decaying flow by 2e-5 and
+lets it drift at random with fluid fluctuations, and the density and stress both from the bounce-back
+populations, which is only first order.
+
+**Fluctuations next to the walls** (Reference, 12 x 14 x 12 nodes with the solid planes j = 0 and j = 13, fluid
+fluctuations at kT = 1/3000 in lattice units, tau = 0.8, 600 samples; ER = variance of the mode over the plane /
+mu rho b_k, as in the equilibrium spectra below):
+
+| plane | bounce-back: rho, j, stress, ghosts | regularized: rho | j along, j normal | stress | ghosts |
+|---|---|---|---|---|---|
+| y = 1 (regularized: on the wall) | 0.990 - 1.011 | 0.777 | 0 (imposed) | 0.830 - 1.990 | 0 (rebuilt) |
+| y = 2 | 0.993 - 1.008 | 0.954 | 0.963 - 0.966, 0.910 | 0.917 - 0.992 | 0.920 - 1.001 |
+| y = 3 | 0.989 - 1.005 | 0.993 | 0.998 - 1.000, 0.986 | 0.986 - 0.998 | 0.991 - 1.003 |
+| y = 4 to 9 | 0.987 - 1.016 | 0.994 - 1.013 | 0.990 - 1.012 | 0.990 - 1.015 | 0.987 - 1.011 |
+
+Bounce-back walls are in thermal equilibrium with the fluctuating fluid at every distance, within the
+statistical error (about 1 %): bounce-back permutes the populations and keeps the Gaussian equilibrium state.
+The regularized wall is not: the fluctuations of the first fluid node next to it are 3 to 9 % low.
+
+**Duct driven by a difference of density** (8 x 16 x 8 nodes and 10 x 32 x 10 nodes, `Density` faces at
+1.01 and 1, largest error in the middle cross-section relative to the incompressible solution): with
+bounce-back walls 1.3 % at tau = 0.6 and 0.5 % at tau = 1 (10 x 32 x 10), 1.3 % at tau = 1.1 (8 x 16 x 8, the
+example of the user guide); with regularized walls 2.7 % and 1.0 %. The density falls linearly from 1.01 to 1.
+
+**Staggered mode.** Without the average over two steps on the `Density` faces, the duct between bounce-back
+walls kept an oscillation of the velocity from one node to the next and from one step to the next, of 0.6 to
+2.9 % of the velocity at tau = 0.8 (at tau = 0.6 and 1 the mass flux through neighbouring cross sections differed
+by 9 to 18 %): the staggered momentum
+sum_y (-1)^(y+t) j_y, an exact invariant of the bulk (eigenvalue -1 of the linearized step at k = pi, for every
+tau), was excited by the start and then kept constant (-0.047 in lattice units from step 2000 to 16000). With
+regularized walls, or with `Velocity` faces, it was at the level of rounding. With the average over two steps it
+is damped to rounding (1e-16) in every combination of walls and faces, and the steady state is the same. The
+alternative of taking the velocity of the `Density` face from the next node (zero gradient, as in the outflow of
+Malaspinas) also damped it, but raised the error with regularized walls to 8 % at tau = 0.6.
+
 ## VTK output (`python/tests/TestVTKReporter.py`, Reference)
 
 `openmmlbm.LBMVTKReporter` on 6x5x4 nodes of 0.5 nm with two solid nodes, a body force and four particles, three

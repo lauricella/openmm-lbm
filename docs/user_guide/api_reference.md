@@ -15,6 +15,7 @@ has units.
 - [Removal of the fluid momentum](#removal-of-the-fluid-momentum)
 - [Stability checks](#stability-checks)
 - [Solid nodes](#solid-nodes)
+- [Open faces](#open-faces)
 - [Coupled particles](#coupled-particles)
 - [Reading and writing the fluid of a Context](#reading-and-writing-the-fluid-of-a-context)
 - [Checkpoints](#checkpoints)
@@ -36,6 +37,10 @@ has units.
 | `setMachCheckFrequency(frequency)` | steps | 100 | yes |
 | `setMachNumberLimit(limit)` | dimensionless | 0.3 | yes |
 | `setSolidNodes(nodes)` | node indices | none | no |
+| `setWallScheme(scheme)` | | `BounceBack` | no |
+| `setFaceBoundary(face, type)` | | `Periodic` | no |
+| `setFaceVelocity(face, velocity)` | nm/ps | (0, 0, 0) | yes |
+| `setFaceDensity(face, density)` | Da/nm^3 | 0, meaning the fluid density | yes |
 | `addParticle(particle)`, `setParticle(index, particle)` | particle indices | none | no |
 | `setCouplingScheme(scheme)` | | `EulerMaruyama` | yes |
 | `setDragScheme(scheme)` | | `Explicit` | no |
@@ -130,9 +135,10 @@ See [Mach number and stability](lattice.md#mach-number-and-stability).
 ### `setSolidNodes(nodes)`, `getSolidNodes()`
 
 Lattice nodes that are solid walls, as a sequence of node indices i + nx*(j + ny*k): a Python list, a
-range or a NumPy array of integers. The fluid does not occupy them. A population of the fluid that
-streams into a solid node is sent back to the node it came from (halfway bounce-back). The wall
-therefore lies halfway between a solid node and its fluid neighbours, and has no-slip conditions.
+range or a NumPy array of integers. The fluid does not occupy them, and does not slip on them (no-slip
+walls). With the default wall scheme a population of the fluid that streams into a solid node is sent back
+to the node it came from (halfway bounce-back): the wall lies halfway between a solid node and its fluid
+neighbours. See [`setWallScheme()`](#setwallschemescheme-getwallscheme) for the other choice.
 
 - The default is an empty list: the whole lattice is fluid.
 - Indices must be in range and must not repeat, and at least one node must be fluid. The order does not
@@ -144,12 +150,39 @@ therefore lies halfway between a solid node and its fluid neighbours, and has no
 
 `getSolidNodes()` returns the list of indices.
 
+### `setWallScheme(scheme)`, `getWallScheme()`
+
+How the fluid meets the solid nodes: `LBMForce.BounceBack` (the default) or `LBMForce.Regularized`. Both
+give no-slip walls, accurate to second order in the lattice spacing, and conserve the mass of the fluid.
+
+| | `BounceBack` | `Regularized` |
+|---|---|---|
+| where the wall is | halfway between the solid node and the first fluid node | on the first fluid node next to the solid nodes |
+| channel between the solid planes j = 0 and j = ny - 1 | walls at y = dx/2 and (ny - 3/2) dx | walls at y = dx and (ny - 2) dx |
+| most accurate for | tau < 15/16 (water: tau about 0.6) | tau > 15/16 |
+| with fluid fluctuations | exact thermal equilibrium next to the wall | fluctuations 3 to 10 % low on the first node next to the wall |
+| platforms | all | Reference only, for now |
+
+If you do not know which one to use, keep the default. The theory and the exact solutions are in
+[theory.md](../theory.md#solid-nodes-and-walls). It is fixed when the Context is created.
+
+```python
+force.setWallScheme(LBMForce.Regularized)
+print(force.getWallScheme() == LBMForce.Regularized)
+```
+
+Output:
+
+```
+True
+```
+
 ### `getWallForce(context)`
 
 Returns the force exerted on the solid nodes during the last lattice step, as a `Vec3` in kJ/mol/nm.
 It is the momentum given to the walls, divided by the time step, by:
 - the fluid, through bounce-back (momentum exchange method of Ladd,
-  [theory.md](../theory.md#solid-nodes-implemented-on-all-platforms));
+  [theory.md](../theory.md#solid-nodes-and-walls));
 - the coupled particles: the reaction of particles at solid nodes and their reflections.
 
 It is zero before the first step and without solid nodes. With it, the total momentum of particles, fluid
@@ -165,6 +198,84 @@ k, j, i = np.meshgrid(np.arange(nz), np.arange(ny), np.arange(nx), indexing='ij'
 index = i + nx*(j + ny*k)
 force.setSolidNodes(index[(j == 0) | (j == ny - 1)])     # walls on the planes j = 0 and j = ny-1
 ```
+
+## Open faces
+
+By default the fluid fills a periodic box: what leaves through a face comes back through the opposite face.
+An **open face** instead holds the fluid on it at a velocity or at a density that you choose. With open faces
+you can build inlets and outlets, moving plates, flows driven by a pressure difference. Available on the
+Reference platform; the GPU platforms refuse them for now. The theory is in
+[theory.md](../theory.md#open-faces), and two complete scripts are in the examples:
+[Couette flow](examples.md#couette-flow-between-two-open-faces) and
+[flow in a duct](examples.md#flow-in-a-duct-driven-by-a-pressure-difference).
+
+**Step by step.**
+
+1. **Choose the faces.** The six faces of the box are `LBMForce.XMin` (the face x = 0), `LBMForce.XMax` (the
+   face at the end of the box along x), `YMin`, `YMax`, `ZMin` and `ZMax`. The two faces of the same axis
+   must be both periodic or both open: you cannot open `YMin` alone.
+2. **Choose the type of each open face** with `setFaceBoundary(face, type)`:
+   - `LBMForce.Velocity`: the fluid on the face moves with the velocity of `setFaceVelocity(face, velocity)`
+     (default zero). A velocity across the face is an inlet or an outlet with a given flow; a velocity
+     along the face is a moving plate; zero is a wall at rest.
+   - `LBMForce.Density`: the fluid on the face has the density of `setFaceDensity(face, density)`, and moves
+     only across the face. The density is the pressure: p = c_s^2 rho with c_s^2 = dx^2/(3 dt^2). The
+     default, 0, means the density of the fluid at rest (`setFluidDensity()`).
+3. **Switch off the removal of the fluid momentum**: `setFluidMomentumRemovalFrequency(0)`. With open faces
+   the fluid exchanges momentum with the outside, and the plugin refuses to create the Context otherwise.
+4. **Create the Context and run.** The velocities and densities of the faces can be changed during the run
+   with `updateParametersInContext()`; the types cannot.
+
+Each face has its own velocity (a vector) and its own density (a number): six faces, six vectors and six
+numbers, independent.
+
+```python
+# A flow along y: inlet at y = 0 with 0.1 nm/ps, outlet at the end of the box at the density of the fluid.
+force.setFaceBoundary(LBMForce.YMin, LBMForce.Velocity)
+force.setFaceBoundary(LBMForce.YMax, LBMForce.Density)
+force.setFaceVelocity(LBMForce.YMin, mm.Vec3(0, 0.1, 0)*unit.nanometer/unit.picosecond)
+force.setFluidMomentumRemovalFrequency(0)
+print(force.getFaceBoundary(LBMForce.YMin) == LBMForce.Velocity, force.getFaceVelocity(LBMForce.YMin))
+```
+
+Output:
+
+```
+True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
+```
+
+**What to know.**
+
+- **The face is on the nodes of the face**, not on the edge of the box: for `ZMin` the nodes k = 0, for
+  `ZMax` the nodes k = nz - 1. The fluid on these nodes has exactly the velocity of a `Velocity` face, or the
+  density of a `Density` face. The grid needs at least 3 nodes along an open axis.
+- **Edges and corners.** A node on several open faces takes the velocity of its first `Velocity` face in
+  the order XMin, XMax, YMin, YMax, ZMin, ZMax; if all its faces are `Density` faces, it takes the density of
+  the first one and the velocity zero. A face node next to a solid node with `Regularized` walls is a wall.
+- **Walls and faces together** are fine: for example solid walls around a duct and open faces at its ends.
+  Bounce-back is never applied across an open face.
+- **The body acceleration** (`setBodyAcceleration()`) still acts on all the fluid.
+- **Particles** still live in OpenMM's periodic box: a particle that crosses an open face reappears on the
+  opposite side. Keep coupled particles away from the open faces.
+- **Mass** is not conserved with open faces (fluid enters and leaves), and `getWallForce()` counts only the
+  solid walls, not the open faces.
+- **Keep the flow slow and the density differences small**: a few percent at most, so that the fluid stays
+  nearly incompressible and the Mach number low.
+
+### `setFaceBoundary(face, type)`, `getFaceBoundary(face)`
+
+The type of a face: `LBMForce.Periodic` (default), `LBMForce.Velocity` or `LBMForce.Density`. Fixed when the
+Context is created.
+
+### `setFaceVelocity(face, velocity)`, `getFaceVelocity(face)`
+
+The velocity of the fluid on a `Velocity` face, a `Vec3` in nm/ps; default zero. It can be changed in a
+Context with `updateParametersInContext()`. Ignored on the other faces.
+
+### `setFaceDensity(face, density)`, `getFaceDensity(face)`
+
+The density of the fluid on a `Density` face, in Da/nm^3; the default, 0, means the density of the fluid at
+rest. It can be changed in a Context with `updateParametersInContext()`. Ignored on the other faces.
 
 ## Coupled particles
 
@@ -454,10 +565,11 @@ It updates:
 - the body acceleration;
 - the friction, the temperature (also of a fluctuating fluid) and the coupling scheme;
 - the frequency of the removal of the fluid momentum;
-- the frequency and the limit of the Mach number check.
+- the frequency and the limit of the Mach number check;
+- the velocities and the densities of the open faces.
 
-The grid size, the fluid density and viscosity, the solid nodes, the set of coupled particles, the
-drag scheme and the fluid fluctuations cannot be changed this way: the method raises an error if they differ from those of the Context. The
+The grid size, the fluid density and viscosity, the solid nodes, the wall scheme, the types of the faces,
+the set of coupled particles, the drag scheme and the fluid fluctuations cannot be changed this way: the method raises an error if they differ from those of the Context. The
 initial velocity and the random seed are used only when the Context is created. To change any of
 these, create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()` if
 the grid is the same. `Context.reinitialize()` also restarts the fluid from its initial state.
@@ -497,7 +609,8 @@ deserializing. A force deserialized on its own is returned as a generic `openmm.
 ## Errors
 
 Invalid settings raise a Python `Exception` with the messages listed in
-[troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created. Three
+[troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created (for
+example open faces with the removal of the fluid momentum, or a single open face on an axis). Some
 conditions only print a warning on stderr: a relaxation time outside [0.505, 2], and, with coupled
 particles and the explicit drag, tau > 1.7, friction*dt > 1, and fluid fluctuations (the particles are then too
 hot).

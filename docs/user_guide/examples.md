@@ -12,6 +12,9 @@ file and run as it is. The outputs shown were obtained with OpenMM 8.6.1.
 5. [Saving and restoring the fluid](#saving-and-restoring-the-fluid).
 6. [Serialization](#serialization).
 7. [Using openmm.app.Simulation](#using-openmmappsimulation): a reporter for the fluid, checkpoints (more in [restart](restart.md)).
+8. [Couette flow between two open faces](#couette-flow-between-two-open-faces): a face at rest and a moving face.
+9. [Flow in a duct driven by a pressure difference](#flow-in-a-duct-driven-by-a-pressure-difference): walls and two
+   faces at different densities.
 
 The page on [the lattice](lattice.md#node-indexing-and-numpy-arrays) shows how to turn the fluid
 fields into NumPy arrays indexed by node.
@@ -112,7 +115,7 @@ Notes:
 - **Agreement with the parabola.** The profile has exactly the curvature of the parabola. The residual
   difference of 0.17% is a uniform slip of the bounce-back scheme, which depends on tau and vanishes at
   tau = 7/8. With this slip included, the profile matches the exact solution of the scheme to 1e-9
-  (see [theory.md](../theory.md#solid-nodes-implemented-on-all-platforms)).
+  (see [theory.md](../theory.md#solid-nodes-and-walls)).
 - **Periodic directions.** The walls are planes of solid nodes. In x and z the lattice stays periodic,
   so the channel is infinite along the flow.
 - **Momentum removal.** It must be off (`setFluidMomentumRemovalFrequency(0)`): otherwise the plugin
@@ -593,3 +596,159 @@ Notes:
   and pass `{'Precision': 'mixed'}`. Every example runs unchanged; the random forces, and therefore
   the outputs with T > 0, differ from those of the Reference platform (see the
   [status table](README.md#what-works-in-this-version)).
+
+## Couette flow between two open faces
+
+The faces of the box can be open instead of periodic ([open faces](api_reference.md#open-faces)). Here the
+bottom face z = 0 holds the fluid at rest and the top face moves along x with the velocity U: the fluid
+between them is sheared, and in the steady state its velocity grows linearly from 0 to U. x and y stay
+periodic, so the two plates are infinite.
+
+```python
+import numpy as np
+import openmm as mm
+import openmm.unit as unit
+from openmmlbm import LBMForce
+
+# A box of 1 x 1 x 5 nm: 2 x 2 x 10 nodes of 0.5 nm.  x and y stay periodic.
+nx, ny, nz, dx = 2, 2, 10, 0.5
+system = mm.System()
+system.setDefaultPeriodicBoxVectors(mm.Vec3(nx*dx, 0, 0), mm.Vec3(0, ny*dx, 0), mm.Vec3(0, 0, nz*dx))
+system.addParticle(1.0)                       # OpenMM needs a particle; it is not coupled to the fluid
+
+force = LBMForce()
+force.setGridSize(nx, ny, nz)
+force.setFluidMomentumRemovalFrequency(0)     # required with open faces
+U = 0.5                                       # nm/ps
+force.setFaceBoundary(LBMForce.ZMin, LBMForce.Velocity)    # the bottom face: fluid at rest
+force.setFaceBoundary(LBMForce.ZMax, LBMForce.Velocity)    # the top face: fluid moving along x
+force.setFaceVelocity(LBMForce.ZMax, mm.Vec3(U, 0, 0))
+system.addForce(force)
+
+integrator = mm.VerletIntegrator(0.01)
+context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+context.setPositions([mm.Vec3(0.1, 0.1, 0.1)])
+integrator.step(20000)
+
+density, velocity = force.getFluidFields(context)
+ux = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))[:, 0].reshape(nz, ny, nx)[:, 0, 0]
+z = np.arange(nz)*dx                          # the faces are on the nodes z = 0 and z = (nz - 1) dx
+for k in (0, 3, 6, 9):
+    print('z = %.1f nm: u_x = %.4f nm/ps, linear profile %.4f' % (z[k], ux[k], U*z[k]/z[-1]))
+print('largest deviation from the linear profile: %.1e nm/ps' % np.abs(ux - U*z/z[-1]).max())
+```
+
+Output:
+
+```
+z = 0.0 nm: u_x = 0.0000 nm/ps, linear profile 0.0000
+z = 1.5 nm: u_x = 0.1667 nm/ps, linear profile 0.1667
+z = 3.0 nm: u_x = 0.3333 nm/ps, linear profile 0.3333
+z = 4.5 nm: u_x = 0.5000 nm/ps, linear profile 0.5000
+largest deviation from the linear profile: 1.1e-14 nm/ps
+```
+
+Notes:
+
+- **Where the plates are.** An open face is on the nodes of the face: z = 0 and z = (nz - 1) dx = 4.5 nm,
+  not at the edge of the box (5 nm). The fluid on those nodes has exactly the velocity of the face.
+- **Both faces of an axis.** The two faces perpendicular to an axis are both periodic or both open. Here
+  both z faces are `Velocity` faces; the bottom one keeps the default velocity, zero.
+- **Momentum removal.** It must be off with open faces: the plugin refuses to create the Context otherwise.
+- **Exact.** The linear profile is an exact solution of the scheme: the deviation is rounding.
+
+## Flow in a duct driven by a pressure difference
+
+A fluid flows from high to low pressure. In the lattice Boltzmann model the pressure is p = c_s^2 rho, with
+c_s^2 = dx^2/(3 dt^2), so two open faces at different densities drive a flow. Here the duct runs along y and
+has square cross-section: no-slip walls perpendicular to x and to z (solid nodes), and the faces y = 0 and
+y = (ny - 1) dx at the densities 1.01 rho0 and rho0. The script compares the velocity in the middle of the duct
+with the analytical solution for an incompressible fluid in a rectangular duct.
+
+```python
+import numpy as np
+import openmm as mm
+import openmm.unit as unit
+from openmmlbm import LBMForce
+
+# A duct along y: 8 x 16 x 8 nodes of 0.5 nm, with no-slip walls perpendicular to x and to z, and two open faces
+# along y at different densities.
+nx, ny, nz, dx, dt = 8, 16, 8, 0.5, 0.01
+rho0 = 602.214                                # Da/nm^3, the density of water
+nu = 5.0                                      # nm^2/ps, a large viscosity so that the flow settles quickly
+system = mm.System()
+system.setDefaultPeriodicBoxVectors(mm.Vec3(nx*dx, 0, 0), mm.Vec3(0, ny*dx, 0), mm.Vec3(0, 0, nz*dx))
+system.addParticle(1.0)
+
+force = LBMForce()
+force.setGridSize(nx, ny, nz)
+force.setFluidDensity(rho0)
+force.setKinematicViscosity(nu)
+force.setFluidMomentumRemovalFrequency(0)     # required with open faces
+
+# The walls: the solid planes i = 0 and k = 0.  The box is periodic in x and z, so each plane bounds the duct on
+# both sides, and with bounce-back the walls lie half a node from them: the duct is H = (nx - 1) dx = 3.5 nm wide.
+k, j, i = np.meshgrid(np.arange(nz), np.arange(ny), np.arange(nx), indexing='ij')
+index = i + nx*(j + ny*k)
+force.setSolidNodes(index[(i == 0) | (k == 0)])
+
+# The open faces: 1 % more density (pressure) at the inlet y = 0 than at the outlet y = (ny - 1) dx.
+force.setFaceBoundary(LBMForce.YMin, LBMForce.Density)
+force.setFaceBoundary(LBMForce.YMax, LBMForce.Density)
+force.setFaceDensity(LBMForce.YMin, 1.01*rho0)
+force.setFaceDensity(LBMForce.YMax, rho0)
+system.addForce(force)
+
+integrator = mm.VerletIntegrator(dt)
+context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+context.setPositions([mm.Vec3(0.1, 0.1, 0.1)])
+integrator.step(5000)
+
+density, velocity = force.getFluidFields(context)
+density = np.array(density.value_in_unit(unit.dalton/unit.nanometer**3)).reshape(nz, ny, nx)
+uy = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))[:, 1].reshape(nz, ny, nx)
+print('density on the axis of the duct / rho0:', ' '.join('%.4f' % d for d in density[nz//2, ::3, nx//2]/rho0))
+
+# The incompressible solution in a square duct of width H, centred at (nx dx/2, nz dx/2), with the pressure gradient
+# G = c_s^2 (rho_in - rho_out)/L, c_s^2 = dx^2/(3 dt^2) and L = (ny - 1) dx the distance between the faces.
+H, L, middle = (nx - 1)*dx, (ny - 1)*dx, ny//2
+G = dx**2/(3*dt**2)*0.01*rho0/L
+K = G/(density[nz//2, middle, nx//2]*nu)
+x, z = i[:, middle, :]*dx - nx*dx/2, k[:, middle, :]*dx - nz*dx/2
+inside = (np.abs(x) < H/2) & (np.abs(z) < H/2)     # the nodes inside the walls
+x, z = np.where(inside, x, 0), np.where(inside, z, 0)
+exact = np.zeros_like(x)
+for m in range(1, 200, 2):
+    a = m*np.pi/H
+    ratio = np.exp(a*(np.abs(z) - H/2))*(1 + np.exp(-2*a*np.abs(z)))/(1 + np.exp(-a*H))   # cosh(a z)/cosh(a H/2)
+    exact += 4*K*H**2/(m*np.pi)**3*(-1)**((m - 1)//2)*(1 - ratio)*np.cos(a*x)
+exact = np.where(inside, exact, 0)
+print('centre of the duct: u_y = %.4f nm/ps, incompressible solution %.4f nm/ps' % (uy[nz//2, middle, nx//2], exact.max()))
+print('largest deviation in the middle cross-section: %.1f %% of the centre velocity'
+      % (100*np.abs(uy[:, middle, :] - exact)[inside].max()/exact.max()))
+```
+
+Output:
+
+```
+density on the axis of the duct / rho0: 1.0100 1.0080 1.0060 1.0040 1.0020 1.0000
+centre of the duct: u_y = 0.1985 nm/ps, incompressible solution 0.1996 nm/ps
+largest deviation in the middle cross-section: 1.3 % of the centre velocity
+```
+
+Notes:
+
+- **The pressure falls linearly** from the inlet to the outlet, as for a viscous flow in a straight duct.
+- **Accuracy.** The deviation of 1.3 % is the error of the bounce-back walls on a duct only 7 nodes wide
+  (it falls as 1/H^2 with the width H in nodes, and it vanishes at tau = 7/8; here tau = 1.1), plus the
+  compressibility of the fluid: the density changes by 1 % along the duct, and so does the velocity, since
+  rho u is the same in every cross-section. Keep the density difference small (a few percent at most).
+- **Walls with Density faces.** With bounce-back walls the lattice keeps a spurious "staggered" motion, an
+  oscillation from one node to the next and from one step to the next, which the `Density` faces damp
+  ([theory.md](../theory.md#open-faces)). The flow above is steady to rounding.
+- **Other combinations.** A `Velocity` face at the inlet and a `Density` face at the outlet give a flow with
+  a prescribed flow rate; `setWallScheme(LBMForce.Regularized)` puts the walls on the first fluid nodes
+  instead of halfway to the solid nodes.
+- **Body force instead.** The same flow can be driven by `setBodyAcceleration()` in a periodic duct, as in
+  the [channel example](#channel-flow-between-two-walls); open faces are needed when the inlet and the outlet
+  matter, for example to impose a flow rate or a pressure.

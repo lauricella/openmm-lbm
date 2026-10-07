@@ -133,7 +133,7 @@ The kinematic viscosity nu enters the model through the relaxation time
 which must be larger than 1/2. The model is accurate for tau between about 0.505 and 2; outside this
 range the plugin prints a warning on stderr when the Context is created. Near 1/2 the fluid is close
 to the stability limit, and at large tau the error on the position of walls grows (see
-[theory.md](../theory.md#solid-nodes-implemented-on-all-platforms)).
+[theory.md](../theory.md#solid-nodes-and-walls)).
 
 Since dt is the time step of the molecular dynamics, the viscosity and the resolution are coupled:
 tau - 1/2 = 3 nu dt/dx^2. With dt = 0.01 ps:

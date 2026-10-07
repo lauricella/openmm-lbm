@@ -20,7 +20,7 @@ LBMForceProxy::LBMForceProxy() : SerializationProxy("LBMForce") {
 }
 
 void LBMForceProxy::serialize(const void* object, SerializationNode& node) const {
-    node.setIntProperty("version", 5);
+    node.setIntProperty("version", 7);
     const LBMForce& force = *reinterpret_cast<const LBMForce*>(object);
     node.setIntProperty("forceGroup", force.getForceGroup());
     node.setStringProperty("name", force.getName());
@@ -39,6 +39,7 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     node.setIntProperty("couplingScheme", force.getCouplingScheme());
     node.setIntProperty("dragScheme", force.getDragScheme());
     node.setBoolProperty("fluidFluctuations", force.getFluidFluctuations());
+    node.setIntProperty("wallScheme", force.getWallScheme());
     node.setDoubleProperty("machNumberLimit", force.getMachNumberLimit());
     Vec3 g = force.getBodyAcceleration();
     node.createChildNode("BodyAcceleration").setDoubleProperty("x", g[0]).setDoubleProperty("y", g[1]).setDoubleProperty("z", g[2]);
@@ -52,11 +53,18 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     SerializationNode& solid = node.createChildNode("SolidNodes");
     for (int index : solidNodes)
         solid.createChildNode("Node").setIntProperty("index", index);
+    SerializationNode& faces = node.createChildNode("Faces");
+    for (int face = 0; face < 6; face++) {
+        Vec3 v = force.getFaceVelocity((LBMForce::Face) face);
+        faces.createChildNode("Face").setIntProperty("type", force.getFaceBoundary((LBMForce::Face) face))
+             .setDoubleProperty("vx", v[0]).setDoubleProperty("vy", v[1]).setDoubleProperty("vz", v[2])
+             .setDoubleProperty("density", force.getFaceDensity((LBMForce::Face) face));
+    }
 }
 
 void* LBMForceProxy::deserialize(const SerializationNode& node) const {
     int version = node.getIntProperty("version");
-    if (version < 1 || version > 5)
+    if (version < 1 || version > 7)
         throw OpenMMException("Unsupported version number");
     LBMForce* force = new LBMForce();
     try {
@@ -81,6 +89,9 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
         // Versions 1 to 4 were written before the fluid fluctuations existed, without them.
         if (version >= 5)
             force->setFluidFluctuations(node.getBoolProperty("fluidFluctuations"));
+        // Versions 1 to 5 were written before the wall schemes existed, with bounce-back.
+        if (version >= 6)
+            force->setWallScheme((LBMForce::WallScheme) node.getIntProperty("wallScheme"));
         const SerializationNode& g = node.getChildNode("BodyAcceleration");
         force->setBodyAcceleration(Vec3(g.getDoubleProperty("x"), g.getDoubleProperty("y"), g.getDoubleProperty("z")));
         const SerializationNode& u = node.getChildNode("InitialFluidVelocity");
@@ -93,6 +104,19 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
             for (const SerializationNode& solid : node.getChildNode("SolidNodes").getChildren())
                 solidNodes.push_back(solid.getIntProperty("index"));
             force->setSolidNodes(solidNodes);
+        }
+        // Versions 1 to 6 were written before the open faces existed, with a periodic box.
+        if (version >= 7) {
+            const vector<SerializationNode>& faces = node.getChildNode("Faces").getChildren();
+            if (faces.size() != 6)
+                throw OpenMMException("LBMForce: the serialized force must have 6 faces");
+            for (int face = 0; face < 6; face++) {
+                LBMForce::Face f = (LBMForce::Face) face;
+                force->setFaceBoundary(f, (LBMForce::BoundaryType) faces[face].getIntProperty("type"));
+                force->setFaceVelocity(f, Vec3(faces[face].getDoubleProperty("vx"), faces[face].getDoubleProperty("vy"),
+                        faces[face].getDoubleProperty("vz")));
+                force->setFaceDensity(f, faces[face].getDoubleProperty("density"));
+            }
         }
     }
     catch (...) {

@@ -126,6 +126,12 @@ import openmm.unit as unit
 %pythonappend LBMPlugin::LBMForce::getInitialFluidVelocity() const %{
     val = unit.Quantity(val, unit.nanometer/unit.picosecond)
 %}
+%pythonappend LBMPlugin::LBMForce::getFaceVelocity(Face face) const %{
+    val = unit.Quantity(val, unit.nanometer/unit.picosecond)
+%}
+%pythonappend LBMPlugin::LBMForce::getFaceDensity(Face face) const %{
+    val = unit.Quantity(val, unit.dalton/unit.nanometer**3)
+%}
 %pythonappend LBMPlugin::LBMForce::getLatticeParametersInContext(const OpenMM::Context& context, double& dx, double& dt, double& tau) const %{
     val = (unit.Quantity(val[0], unit.nanometer), unit.Quantity(val[1], unit.picosecond), val[2])
 %}
@@ -160,6 +166,23 @@ public:
         Explicit = 0,
         Centered = 1
     };
+    enum WallScheme {
+        BounceBack = 0,
+        Regularized = 1
+    };
+    enum Face {
+        XMin = 0,
+        XMax = 1,
+        YMin = 2,
+        YMax = 3,
+        ZMin = 4,
+        ZMax = 5
+    };
+    enum BoundaryType {
+        Periodic = 0,
+        Velocity = 1,
+        Density = 2
+    };
     LBMForce();
 
     %apply int& OUTPUT {int& nx};
@@ -185,6 +208,14 @@ public:
     void setDragScheme(DragScheme scheme);
     bool getFluidFluctuations() const;
     void setFluidFluctuations(bool fluctuations);
+    WallScheme getWallScheme() const;
+    void setWallScheme(WallScheme scheme);
+    BoundaryType getFaceBoundary(Face face) const;
+    void setFaceBoundary(Face face, BoundaryType type);
+    OpenMM::Vec3 getFaceVelocity(Face face) const;
+    void setFaceVelocity(Face face, const OpenMM::Vec3& velocity);
+    double getFaceDensity(Face face) const;
+    void setFaceDensity(Face face, double density);
     int getRandomNumberSeed() const;
     void setRandomNumberSeed(int seed);
     OpenMM::Vec3 getBodyAcceleration() const;

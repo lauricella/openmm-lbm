@@ -31,8 +31,9 @@ Know these before using the plugin for a study:
 - **Nearest-node coupling.** Each particle is coupled to the nearest lattice node, so the forces jump when
   a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
   lattice spacing and on tau.
-- **Walls.** Solid nodes have a no-slip bounce-back; faces with an imposed density or velocity are not
-  available yet.
+- **Walls and open faces.** Solid nodes are no-slip walls, with bounce-back on every platform; the
+  regularized walls (`setWallScheme()`) and the open faces with an imposed velocity or density
+  (`setFaceBoundary()`) are available only on the Reference platform for now.
 
 ## Contents
 
@@ -67,6 +68,8 @@ Know these before using the plugin for a study:
 | Reading and writing the fluid: `getFluidFields()`, `getFluidState()`, `setFluidState()`, `getFluidMachNumber()` | yes | yes |
 | Fluid update: collision, streaming, body force, removal of the fluid momentum, Mach number check | yes | yes |
 | Solid nodes (`setSolidNodes()`) and the force of the fluid on the walls (`getWallForce()`) | yes | yes |
+| Regularized walls (`setWallScheme(LBMForce.Regularized)`) | yes | not yet |
+| Open faces with an imposed velocity or density ([`setFaceBoundary()`](api_reference.md#open-faces)) | yes | not yet |
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |

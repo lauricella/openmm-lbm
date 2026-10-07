@@ -38,6 +38,11 @@ void testSerialization() {
     force.setCouplingScheme(LBMForce::NVE);
     force.setDragScheme(LBMForce::Centered);
     force.setFluidFluctuations(true);
+    force.setWallScheme(LBMForce::Regularized);
+    force.setFaceBoundary(LBMForce::YMin, LBMForce::Density);
+    force.setFaceBoundary(LBMForce::YMax, LBMForce::Velocity);
+    force.setFaceDensity(LBMForce::YMin, 610.0);
+    force.setFaceVelocity(LBMForce::YMax, Vec3(0.1, -0.2, 0.3));
     force.setSolidNodes(vector<int>({0, 7, 42}));
     force.setBodyAcceleration(Vec3(0.1, 0.2, 0.3));
     force.setInitialFluidVelocity(Vec3(-0.1, 0.0, 0.05));
@@ -73,6 +78,13 @@ void testSerialization() {
     ASSERT_EQUAL(force.getCouplingScheme(), force2.getCouplingScheme());
     ASSERT_EQUAL(force.getDragScheme(), force2.getDragScheme());
     ASSERT_EQUAL(force.getFluidFluctuations(), force2.getFluidFluctuations());
+    ASSERT_EQUAL(force.getWallScheme(), force2.getWallScheme());
+    for (int face = 0; face < 6; face++) {
+        LBMForce::Face f = (LBMForce::Face) face;
+        ASSERT_EQUAL(force.getFaceBoundary(f), force2.getFaceBoundary(f));
+        ASSERT_EQUAL_VEC(force.getFaceVelocity(f), force2.getFaceVelocity(f), 0.0);
+        ASSERT_EQUAL(force.getFaceDensity(f), force2.getFaceDensity(f));
+    }
     vector<int> solid1, solid2;
     force.getSolidNodes(solid1);
     force2.getSolidNodes(solid2);
@@ -84,14 +96,35 @@ void testSerialization() {
         ASSERT_EQUAL(force.getParticle(i), force2.getParticle(i));
     delete copy;
 
-    // A force written before the fluid fluctuations existed (version 4) has none, and one written before the drag
-    // scheme existed (version 3) has the explicit drag.
+    // A force written before the open faces existed (version 6) has a periodic box, one written before the wall
+    // schemes existed (version 5) has bounce-back walls, one written before the fluid fluctuations existed (version
+    // 4) has none, and one written before the drag scheme existed (version 3) has the explicit drag.
 
     string xml = buffer.str();
+    size_t version = xml.find("version=\"7\"");
+    ASSERT(version != string::npos);
+    xml.replace(version, 11, "version=\"6\"");
+    stringstream buffer6(xml);
+    LBMForce* copy6 = XmlSerializer::deserialize<LBMForce>(buffer6);
+    for (int face = 0; face < 6; face++)
+        ASSERT_EQUAL(LBMForce::Periodic, copy6->getFaceBoundary((LBMForce::Face) face));
+    ASSERT_EQUAL(LBMForce::Regularized, copy6->getWallScheme());
+    delete copy6;
+    size_t walls = xml.find(" wallScheme=\"1\"");
+    ASSERT(walls != string::npos);
+    xml.erase(walls, 15);
+    version = xml.find("version=\"6\"");
+    ASSERT(version != string::npos);
+    xml.replace(version, 11, "version=\"5\"");
+    stringstream buffer5(xml);
+    LBMForce* copy5 = XmlSerializer::deserialize<LBMForce>(buffer5);
+    ASSERT_EQUAL(LBMForce::BounceBack, copy5->getWallScheme());
+    ASSERT(copy5->getFluidFluctuations());
+    delete copy5;
     size_t fluctuations = xml.find(" fluidFluctuations=\"1\"");
     ASSERT(fluctuations != string::npos);
     xml.erase(fluctuations, 22);
-    size_t version = xml.find("version=\"5\"");
+    version = xml.find("version=\"5\"");
     ASSERT(version != string::npos);
     xml.replace(version, 11, "version=\"4\"");
     stringstream buffer4(xml);

@@ -94,6 +94,36 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     }
     if ((int) lattice.solidNodes.size() == lattice.getNumNodes())
         throw OpenMMException("LBMForce: all lattice nodes are solid");
+    if (force.getWallScheme() != LBMForce::BounceBack && force.getWallScheme() != LBMForce::Regularized)
+        throw OpenMMException("LBMForce: unknown wall scheme");
+    lattice.wallScheme = force.getWallScheme();
+
+    // Faces of the box: periodic, or open with a velocity or a density (in lattice units).
+
+    const char* axisName[3] = {"x", "y", "z"};
+    int size[3] = {lattice.nx, lattice.ny, lattice.nz};
+    for (int face = 0; face < 6; face++) {
+        LBMForce::BoundaryType type = force.getFaceBoundary((LBMForce::Face) face);
+        if (type != LBMForce::Periodic && type != LBMForce::Velocity && type != LBMForce::Density)
+            throw OpenMMException("LBMForce: unknown boundary type of a face");
+        lattice.faceBoundary[face] = type;
+        lattice.faceVelocity[face] = force.getFaceVelocity((LBMForce::Face) face)*(lattice.dt/lattice.dx);
+        double density = force.getFaceDensity((LBMForce::Face) face);
+        if (density < 0)
+            throw OpenMMException("LBMForce: the density of a face must not be negative");
+        lattice.faceDensity[face] = (density == 0 ? 1.0 : density/lattice.density);
+    }
+    for (int axis = 0; axis < 3; axis++) {
+        if ((lattice.faceBoundary[2*axis] == LBMForce::Periodic) != (lattice.faceBoundary[2*axis+1] == LBMForce::Periodic))
+            throw OpenMMException(string("LBMForce: the two faces perpendicular to ") + axisName[axis] + " must be both "
+                    "periodic or both open (Velocity or Density)");
+        if (lattice.isOpenAxis(axis) && size[axis] < 3)
+            throw OpenMMException(string("LBMForce: with open faces perpendicular to ") + axisName[axis] + " the grid "
+                    "needs at least 3 nodes along " + axisName[axis]);
+    }
+    if (lattice.hasOpenFaces() && force.getFluidMomentumRemovalFrequency() > 0)
+        throw OpenMMException("LBMForce: with open faces the fluid exchanges momentum with the outside, and its momentum "
+                "cannot be removed: call setFluidMomentumRemovalFrequency(0)");
     lattice.friction = force.getFriction();
     if (force.getCouplingScheme() != LBMForce::EulerMaruyama && force.getCouplingScheme() != LBMForce::NVE)
         throw OpenMMException("LBMForce: unknown coupling scheme");
@@ -228,6 +258,11 @@ void LBMForceImpl::updateParametersInContext(ContextImpl& context) {
         throw OpenMMException("updateParametersInContext: the set of coupled particles cannot be changed");
     if (updated.solidNodes != lattice.solidNodes)
         throw OpenMMException("updateParametersInContext: the solid nodes cannot be changed");
+    if (updated.wallScheme != lattice.wallScheme)
+        throw OpenMMException("updateParametersInContext: the wall scheme cannot be changed");
+    for (int face = 0; face < 6; face++)
+        if (updated.faceBoundary[face] != lattice.faceBoundary[face])
+            throw OpenMMException("updateParametersInContext: the boundary types of the faces cannot be changed");
     if (updated.dragScheme != lattice.dragScheme)
         throw OpenMMException("updateParametersInContext: the drag scheme cannot be changed");
     if (updated.fluidFluctuations != lattice.fluidFluctuations)
@@ -250,12 +285,13 @@ void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& sta
 
 /**
  * A checkpoint starts with a header that identifies it: a tag, the format version, the platform, the grid size,
- * the number of coupled particles, (from version 2) the drag scheme and (from version 3) whether the fluid
- * fluctuates.  The kernel writes the rest, which is the same in all versions.  Version 1 was written before the
- * drag scheme existed, with the explicit drag, and versions 1 and 2 before the fluid fluctuations, without them.
+ * the number of coupled particles, (from version 2) the drag scheme, (from version 3) whether the fluid
+ * fluctuates and (from version 4) the wall scheme.  The kernel writes the rest, which is the same in all versions.
+ * Version 1 was written before the drag scheme existed, with the explicit drag, versions 1 and 2 before the fluid
+ * fluctuations, without them, and versions 1 to 3 before the wall schemes, with bounce-back.
  */
 static const char checkpointTag[8] = {'L', 'B', 'M', 'C', 'K', 'P', 'T', '1'};
-static const int checkpointVersion = 3;
+static const int checkpointVersion = 4;
 
 void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     stream.write(checkpointTag, sizeof(checkpointTag));
@@ -264,8 +300,8 @@ void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     int length = platform.size();
     stream.write((const char*) &length, sizeof(int));
     stream.write(platform.c_str(), length);
-    int header[6] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme,
-                     (int) lattice.fluidFluctuations};
+    int header[7] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme,
+                     (int) lattice.fluidFluctuations, (int) lattice.wallScheme};
     stream.write((const char*) header, sizeof(header));
     kernel.getAs<CalcLBMForceKernel>().createCheckpoint(context, stream);
     if (!stream)
@@ -289,7 +325,7 @@ void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
     if (platform != context.getPlatform().getName())
         throw OpenMMException("LBMForce: the checkpoint was written on the platform " + platform + ", not on " +
                 context.getPlatform().getName());
-    int header[6] = {0, 0, 0, 0, (int) LBMForce::Explicit, 0};
+    int header[7] = {0, 0, 0, 0, (int) LBMForce::Explicit, 0, (int) LBMForce::BounceBack};
     stream.read((char*) header, (version+3)*sizeof(int));
     if (!stream || header[0] != lattice.nx || header[1] != lattice.ny || header[2] != lattice.nz ||
             header[3] != (int) lattice.particles.size())
@@ -299,6 +335,8 @@ void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
     if (header[5] != (int) lattice.fluidFluctuations)
         throw OpenMMException(string("LBMForce: the checkpoint was written ") + (header[5] ? "with" : "without") +
                 " fluid fluctuations, and this Context has them " + (lattice.fluidFluctuations ? "on" : "off"));
+    if (header[6] != (int) lattice.wallScheme)
+        throw OpenMMException("LBMForce: the checkpoint was written with a different wall scheme");
     kernel.getAs<CalcLBMForceKernel>().loadCheckpoint(context, stream);
     if (!stream)
         throw OpenMMException("LBMForce: the checkpoint is truncated");

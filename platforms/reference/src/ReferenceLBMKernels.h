@@ -30,8 +30,10 @@ namespace LBMPlugin {
  *     node, and the node receives the opposite force (docs/theory.md, section 2);
  *  4. collision and streaming: the populations are rebuilt from the moments of their own node and pushed
  *     to the neighbours.  The collision reads only moments, so a single population array is enough;
- *  5. bounce-back at the solid nodes, if any: a population that streamed into a solid node is sent back
- *     to the fluid node it came from.  Solid nodes have no moments and no collision.
+ *  5. the walls and the open faces: with bounce-back a population that streamed into a solid node is sent back to
+ *     the fluid node it came from; then the populations of the boundary nodes (the fluid nodes next to the solid
+ *     nodes with regularized walls, and those on open faces) are rebuilt.  Solid nodes have no moments and no
+ *     collision.
  */
 class ReferenceCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
@@ -65,6 +67,7 @@ private:
     double getGaussianRandom();
     void collideAndStream();
     void bounceBack();
+    void applyBoundaries();
     void checkMachNumber();
     double computeMachNumber() const;
     LBMLatticeParameters lattice;
@@ -79,6 +82,17 @@ private:
     std::vector<double> rho, momentum, piNeq, forceDensity;
     /** 1 for fluid nodes, 0 for solid nodes; empty if there are no solid nodes. */
     std::vector<char> isFluid;
+    /** What a boundary node imposes: a wall at rest, the velocity of a face, the density of a face (with the velocity
+        along the face zero), or the density of a face with zero velocity (nodes shared by several Density faces). */
+    enum BoundaryKind {WallBoundary = 0, VelocityBoundary = 1, DensityBoundary = 2, DensityAtRestBoundary = 3};
+    /** The boundary nodes: with regularized walls the fluid nodes next to the solid nodes, which lie on the walls,
+        and the fluid nodes on the open faces.  For each of them: the bits 1 << q of the directions q whose
+        populations are unknown after the streaming (unknownDirections) and of those among them whose source node
+        x - c_q is solid (solidDirections), its BoundaryKind and the face that gives its velocity or density. */
+    std::vector<int> boundaryNodes, unknownDirections, solidDirections, boundaryKind, boundaryFace;
+    /** 1 for the nodes of regularized walls, 2 for the other boundary nodes (on open faces), 0 elsewhere; empty if
+        there are no boundary nodes. */
+    std::vector<char> isBoundary;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;
     /** True from the lattice step until the coupling forces are recomputed or the state is replaced: the forces

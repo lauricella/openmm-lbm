@@ -96,6 +96,9 @@ void testParameters() {
     ASSERT_EQUAL(LBMForce::Explicit, force.getDragScheme());
     force.setDragScheme(LBMForce::Centered);
     ASSERT_EQUAL(LBMForce::Centered, force.getDragScheme());
+    ASSERT_EQUAL(LBMForce::BounceBack, force.getWallScheme());
+    force.setWallScheme(LBMForce::Regularized);
+    ASSERT_EQUAL(LBMForce::Regularized, force.getWallScheme());
     ASSERT_EQUAL(0.3, force.getMachNumberLimit());
     force.setMachCheckFrequency(50);
     force.setMachNumberLimit(0.25);

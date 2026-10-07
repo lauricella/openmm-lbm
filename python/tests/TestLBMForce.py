@@ -185,6 +185,52 @@ def test_wall_force():
     assert force.getWallForce(context)[2].value_in_unit(unit.kilojoule_per_mole/unit.nanometer) < 0.0
 
 
+def test_wall_scheme_and_faces():
+    # The wall scheme and the open faces, with units, survive serialization; a Couette flow between a face at rest and
+    # a moving face becomes linear.
+    import numpy as np
+    force = LBMForce()
+    assert force.getWallScheme() == LBMForce.BounceBack
+    force.setWallScheme(LBMForce.Regularized)
+    assert force.getWallScheme() == LBMForce.Regularized
+    for face in (LBMForce.XMin, LBMForce.XMax, LBMForce.YMin, LBMForce.YMax, LBMForce.ZMin, LBMForce.ZMax):
+        assert force.getFaceBoundary(face) == LBMForce.Periodic
+        assert force.getFaceDensity(face) == 0*unit.dalton/unit.nanometer**3
+    force.setFaceBoundary(LBMForce.ZMin, LBMForce.Velocity)
+    force.setFaceBoundary(LBMForce.ZMax, LBMForce.Velocity)
+    force.setFaceVelocity(LBMForce.ZMax, mm.Vec3(0.5, 0, 0)*unit.nanometer/unit.picosecond)
+    force.setFaceDensity(LBMForce.XMin, 610.0*unit.dalton/unit.nanometer**3)
+    assert force.getFaceVelocity(LBMForce.ZMax) == mm.Vec3(0.5, 0, 0)*unit.nanometer/unit.picosecond
+    assert force.getFaceDensity(LBMForce.XMin) == 610.0*unit.dalton/unit.nanometer**3
+    copy = LBMForce.cast(mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(force)))
+    assert copy.getWallScheme() == LBMForce.Regularized
+    assert copy.getFaceBoundary(LBMForce.ZMax) == LBMForce.Velocity
+    assert copy.getFaceVelocity(LBMForce.ZMax) == mm.Vec3(0.5, 0, 0)*unit.nanometer/unit.picosecond
+    system = mm.System()
+    system.setDefaultPeriodicBoxVectors(mm.Vec3(1, 0, 0), mm.Vec3(0, 1, 0), mm.Vec3(0, 0, 5))
+    system.addParticle(1.0)
+    force.setGridSize(2, 2, 10)
+    force.setFluidMomentumRemovalFrequency(0)
+    force.setKinematicViscosity(5.0)
+    system.addForce(force)
+    integrator = mm.VerletIntegrator(0.01)
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+    context.setPositions([mm.Vec3(0.1, 0.1, 0.1)])
+    integrator.step(2000)
+    density, velocity = force.getFluidFields(context)
+    ux = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))[:, 0].reshape(10, 4)
+    assert np.allclose(ux, 0.5*np.arange(10)[:, None]/9, rtol=0, atol=1e-10)
+
+
+def test_open_faces_need_no_momentum_removal():
+    # With open faces the momentum of the fluid cannot be removed: the default removal frequency (1) is an error.
+    system, force, positions = create_system(num_particles=1)
+    force.setFaceBoundary(LBMForce.YMin, LBMForce.Density)
+    force.setFaceBoundary(LBMForce.YMax, LBMForce.Density)
+    with pytest.raises(mm.OpenMMException, match='setFluidMomentumRemovalFrequency'):
+        mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+
+
 def test_serialization():
     system, force, positions = create_system()
     force.setFriction(7.0)

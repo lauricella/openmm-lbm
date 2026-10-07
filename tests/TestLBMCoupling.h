@@ -409,10 +409,12 @@ void testWallReflectionDirection(Platform& platform) {
  * being the sum of getWallForce() dt over the steps.  The fluid flows against the walls j = 0 and j = 4, one
  * particle is reflected by a wall, and all particles feel drag and random force.
  */
-void testWallMomentumBalance(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
+void testWallMomentumBalance(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit,
+        LBMForce::WallScheme wallScheme=LBMForce::BounceBack) {
     LBMForce* force;
     System* system = createCoupledSystem(force, 4, 10.0, 300.0);
     force->setDragScheme(drag);
+    force->setWallScheme(wallScheme);
     vector<int> walls = wallPlane(8, 8, 8);
     for (int node : wallPlane(8, 8, 8))
         walls.push_back(node + 8*4);                   // the plane j = 4
@@ -730,6 +732,8 @@ void runCouplingTests(Platform& platform) {
     testWallReflection(platform);
     testWallReflectionDirection(platform);
     testWallMomentumBalance(platform);
+    if (platform.getName() == "Reference")
+        testWallMomentumBalance(platform, LBMForce::Explicit, LBMForce::Regularized);
     testRestartWithParticles(platform);
     testCheckpointWithRandomForce(platform);
     testCheckpointMismatch(platform);

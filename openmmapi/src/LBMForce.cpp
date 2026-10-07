@@ -19,8 +19,48 @@ using namespace std;
 
 LBMForce::LBMForce() : nx(0), ny(0), nz(0), randomNumberSeed(0), momentumRemovalFrequency(1), machCheckFrequency(100),
         density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0), machNumberLimit(0.3),
-        couplingScheme(EulerMaruyama), dragScheme(Explicit), fluidFluctuations(false), bodyAcceleration(0, 0, 0),
+        couplingScheme(EulerMaruyama), dragScheme(Explicit), wallScheme(BounceBack), fluidFluctuations(false), bodyAcceleration(0, 0, 0),
         initialVelocity(0, 0, 0) {
+    for (int face = 0; face < 6; face++) {
+        faceBoundary[face] = Periodic;
+        faceVelocity[face] = Vec3();
+        faceDensity[face] = 0.0;
+    }
+}
+
+static void checkFace(LBMForce::Face face) {
+    if (face < LBMForce::XMin || face > LBMForce::ZMax)
+        throw OpenMMException("LBMForce: unknown face of the box");
+}
+
+LBMForce::BoundaryType LBMForce::getFaceBoundary(Face face) const {
+    checkFace(face);
+    return faceBoundary[face];
+}
+
+void LBMForce::setFaceBoundary(Face face, BoundaryType type) {
+    checkFace(face);
+    faceBoundary[face] = type;
+}
+
+Vec3 LBMForce::getFaceVelocity(Face face) const {
+    checkFace(face);
+    return faceVelocity[face];
+}
+
+void LBMForce::setFaceVelocity(Face face, const Vec3& velocity) {
+    checkFace(face);
+    faceVelocity[face] = velocity;
+}
+
+double LBMForce::getFaceDensity(Face face) const {
+    checkFace(face);
+    return faceDensity[face];
+}
+
+void LBMForce::setFaceDensity(Face face, double density) {
+    checkFace(face);
+    faceDensity[face] = density;
 }
 
 LBMForce::CouplingScheme LBMForce::getCouplingScheme() const {
@@ -37,6 +77,14 @@ LBMForce::DragScheme LBMForce::getDragScheme() const {
 
 void LBMForce::setDragScheme(DragScheme scheme) {
     dragScheme = scheme;
+}
+
+LBMForce::WallScheme LBMForce::getWallScheme() const {
+    return wallScheme;
+}
+
+void LBMForce::setWallScheme(WallScheme scheme) {
+    wallScheme = scheme;
 }
 
 bool LBMForce::getFluidFluctuations() const {

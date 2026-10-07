@@ -346,6 +346,8 @@ void runCenteredTests(Platform& platform) {
     testForceEvaluationsAndSeeds(platform, drag);
     testRepeatedForceEvaluation(platform, drag);
     testWallMomentumBalance(platform, drag);
+    if (platform.getName() == "Reference")
+        testWallMomentumBalance(platform, drag, LBMForce::Regularized);
     testRestartWithParticles(platform, drag);
     testCheckpointWithRandomForce(platform, drag);
     testEquipartition(platform, drag);

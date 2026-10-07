@@ -66,6 +66,81 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
         }
     }
 
+    // Boundary nodes (docs/theory.md, section 1): with regularized walls the fluid nodes next to the solid nodes, which
+    // lie on the walls, and the fluid nodes on the open faces of the box.  For each of them, the directions q whose
+    // source node x - c_q is solid, or lies beyond an open face, are unknown after the streaming.  A node next to a
+    // solid node is a wall at rest; on the faces, the first Velocity face of the node in the order XMin ... ZMax gives
+    // the velocity, and otherwise its Density faces give the density.  The wall nodes start at rest, with the velocity
+    // -g/2 of their populations, so that the velocity of the fluid (j + F/2)/rho is that of the wall.
+
+    boundaryNodes.clear();
+    unknownDirections.clear();
+    solidDirections.clear();
+    boundaryKind.clear();
+    boundaryFace.clear();
+    isBoundary.clear();
+    bool regularized = (!isFluid.empty() && lattice.wallScheme == LBMForce::Regularized);
+    if (regularized || lattice.hasOpenFaces()) {
+        int size[3] = {lattice.nx, lattice.ny, lattice.nz};
+        int nx = size[0], ny = size[1];
+        isBoundary.resize(numNodes, 0);
+        Vec3 v = lattice.bodyAcceleration*(-0.5);
+        D3Q19::equilibriumDeviation(0.0, v[0], v[1], v[2], dfeq);
+        for (int node = 0; node < numNodes; node++) {
+            if (!isFluid.empty() && !isFluid[node])
+                continue;
+            int index[3] = {node%nx, (node/nx)%ny, node/(nx*ny)};
+            int solid = 0, outside = 0;
+            for (int q = 1; q < D3Q19::numVelocities; q++) {
+                int c[3] = {D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]}, source[3];
+                bool beyondFace = false;
+                for (int a = 0; a < 3; a++) {
+                    source[a] = index[a] - c[a];
+                    if (source[a] < 0 || source[a] >= size[a]) {
+                        beyondFace = beyondFace || lattice.isOpenAxis(a);
+                        source[a] = (source[a] + size[a])%size[a];
+                    }
+                }
+                if (beyondFace)
+                    outside |= 1<<q;
+                else if (regularized && !isFluid[source[0] + nx*(source[1] + ny*source[2])])
+                    solid |= 1<<q;
+            }
+            if (solid == 0 && outside == 0)
+                continue;
+            int kind = WallBoundary, face = -1;
+            if (solid == 0) {
+                int velocityFace = -1, densityFace = -1, numDensityFaces = 0;
+                for (int f = 0; f < 6; f++) {
+                    int a = f/2;
+                    if (!lattice.isOpenAxis(a) || index[a] != (f%2 == 0 ? 0 : size[a]-1))
+                        continue;
+                    if (lattice.faceBoundary[f] == LBMForce::Velocity && velocityFace < 0)
+                        velocityFace = f;
+                    if (lattice.faceBoundary[f] == LBMForce::Density && numDensityFaces++ == 0)
+                        densityFace = f;
+                }
+                if (velocityFace >= 0) {
+                    kind = VelocityBoundary;
+                    face = velocityFace;
+                }
+                else {
+                    kind = (numDensityFaces == 1 ? DensityBoundary : DensityAtRestBoundary);
+                    face = densityFace;
+                }
+            }
+            boundaryNodes.push_back(node);
+            unknownDirections.push_back(solid | outside);
+            solidDirections.push_back(solid);
+            boundaryKind.push_back(kind);
+            boundaryFace.push_back(face);
+            isBoundary[node] = (kind == WallBoundary ? 1 : 2);
+            if (kind == WallBoundary)
+                for (int q = 0; q < D3Q19::numVelocities; q++)
+                    populations[q*numNodes+node] = dfeq[q];
+        }
+    }
+
     // Coupled particles: masses in units of the mass of a cell, m_c = rho0 dx^3.  The coupling force is zero
     // before the first step.
 
@@ -147,8 +222,10 @@ void ReferenceCalcLBMForceKernel::advanceFluid(ContextImpl& context) {
     if (!lattice.particles.empty())
         couple(context, true);
     collideAndStream();
-    if (!isFluid.empty())
+    if (!isFluid.empty() && lattice.wallScheme == LBMForce::BounceBack)
         bounceBack();
+    if (!boundaryNodes.empty())
+        applyBoundaries();
     stepForcesCurrent = true;
     stepIndex++;
     if (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)
@@ -233,10 +310,13 @@ void ReferenceCalcLBMForceKernel::computeMoments() {
 
 void ReferenceCalcLBMForceKernel::removeFluidMomentum() {
     // Subtract the velocity of the centre of mass of the fluid, u_cm = sum(j)/sum(rho), from every node:
-    // j <- j - rho*u_cm.  The non-equilibrium moments are left as they are.
+    // j <- j - rho*u_cm.  The non-equilibrium moments are left as they are.  The nodes on regularized walls keep
+    // the velocity of the wall: they are left out of the sums and of the subtraction.
     int numNodes = lattice.getNumNodes();
     double mass = 0, px = 0, py = 0, pz = 0;
     for (int node = 0; node < numNodes; node++) {
+        if (!isBoundary.empty() && isBoundary[node])
+            continue;
         mass += rho[node];
         px += momentum[3*node];
         py += momentum[3*node+1];
@@ -244,6 +324,8 @@ void ReferenceCalcLBMForceKernel::removeFluidMomentum() {
     }
     double ux = px/mass, uy = py/mass, uz = pz/mass;
     for (int node = 0; node < numNodes; node++) {
+        if (!isBoundary.empty() && isBoundary[node])
+            continue;
         momentum[3*node] -= rho[node]*ux;
         momentum[3*node+1] -= rho[node]*uy;
         momentum[3*node+2] -= rho[node]*uz;
@@ -257,7 +339,9 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
     // the momentum of the fluid before the force of this step, j(t - dt/2).  In a lattice step (isStep) the
     // particle receives F and the node -F: the reactions of the particles of a node are summed in particle
     // order, then added to the force density of the node.  A solid node has rho = 0 and is at rest; the
-    // reaction it receives leaves the fluid.  The random numbers are drawn once per step, in particle order.
+    // reaction it receives leaves the fluid, and so does the reaction on a boundary node (a node of a regularized
+    // wall or of an open face), whose velocity is imposed.  The random numbers are drawn once per step, in particle
+    // order.
     vector<Vec3>& positions = extractPositions(context);
     vector<Vec3>& velocities = extractVelocities(context);
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
@@ -301,7 +385,9 @@ void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, 
     // node, the sum S of their forces and the velocity of the node are
     //   S = [-gamma (P~ - M u~) + R]/(1 + a + a M/m_c),   u_c(t) = u~ - h S/m_c,
     // and then F_k = [-gamma m_k (v~_k - u_c(t)) + R_k]/(1 + a).  The node receives -S, so that G_c = Fbody_c - S.
-    // A solid node is a wall at rest of infinite mass: u_c(t) = 0.  Fc_k is read from the forces of OpenMM, to which
+    // A solid node is a wall at rest of infinite mass: u_c(t) = 0.  A boundary node (of a regularized wall or of an
+    // open face) is a wall of infinite mass that moves with the velocity imposed on the node, (j + F/2)/rho, and it
+    // receives -S.  Fc_k is read from the forces of OpenMM, to which
     // the other forces of the System have been added since LBMForce is the last one.  The particles of a node are
     // summed in particle order, as on the GPU platforms (keys node*N + k, sorted).
     int numParticles = lattice.particles.size();
@@ -342,15 +428,19 @@ void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, 
             random += randomForces[i];
         }
         Vec3 u, sum;
-        if (rho[node] > 0) {
+        bool boundary = (!isBoundary.empty() && isBoundary[node]);
+        if (rho[node] > 0 && !boundary) {
             const double* j = &momentum[3*node];
             const double* F = &forceDensity[3*node];
             Vec3 known = Vec3(j[0] + h*F[0], j[1] + h*F[1], j[2] + h*F[2])*(1.0/rho[node]);
             sum = ((particleMomentum - known*mass)*(-gamma) + random)*(1.0/(1.0 + a + a*mass/rho[node]));
             u = known - sum*(h/rho[node]);
         }
-        else
-            sum = (particleMomentum*(-gamma) + random)*(1.0/(1.0 + a));
+        else {
+            if (boundary)
+                u = Vec3(momentum[3*node], momentum[3*node+1], momentum[3*node+2])*(1.0/rho[node]) + lattice.bodyAcceleration*0.5;
+            sum = ((particleMomentum - u*mass)*(-gamma) + random)*(1.0/(1.0 + a));
+        }
         for (int k = first; k < end; k++) {
             int i = keys[k]%numParticles;
             Vec3 f = ((knownVelocity[i] - u)*(-gamma*particleMass[i]) + randomForces[i])*(1.0/(1.0 + a));
@@ -381,15 +471,21 @@ void ReferenceCalcLBMForceKernel::drawNoise() {
 
 void ReferenceCalcLBMForceKernel::applyReaction() {
     // At the end of the coupling of a lattice step: the random numbers have been used, and the reaction of the
-    // particles is added to the force density of the nodes.  The reaction on a solid node goes to the wall.
+    // particles is added to the force density of the nodes.  The reaction on a solid node, or on a node of a
+    // regularized wall, goes to the wall; the reaction on a node of an open face leaves the fluid through the face.
     int numNodes = lattice.getNumNodes();
     noiseDrawn = false;
-    for (int k = 0; k < 3*numNodes; k++)
-        forceDensity[k] += reaction[k];
+    for (int node = 0; node < numNodes; node++)
+        if (isBoundary.empty() || !isBoundary[node])
+            for (int k = 0; k < 3; k++)
+                forceDensity[3*node+k] += reaction[3*node+k];
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     double momentumScale = cellMass*lattice.dx/lattice.dt;
     for (int node : lattice.solidNodes)
         wallMomentum += Vec3(reaction[3*node], reaction[3*node+1], reaction[3*node+2])*momentumScale;
+    for (int node : boundaryNodes)
+        if (isBoundary[node] == 1)
+            wallMomentum += Vec3(reaction[3*node], reaction[3*node+1], reaction[3*node+2])*momentumScale;
 }
 
 int ReferenceCalcLBMForceKernel::nearestNode(const Vec3& position) const {
@@ -513,9 +609,13 @@ void ReferenceCalcLBMForceKernel::bounceBack() {
     for (int node : lattice.solidNodes) {
         int i = node%nx, j = (node/nx)%ny, k = node/(nx*ny);
         for (int q = 1; q < D3Q19::numVelocities; q++) {
-            int di = (i + D3Q19::cx[q] + nx)%nx;
-            int dj = (j + D3Q19::cy[q] + ny)%ny;
-            int dk = (k + D3Q19::cz[q] + nz)%nz;
+            int di = i + D3Q19::cx[q], dj = j + D3Q19::cy[q], dk = k + D3Q19::cz[q];
+            if ((lattice.isOpenAxis(0) && (di < 0 || di >= nx)) || (lattice.isOpenAxis(1) && (dj < 0 || dj >= ny)) ||
+                    (lattice.isOpenAxis(2) && (dk < 0 || dk >= nz)))
+                continue;       // the link crosses an open face
+            di = (di + nx)%nx;
+            dj = (dj + ny)%ny;
+            dk = (dk + nz)%nz;
             int target = di + nx*(dj + ny*dk);
             if (!isFluid[target])
                 continue;
@@ -523,6 +623,131 @@ void ReferenceCalcLBMForceKernel::bounceBack() {
             populations[q*numNodes + target] = df;
             exchanged -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*(df + D3Q19::w[q]));
         }
+    }
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    wallMomentum += exchanged*(cellMass*lattice.dx/lattice.dt);
+}
+
+void ReferenceCalcLBMForceKernel::applyBoundaries() {
+    // Local regularized boundary condition (Latt 2007, section 5.2; docs/theory.md, section 1), after the streaming
+    // (and after the bounce-back), at the boundary nodes: the fluid nodes next to solid nodes with regularized walls,
+    // and the fluid nodes on open faces.  At a boundary node x the populations of the directions q whose source
+    // x - c_q is solid, or lies beyond an open face, are unknown.  The 19 populations are rebuilt as
+    // feq(rho, v) + fneq(Pi), where v is the velocity of the populations, v = u - g/2, so that the velocity of the
+    // fluid (j + F/2)/rho with the body force F = rho g is the velocity u imposed on the node:
+    //  - on a wall u = 0, and on a Velocity face u is the velocity of the face; rho follows from the populations that
+    //    arrive: the known ones, those that x sent into the solid nodes in this streaming (in the solid node x - c_q,
+    //    direction qbar = opposite of q), which return as with bounce-back, and, for an unknown direction q beyond a
+    //    face, f_qbar + 6 w_q rho c_q.v (bounce-back of the non-equilibrium part) or, if qbar is unknown as well,
+    //    feq_q(rho, v): the generalization of eq. 5.3 of Latt.  On a wall the mass of the fluid is conserved exactly;
+    //  - on a Density face rho is that of the face, the velocity along the face is zero and the velocity across it
+    //    follows from the same balance, rho = sum of the known f + sum over the unknown q of f_qbar + rho v.n
+    //    (note 5.1 of Latt), averaged with that of the previous step;
+    //  - on the nodes shared by several Density faces (and no Velocity face) rho is that of the first face and u = 0;
+    //  - Pi = sum_q H2(c_q) fneq_q, with fneq_q = f_q - feq_q(rho, v) for the known populations and the bounce-back
+    //    of the non-equilibrium part, fneq_q = fneq_qbar, for the unknown ones (zero if qbar is unknown as well).
+    // The walls receive the momentum of the populations that streamed into them, minus the momentum that the rebuild
+    // adds to their nodes.  Each node reads only its own populations and the solid slots that it wrote itself.
+    int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
+    int numNodes = lattice.getNumNodes();
+    Vec3 g = lattice.bodyAcceleration;
+    double a[D3Q19::numVelocities], dfeq[D3Q19::numVelocities], fneq[D3Q19::numVelocities], h[6];
+    Vec3 exchanged;
+    for (int b = 0; b < (int) boundaryNodes.size(); b++) {
+        int node = boundaryNodes[b], unknown = unknownDirections[b], solid = solidDirections[b];
+        int kind = boundaryKind[b], face = boundaryFace[b];
+        int i = node%nx, j = (node/nx)%ny, k = node/(nx*ny);
+
+        // The populations that are available: the known ones and, for the solid directions, the reflected ones.
+
+        bool available[D3Q19::numVelocities];
+        double sum = 0;
+        Vec3 known, into;
+        for (int q = 0; q < D3Q19::numVelocities; q++) {
+            Vec3 c(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]);
+            available[q] = true;
+            if (!(unknown & (1<<q))) {
+                a[q] = populations[q*numNodes+node];
+                known += c*(a[q] + D3Q19::w[q]);
+            }
+            else if (solid & (1<<q)) {
+                int si = (i - D3Q19::cx[q] + nx)%nx;
+                int sj = (j - D3Q19::cy[q] + ny)%ny;
+                int sk = (k - D3Q19::cz[q] + nz)%nz;
+                a[q] = populations[D3Q19::opposite[q]*numNodes + si + nx*(sj + ny*sk)];
+                into -= c*(a[q] + D3Q19::w[q]);
+            }
+            else
+                available[q] = false;
+            if (available[q])
+                sum += a[q];
+        }
+
+        // Density and velocity of the populations.  The populations are deviations f - w, and w_q = w_qbar.
+
+        Vec3 v;
+        double dr;
+        if (kind == DensityBoundary) {
+            int axis = face/2;
+            double inward = (face%2 == 0 ? 1.0 : -1.0);
+            for (int q = 1; q < D3Q19::numVelocities; q++)
+                if (!available[q])
+                    sum += a[D3Q19::opposite[q]];
+            dr = lattice.faceDensity[face]-1.0;
+            v = g*(-0.5);
+            // The velocity across the face that the arriving populations give, averaged with the velocity of the node
+            // in the previous step (its momentum at the start of this step).  The steady state is unchanged, while the
+            // staggered mode (-1)^(y+t) j_y, which the lattice conserves exactly and which the face would send back
+            // unchanged, is damped (docs/theory.md, section 1).
+            v[axis] = 0.5*(inward*(dr-sum)/(1.0+dr) + momentum[3*node+axis]/rho[node]);
+        }
+        else {
+            v = (kind == VelocityBoundary ? lattice.faceVelocity[face] : Vec3()) - g*0.5;
+            if (kind == DensityAtRestBoundary)
+                dr = lattice.faceDensity[face]-1.0;
+            else {
+                double numerator = sum, denominator = 1.0, vv = v.dot(v);
+                for (int q = 1; q < D3Q19::numVelocities; q++) {
+                    if (available[q])
+                        continue;
+                    double cv = D3Q19::cx[q]*v[0] + D3Q19::cy[q]*v[1] + D3Q19::cz[q]*v[2];
+                    if (available[D3Q19::opposite[q]]) {
+                        numerator += a[D3Q19::opposite[q]] + 6.0*D3Q19::w[q]*cv;
+                        denominator -= 6.0*D3Q19::w[q]*cv;
+                    }
+                    else {
+                        double e = D3Q19::w[q]*(3.0*cv + 4.5*cv*cv - 1.5*vv);
+                        numerator += e;
+                        denominator -= D3Q19::w[q] + e;
+                    }
+                }
+                dr = numerator/denominator;
+            }
+        }
+
+        // Stress from the known non-equilibrium parts and their bounce-back, then the regularized populations.
+
+        D3Q19::equilibriumDeviation(dr, v[0], v[1], v[2], dfeq);
+        for (int q = 0; q < D3Q19::numVelocities; q++)
+            fneq[q] = (unknown & (1<<q) ? 0.0 : a[q] - dfeq[q]);
+        for (int q = 1; q < D3Q19::numVelocities; q++)
+            if ((unknown & (1<<q)) && !(unknown & (1<<D3Q19::opposite[q])))
+                fneq[q] = fneq[D3Q19::opposite[q]];
+        double pi[6] = {0, 0, 0, 0, 0, 0};
+        for (int q = 0; q < D3Q19::numVelocities; q++) {
+            D3Q19::hermite2(q, h);
+            for (int m = 0; m < 6; m++)
+                pi[m] += h[m]*fneq[q];
+        }
+        D3Q19::regularizedNonEquilibrium(pi, fneq);
+        Vec3 rebuilt;
+        for (int q = 0; q < D3Q19::numVelocities; q++) {
+            double value = dfeq[q] + fneq[q];
+            populations[q*numNodes+node] = value;
+            rebuilt += Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*value;
+        }
+        if (kind == WallBoundary)
+            exchanged += into - (rebuilt - known);
     }
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     wallMomentum += exchanged*(cellMass*lattice.dx/lattice.dt);

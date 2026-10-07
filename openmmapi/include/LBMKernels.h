@@ -55,6 +55,20 @@ public:
     std::vector<int> particles;
     /** Solid nodes, sorted and without repetitions; empty if the whole lattice is fluid. */
     std::vector<int> solidNodes;
+    /** Boundary condition at the solid nodes, fixed when the Context is created. */
+    LBMForce::WallScheme wallScheme;
+    /** Boundary conditions of the faces of the box (fixed when the Context is created), velocities of the Velocity
+        faces in lattice units and densities of the Density faces in lattice units (1 is the fluid at rest). */
+    LBMForce::BoundaryType faceBoundary[6];
+    OpenMM::Vec3 faceVelocity[6];
+    double faceDensity[6];
+    /** True if the faces perpendicular to the axis (0, 1, 2 for x, y, z) are open. */
+    bool isOpenAxis(int axis) const {
+        return faceBoundary[2*axis] != LBMForce::Periodic;
+    }
+    bool hasOpenFaces() const {
+        return isOpenAxis(0) || isOpenAxis(1) || isOpenAxis(2);
+    }
     int getNumNodes() const {
         return nx*ny*nz;
     }

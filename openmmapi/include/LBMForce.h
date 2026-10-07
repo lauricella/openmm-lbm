@@ -74,6 +74,56 @@ public:
         Centered = 1
     };
     /**
+     * The boundary condition of the fluid at the solid nodes (docs/theory.md, section 1).
+     */
+    enum WallScheme {
+        /**
+         * Halfway bounce-back: a population that streams from a fluid node into a solid node returns to the fluid node
+         * with the opposite velocity.  The wall lies halfway between the solid node and the fluid node.  Mass is
+         * conserved exactly, and with fluid fluctuations the fluid next to the walls is in exact thermal equilibrium.
+         * This is the default.
+         */
+        BounceBack = 0,
+        /**
+         * Local regularized wall (Latt 2007): the fluid nodes next to the solid nodes are on the wall, and their
+         * populations are rebuilt at every step from the wall velocity (zero), a density that conserves the mass
+         * exactly and a stress from the populations that arrive from the fluid.  The wall lies on these fluid nodes,
+         * half a node from where the bounce-back puts it.
+         */
+        Regularized = 1
+    };
+    /**
+     * A face of the box, for the boundary conditions of setFaceBoundary(): XMin is the face x = 0, XMax the face
+     * x = box length, and so on.
+     */
+    enum Face {
+        XMin = 0,
+        XMax = 1,
+        YMin = 2,
+        YMax = 3,
+        ZMin = 4,
+        ZMax = 5
+    };
+    /**
+     * The boundary condition of the fluid on a face of the box (docs/theory.md, section 1).
+     */
+    enum BoundaryType {
+        /**
+         * The fluid that leaves through the face enters through the opposite one.  This is the default.
+         */
+        Periodic = 0,
+        /**
+         * The fluid on the face moves with the velocity set with setFaceVelocity(): an inlet, an outlet or a moving
+         * wall.  The density on the face follows from the fluid that arrives from inside.
+         */
+        Velocity = 1,
+        /**
+         * The fluid on the face has the density, that is the pressure, set with setFaceDensity(), and moves only
+         * across the face: its velocity along the face is zero.
+         */
+        Density = 2
+    };
+    /**
      * Create an LBMForce.  The grid size must be set with setGridSize() before the force is used.
      */
     LBMForce();
@@ -164,6 +214,54 @@ public:
      */
     void setFluidFluctuations(bool fluctuations);
     /**
+     * Get the boundary condition of the fluid at the solid nodes.
+     */
+    WallScheme getWallScheme() const;
+    /**
+     * Set the boundary condition of the fluid at the solid nodes: BounceBack (the default) or Regularized.  Both are
+     * accurate to second order in the lattice spacing; they differ in where the wall lies and in how the fluid next
+     * to it fluctuates (docs/theory.md, section 1).  It is fixed when a Context is created: updateParametersInContext()
+     * cannot change it.
+     */
+    void setWallScheme(WallScheme scheme);
+    /**
+     * Get the boundary condition of the fluid on a face of the box.
+     */
+    BoundaryType getFaceBoundary(Face face) const;
+    /**
+     * Set the boundary condition of the fluid on a face of the box: Periodic (the default), Velocity or Density.  The
+     * two faces perpendicular to an axis must be both periodic or both open (Velocity or Density, in any
+     * combination).  The nodes on an open face (i = 0 for XMin, i = nx - 1 for XMax, and so on) are on the boundary:
+     * their populations are rebuilt at every step from the velocity or the density of the face (local regularized
+     * boundary condition, Latt 2007).  On the nodes shared by several open faces the first Velocity face in the order
+     * XMin, XMax, YMin, YMax, ZMin, ZMax gives the velocity; if they are all Density faces, the first one gives the
+     * density and the velocity is zero.  A node next to a solid node with the Regularized wall scheme is a wall.
+     * With open faces the removal of the fluid momentum must be switched off (setFluidMomentumRemovalFrequency(0)).
+     * The particles still see a periodic box.  It is fixed when a Context is created.
+     */
+    void setFaceBoundary(Face face, BoundaryType type);
+    /**
+     * Get the velocity of the fluid on a Velocity face, measured in nm/ps.
+     */
+    OpenMM::Vec3 getFaceVelocity(Face face) const;
+    /**
+     * Set the velocity of the fluid on a Velocity face, measured in nm/ps.  It can have any direction: across the
+     * face (inlet or outlet) or along it (a moving wall).  The default is zero.  updateParametersInContext() can
+     * change it.
+     */
+    void setFaceVelocity(Face face, const OpenMM::Vec3& velocity);
+    /**
+     * Get the density of the fluid on a Density face, measured in Da/nm^3; 0 means the density of the fluid at rest.
+     */
+    double getFaceDensity(Face face) const;
+    /**
+     * Set the density of the fluid on a Density face, measured in Da/nm^3.  The pressure of the fluid is
+     * p = c_s^2 rho, with c_s^2 = dx^2/(3 dt^2), so a difference of density between two faces drives a flow.  The
+     * default, 0, means the density of the fluid at rest (setFluidDensity()).  updateParametersInContext() can
+     * change it.
+     */
+    void setFaceDensity(Face face, double density);
+    /**
      * Get the random number seed.  See setRandomNumberSeed() for details.
      */
     int getRandomNumberSeed() const;
@@ -236,10 +334,11 @@ public:
      */
     void getSolidNodes(std::vector<int>& nodes) const;
     /**
-     * Set the nodes of the lattice that are solid walls.  The fluid does not occupy them: a population that
-     * streams into a solid node is sent back to the fluid node it came from (bounce-back), which places the
-     * wall halfway between the two nodes.  Node (i, j, k) has index i + nx*(j + ny*k).  An empty list (the
-     * default) means that the whole lattice is fluid.
+     * Set the nodes of the lattice that are solid walls.  The fluid does not occupy them.  With the default wall
+     * scheme (setWallScheme()) a population that streams into a solid node is sent back to the fluid node it came
+     * from (bounce-back), which places the wall halfway between the two nodes; with the Regularized scheme the wall
+     * lies on the fluid nodes next to the solid nodes.  Node (i, j, k) has index i + nx*(j + ny*k).  An empty list
+     * (the default) means that the whole lattice is fluid.
      *
      * @param nodes    the indices of the solid nodes
      */
@@ -328,11 +427,13 @@ public:
      */
     double getFluidMachNumber(OpenMM::Context& context) const;
     /**
-     * Get the force exerted on the solid nodes during the last lattice step, measured in kJ/mol/nm: the
-     * momentum given to the walls by the fluid, through bounce-back (momentum exchange method of Ladd), and by
-     * the coupled particles, through their coupling forces at solid nodes and their reflections, divided by
-     * the time step.  It is zero before the first step and without solid nodes.  With it, the total momentum
-     * of particles, fluid and walls is conserved.
+     * Get the force exerted on the walls during the last lattice step, measured in kJ/mol/nm: the momentum given to
+     * the walls by the fluid and by the coupled particles, divided by the time step.  The fluid gives it through
+     * bounce-back (momentum exchange method of Ladd) or, with the Regularized wall scheme, as the populations that
+     * stream into the solid nodes minus the momentum that the walls put into their fluid nodes when they rebuild
+     * them.  The particles give it through their coupling forces at solid nodes (and, with the Regularized scheme,
+     * at the fluid nodes on the walls) and their reflections.  It is zero before the first step and without solid
+     * nodes.  With it, the total momentum of particles, fluid and walls is conserved.
      *
      * @param context    the Context in which to get the force
      */
@@ -349,9 +450,10 @@ public:
     /**
      * Update the parameters of a Context to match those stored in this Force object: the friction,
      * the temperature, the coupling scheme, the body acceleration, the frequency of the removal of the
-     * fluid momentum, and the frequency and limit of the Mach number check.  The grid, the fluid density
-     * and viscosity, the solid nodes, the set of coupled particles, the drag scheme and the fluid fluctuations
-     * cannot be changed this way, and an exception is thrown if they differ.  With fluid fluctuations the new
+     * fluid momentum, the frequency and limit of the Mach number check, and the velocities and densities of the
+     * faces.  The grid, the fluid density and viscosity, the solid nodes, the wall scheme, the boundary types of the
+     * faces, the set of coupled particles, the drag scheme and the fluid fluctuations cannot be changed this way,
+     * and an exception is thrown if they differ.  With fluid fluctuations the new
      * temperature applies to the fluid as well.  The initial fluid velocity and the random
      * number seed are used only when a Context is created.  The fluid itself is not modified.
      */
@@ -370,6 +472,10 @@ private:
     double density, viscosity, friction, temperature, machNumberLimit;
     CouplingScheme couplingScheme;
     DragScheme dragScheme;
+    WallScheme wallScheme;
+    BoundaryType faceBoundary[6];
+    OpenMM::Vec3 faceVelocity[6];
+    double faceDensity[6];
     bool fluidFluctuations;
     OpenMM::Vec3 bodyAcceleration, initialVelocity;
     std::vector<int> particles, solidNodes;

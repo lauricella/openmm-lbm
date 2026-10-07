@@ -26,6 +26,18 @@ versions the API may still change.
   velocity, solid nodes) and the particles (positions, velocities, masses, coupled or not) in VTK files for
   ParaView, in OpenMM units (nm, Da/nm^3, nm/ps), with a `.pvd` file for the series; `--vtk N` in
   `examples/cocomo/diffusion.py`.
+- Regularized walls, `setWallScheme(LBMForce.Regularized)` (Reference platform only for now; the default stays the
+  bounce-back of version 0.2): the local regularized boundary condition of Latt on the fluid nodes next to the
+  solid nodes, which lie on the wall, with a density that conserves the mass exactly. Both walls are second order;
+  bounce-back is exact for Poiseuille flow at tau = 7/8, the regularized wall at tau = 1. Serialization version 6
+  and checkpoint version 4 record the scheme; older files are read with bounce-back. `docs/theory.md`, section 1.
+- Open faces, `setFaceBoundary(face, LBMForce.Velocity | LBMForce.Density)` with `setFaceVelocity()` and
+  `setFaceDensity()`, six independent faces (Reference platform only for now): inlets, outlets, moving plates and
+  flows driven by a pressure difference, with the local regularized boundary condition of Latt on the nodes of
+  the faces; the Density faces damp the staggered mode that the lattice otherwise keeps. The velocities and
+  densities can be changed with `updateParametersInContext()`. Serialization version 7. With open faces the
+  removal of the fluid momentum must be off. Examples: Couette flow and a duct driven by a pressure difference
+  (`docs/user_guide/examples.md`).
 
 ### Changed
 - Build: the OpenMM library and the platform libraries are linked by their full path in `OPENMM_DIR`, for the
