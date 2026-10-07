@@ -147,7 +147,7 @@ away from the reference structure).
 
 | File | Content | Source |
 |---|---|---|
-| `cocomo/data/sod1.pdb` | SOD1 coarse grained with one bead per residue (110 beads, positions in Angstrom) | prepared by the IBPC group (L. Coronas, F. Sterpone) for the thermal-diffusion runs of SOD1 with COCOMO2 |
+| `cocomo/data/sod1.pdb` | SOD1 coarse grained with one bead per residue (110 beads, positions in Angstrom) | prepared by the IBPC group (L. E. Coronas-Serna, F. Sterpone) for the thermal-diffusion runs of SOD1 with COCOMO2 |
 | `cocomo/data/sod1.surface` | solvent accessible surface of each residue of `sod1.pdb`, in nm^2 | same |
 | `cocomo/data/GRGDSPYS.pdb` | the peptide GRGDSPYS, one bead per residue | kick examples of the DragOpenMM plugin (IBPC group) |
 | `cocomo/data/ubiquitin.pdb`, `cocomo/data/ubiquitin.surface` | ubiquitin, one bead per residue at the C-alpha positions (`ubione.min.pdb` of the original example), and the solvent accessible surface of each residue in nm^2 | same |
