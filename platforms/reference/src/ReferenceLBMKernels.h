@@ -82,13 +82,11 @@ private:
     std::vector<double> rho, momentum, piNeq, forceDensity;
     /** 1 for fluid nodes, 0 for solid nodes; empty if there are no solid nodes. */
     std::vector<char> isFluid;
-    /** What a boundary node imposes: a wall at rest, the velocity of a face, the density of a face (with the velocity
-        along the face zero), or the density of a face with zero velocity (nodes shared by several Density faces). */
-    enum BoundaryKind {WallBoundary = 0, VelocityBoundary = 1, DensityBoundary = 2, DensityAtRestBoundary = 3};
-    /** The boundary nodes: with regularized walls the fluid nodes next to the solid nodes, which lie on the walls,
-        and the fluid nodes on the open faces.  For each of them: the bits 1 << q of the directions q whose
-        populations are unknown after the streaming (unknownDirections) and of those among them whose source node
-        x - c_q is solid (solidDirections), its BoundaryKind and the face that gives its velocity or density. */
+    /** The boundary nodes (internal/LBMBoundaries.h): with regularized walls the fluid nodes next to the solid
+        nodes, which lie on the walls, and the fluid nodes on the open faces.  For each of them: the bits 1 << q of
+        the directions q whose populations are unknown after the streaming (unknownDirections) and of those among
+        them whose source node x - c_q is solid (solidDirections), its LBMBoundaries::Kind and the face that gives
+        its velocity or density. */
     std::vector<int> boundaryNodes, unknownDirections, solidDirections, boundaryKind, boundaryFace;
     /** 1 for the nodes of regularized walls, 2 for the other boundary nodes (on open faces), 0 elsewhere; empty if
         there are no boundary nodes. */

@@ -222,18 +222,32 @@ void testFluctuationsReproducible(Platform& platform) {
 /**
  * A run with a fluctuating fluid and coupled particles restarted from the checkpoints of OpenMM and of the force is
  * identical, bit for bit, to the uninterrupted run.  The seed is 0, so the two Contexts choose different seeds:
- * the checkpoint restores the generator.
+ * the checkpoint restores the generator.  With boundaries the fluid also has a wall (the plane j = 0, with the
+ * given wall scheme), open faces along x (a Velocity inlet and a Density outlet, whose time filter is part of the
+ * populations) and a body force; the force on the walls of the last step is restored as well.
  */
-void testFluctuationsRestart(Platform& platform) {
+void testFluctuationsRestart(Platform& platform, bool boundaries=false, LBMForce::WallScheme wallScheme=LBMForce::BounceBack,
+        LBMForce::DragScheme drag=LBMForce::Explicit) {
     int numSteps = 23, split = 9;
     vector<double> fluid[2];
     vector<Vec3> velocities[2];
+    Vec3 wallForce[2];
     stringstream openmmCheckpoint, forceCheckpoint;
     for (int run = 0; run < 2; run++) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 3, 5.0, 300.0);
         force->setFluidFluctuations(true);
         force->setRandomNumberSeed(0);
+        force->setDragScheme(drag);
+        if (boundaries) {
+            force->setSolidNodes(wallPlane(8, 8, 8));
+            force->setWallScheme(wallScheme);
+            force->setFaceBoundary(LBMForce::XMin, LBMForce::Velocity);
+            force->setFaceBoundary(LBMForce::XMax, LBMForce::Density);
+            force->setFaceVelocity(LBMForce::XMin, Vec3(0.5, 0.2, 0.0));
+            force->setFaceDensity(LBMForce::XMax, 1.002*fluidDensity);
+            force->setBodyAcceleration(Vec3(0.0, 0.0, 5.0));
+        }
         VerletIntegrator integrator(fluidDt);
         Context context(*system, integrator, platform);
         if (run == 0) {
@@ -250,12 +264,14 @@ void testFluctuationsRestart(Platform& platform) {
         integrator.step(numSteps-split);
         force->getFluidState(context, fluid[run]);
         velocities[run] = context.getState(State::Velocities).getVelocities();
+        wallForce[run] = force->getWallForce(context);
         delete system;
     }
     for (int i = 0; i < (int) fluid[0].size(); i++)
         ASSERT_EQUAL(fluid[0][i], fluid[1][i]);
     for (int i = 0; i < (int) velocities[0].size(); i++)
         ASSERT_EQUAL_VEC(velocities[0][i], velocities[1][i], 0.0);
+    ASSERT_EQUAL_VEC(wallForce[0], wallForce[1], 0.0);
 }
 
 /**
@@ -453,6 +469,9 @@ void runFluctuationTests(Platform& platform) {
     testFluctuationsAtZeroTemperature(platform);
     testFluctuationsReproducible(platform);
     testFluctuationsRestart(platform);
+    testFluctuationsRestart(platform, true, LBMForce::Regularized, LBMForce::Explicit);
+    testFluctuationsRestart(platform, true, LBMForce::Regularized, LBMForce::Centered);
+    testFluctuationsRestart(platform, true, LBMForce::BounceBack, LBMForce::Centered);
     testFluctuationsWithNVE(platform);
     testFluctuationsParameters(platform);
     testFluctuationDragWarning(platform);

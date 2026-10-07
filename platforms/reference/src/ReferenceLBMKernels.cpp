@@ -7,6 +7,7 @@
 
 #include "ReferenceLBMKernels.h"
 #include "internal/D3Q19.h"
+#include "internal/LBMBoundaries.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/internal/OSRngSeed.h"
@@ -73,73 +74,20 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
     // the velocity, and otherwise its Density faces give the density.  The wall nodes start at rest, with the velocity
     // -g/2 of their populations, so that the velocity of the fluid (j + F/2)/rho is that of the wall.
 
-    boundaryNodes.clear();
-    unknownDirections.clear();
-    solidDirections.clear();
-    boundaryKind.clear();
-    boundaryFace.clear();
-    isBoundary.clear();
-    bool regularized = (!isFluid.empty() && lattice.wallScheme == LBMForce::Regularized);
-    if (regularized || lattice.hasOpenFaces()) {
-        int size[3] = {lattice.nx, lattice.ny, lattice.nz};
-        int nx = size[0], ny = size[1];
-        isBoundary.resize(numNodes, 0);
-        Vec3 v = lattice.bodyAcceleration*(-0.5);
-        D3Q19::equilibriumDeviation(0.0, v[0], v[1], v[2], dfeq);
-        for (int node = 0; node < numNodes; node++) {
-            if (!isFluid.empty() && !isFluid[node])
-                continue;
-            int index[3] = {node%nx, (node/nx)%ny, node/(nx*ny)};
-            int solid = 0, outside = 0;
-            for (int q = 1; q < D3Q19::numVelocities; q++) {
-                int c[3] = {D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]}, source[3];
-                bool beyondFace = false;
-                for (int a = 0; a < 3; a++) {
-                    source[a] = index[a] - c[a];
-                    if (source[a] < 0 || source[a] >= size[a]) {
-                        beyondFace = beyondFace || lattice.isOpenAxis(a);
-                        source[a] = (source[a] + size[a])%size[a];
-                    }
-                }
-                if (beyondFace)
-                    outside |= 1<<q;
-                else if (regularized && !isFluid[source[0] + nx*(source[1] + ny*source[2])])
-                    solid |= 1<<q;
-            }
-            if (solid == 0 && outside == 0)
-                continue;
-            int kind = WallBoundary, face = -1;
-            if (solid == 0) {
-                int velocityFace = -1, densityFace = -1, numDensityFaces = 0;
-                for (int f = 0; f < 6; f++) {
-                    int a = f/2;
-                    if (!lattice.isOpenAxis(a) || index[a] != (f%2 == 0 ? 0 : size[a]-1))
-                        continue;
-                    if (lattice.faceBoundary[f] == LBMForce::Velocity && velocityFace < 0)
-                        velocityFace = f;
-                    if (lattice.faceBoundary[f] == LBMForce::Density && numDensityFaces++ == 0)
-                        densityFace = f;
-                }
-                if (velocityFace >= 0) {
-                    kind = VelocityBoundary;
-                    face = velocityFace;
-                }
-                else {
-                    kind = (numDensityFaces == 1 ? DensityBoundary : DensityAtRestBoundary);
-                    face = densityFace;
-                }
-            }
-            boundaryNodes.push_back(node);
-            unknownDirections.push_back(solid | outside);
-            solidDirections.push_back(solid);
-            boundaryKind.push_back(kind);
-            boundaryFace.push_back(face);
-            isBoundary[node] = (kind == WallBoundary ? 1 : 2);
-            if (kind == WallBoundary)
-                for (int q = 0; q < D3Q19::numVelocities; q++)
-                    populations[q*numNodes+node] = dfeq[q];
-        }
-    }
+    LBMBoundaries boundaries;
+    boundaries.find(lattice, isFluid);
+    boundaryNodes = boundaries.nodes;
+    unknownDirections = boundaries.unknown;
+    solidDirections = boundaries.solid;
+    boundaryKind = boundaries.kind;
+    boundaryFace = boundaries.face;
+    isBoundary = boundaries.type;
+    Vec3 v = lattice.bodyAcceleration*(-0.5);
+    D3Q19::equilibriumDeviation(0.0, v[0], v[1], v[2], dfeq);
+    for (int b = 0; b < (int) boundaryNodes.size(); b++)
+        if (boundaryKind[b] == LBMBoundaries::Wall)
+            for (int q = 0; q < D3Q19::numVelocities; q++)
+                populations[q*numNodes+boundaryNodes[b]] = dfeq[q];
 
     // Coupled particles: masses in units of the mass of a cell, m_c = rho0 dx^3.  The coupling force is zero
     // before the first step.
@@ -687,7 +635,7 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
 
         Vec3 v;
         double dr;
-        if (kind == DensityBoundary) {
+        if (kind == LBMBoundaries::Density) {
             int axis = face/2;
             double inward = (face%2 == 0 ? 1.0 : -1.0);
             for (int q = 1; q < D3Q19::numVelocities; q++)
@@ -702,8 +650,8 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
             v[axis] = 0.5*(inward*(dr-sum)/(1.0+dr) + momentum[3*node+axis]/rho[node]);
         }
         else {
-            v = (kind == VelocityBoundary ? lattice.faceVelocity[face] : Vec3()) - g*0.5;
-            if (kind == DensityAtRestBoundary)
+            v = (kind == LBMBoundaries::Velocity ? lattice.faceVelocity[face] : Vec3()) - g*0.5;
+            if (kind == LBMBoundaries::DensityAtRest)
                 dr = lattice.faceDensity[face]-1.0;
             else {
                 double numerator = sum, denominator = 1.0, vv = v.dot(v);
@@ -746,7 +694,7 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
             populations[q*numNodes+node] = value;
             rebuilt += Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*value;
         }
-        if (kind == WallBoundary)
+        if (kind == LBMBoundaries::Wall)
             exchanged += into - (rebuilt - known);
     }
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;

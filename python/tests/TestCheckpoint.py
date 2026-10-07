@@ -18,8 +18,10 @@ import openmmlbm
 from openmmlbm import LBMForce
 
 
-def create_simulation(seed=5):
-    """Eight beads coupled to the fluid at 300 K, with a wall and the momentum removal every 3 steps."""
+def create_simulation(seed=5, boundaries=False):
+    """Eight beads coupled to the fluid at 300 K, with a wall and the momentum removal every 3 steps; with
+    boundaries, a fluctuating fluid, a regularized wall, open faces along x (a Velocity inlet and a Density outlet)
+    and no removal."""
     n, L = 8, 4.0
     topology = app.Topology()
     chain = topology.addChain()
@@ -30,8 +32,15 @@ def create_simulation(seed=5):
     force.setFriction(10.0)
     force.setTemperature(300.0)
     force.setRandomNumberSeed(seed)
-    force.setFluidMomentumRemovalFrequency(3)
+    force.setFluidMomentumRemovalFrequency(0 if boundaries else 3)
     force.setSolidNodes([i + n*n*k for k in range(n) for i in range(n)])
+    if boundaries:
+        force.setFluidFluctuations(True)
+        force.setWallScheme(LBMForce.Regularized)
+        force.setFaceBoundary(LBMForce.XMin, LBMForce.Velocity)
+        force.setFaceBoundary(LBMForce.XMax, LBMForce.Density)
+        force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.4, 0.1, 0.0))
+        force.setFaceDensity(LBMForce.XMax, 604.0)
     for i in range(8):
         topology.addAtom('B', None, topology.addResidue('BEA', chain))
         system.addParticle(100.0)
@@ -52,11 +61,13 @@ def test_checkpoint_bytes():
         force.loadCheckpoint(simulation.context, b'not a checkpoint')
 
 
-def test_restart_is_exact(tmp_path):
+@pytest.mark.parametrize('boundaries', [False, True], ids=['wall', 'fluctuations-faces'])
+def test_restart_is_exact(tmp_path, boundaries):
     """A Simulation restarted from the file of LBMCheckpointReporter continues exactly like the original one,
-    also when a StateDataReporter at the same step has drawn the random numbers of the next step."""
+    also when a StateDataReporter at the same step has drawn the random numbers of the next step, and also with a
+    fluctuating fluid, regularized walls and open faces."""
     file = str(tmp_path/'run.chk')
-    simulation, force = create_simulation()
+    simulation, force = create_simulation(boundaries=boundaries)
     simulation.context.setPositions(np.random.default_rng(1).uniform(0.6, 3.4, (8, 3)))
     simulation.context.setVelocities(np.random.default_rng(2).normal(0, 0.3, (8, 3)))
     simulation.reporters.append(app.StateDataReporter(io.StringIO(), 5, step=True, temperature=True))
@@ -66,13 +77,15 @@ def test_restart_is_exact(tmp_path):
     positions = simulation.context.getState(getPositions=True).getPositions(asNumpy=True)._value
     fluid = np.array(force.getFluidState(simulation.context))
 
-    restarted, restartedForce = create_simulation(seed=99)       # the seed is restored by the checkpoint
+    wall = force.getWallForce(simulation.context)
+    restarted, restartedForce = create_simulation(seed=99, boundaries=boundaries)    # the checkpoint restores the seed
     openmmlbm.loadCheckpoint(file, restarted.context, restartedForce)
     assert restarted.currentStep == 20
     restarted.reporters.append(app.StateDataReporter(io.StringIO(), 5, step=True, temperature=True))
     restarted.step(15)
     assert np.array_equal(positions, restarted.context.getState(getPositions=True).getPositions(asNumpy=True)._value)
     assert np.array_equal(fluid, np.array(restartedForce.getFluidState(restarted.context)))
+    assert restartedForce.getWallForce(restarted.context) == wall
 
 
 def test_save_and_load_functions(tmp_path):

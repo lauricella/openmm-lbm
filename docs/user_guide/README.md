@@ -31,9 +31,10 @@ Know these before using the plugin for a study:
 - **Nearest-node coupling.** Each particle is coupled to the nearest lattice node, so the forces jump when
   a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
   lattice spacing and on tau.
-- **Walls and open faces.** Solid nodes are no-slip walls, with bounce-back on every platform; the
-  regularized walls (`setWallScheme()`) and the open faces with an imposed velocity or density
-  (`setFaceBoundary()`) are available only on the Reference platform for now.
+- **Walls and open faces.** Solid nodes are no-slip walls at rest, with bounce-back (the default) or
+  regularized walls (`setWallScheme()`); a moving plate, an inlet or an outlet is an open face with an
+  imposed velocity or density (`setFaceBoundary()`). The particles stay in OpenMM's periodic box also with
+  open faces: keep coupled particles away from them.
 
 ## Contents
 
@@ -58,8 +59,8 @@ Know these before using the plugin for a study:
    - Saving and restoring the fluid.
    - Serialization.
    - `openmm.app.Simulation` with a reporter for the fluid.
-   - A Couette flow between two open faces (Reference platform).
-   - A flow in a duct driven by a pressure difference (Reference platform).
+   - A Couette flow between two open faces.
+   - A flow in a duct driven by a pressure difference.
 8. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
 
 ## What works in this version
@@ -70,16 +71,15 @@ Know these before using the plugin for a study:
 | Reading and writing the fluid: `getFluidFields()`, `getFluidState()`, `setFluidState()`, `getFluidMachNumber()` | yes | yes |
 | Fluid update: collision, streaming, body force, removal of the fluid momentum, Mach number check | yes | yes |
 | Solid nodes (`setSolidNodes()`) and the force of the fluid on the walls (`getWallForce()`) | yes | yes |
-| Regularized walls (`setWallScheme(LBMForce.Regularized)`) | yes | not yet |
-| Open faces with an imposed velocity or density ([`setFaceBoundary()`](api_reference.md#open-faces)) | yes | not yet |
+| Regularized walls (`setWallScheme(LBMForce.Regularized)`) | yes | yes |
+| Open faces with an imposed velocity or density ([`setFaceBoundary()`](api_reference.md#open-faces)) | yes | yes |
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |
 | Checkpoints of the fluid (`createCheckpoint()`, `openmmlbm.saveCheckpoint()`, `LBMCheckpointReporter`) | yes | yes |
 | VTK files of the fluid and of the particles for ParaView ([`openmmlbm.LBMVTKReporter`](api_reference.md#openmmlbmlbmvtkreporterprefix-reportinterval-force)) | yes | yes |
 
-Every feature runs on every platform, except the regularized walls and the open faces, which run only on the
-Reference platform for now. The random forces of the Reference platform, and the fluctuations of the fluid, come from a
+Every feature runs on every platform. The random forces of the Reference platform, and the fluctuations of the fluid, come from a
 generator of the force, those of the GPU platforms from OpenMM's generator: with the same seed the two are
 different sequences with the same statistics. The coupling is dissipative and has no potential energy: on every
 platform its energy in the State is zero.

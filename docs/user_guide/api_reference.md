@@ -161,7 +161,7 @@ give no-slip walls, accurate to second order in the lattice spacing, and conserv
 | channel between the solid planes j = 0 and j = ny - 1 | walls at y = dx/2 and (ny - 3/2) dx | walls at y = dx and (ny - 2) dx |
 | most accurate for | tau < 15/16 (water: tau about 0.6) | tau > 15/16 |
 | with fluid fluctuations | exact thermal equilibrium next to the wall | fluctuations 3 to 9 % low on the first node next to the wall |
-| platforms | all | Reference only, for now |
+| platforms | all | all |
 
 If you do not know which one to use, keep the default. The theory and the exact solutions are in
 [theory.md](../theory.md#solid-nodes-and-walls). It is fixed when the Context is created.
@@ -206,8 +206,8 @@ force.setSolidNodes(index[(j == 0) | (j == ny - 1)])     # walls on the planes j
 
 By default the fluid fills a periodic box: what leaves through a face comes back through the opposite face.
 An **open face** instead holds the fluid on it at a velocity or at a density that you choose. With open faces
-you can build inlets and outlets, moving plates, flows driven by a pressure difference. Available on the
-Reference platform; the GPU platforms refuse them for now. The theory is in
+you can build inlets and outlets, moving plates, flows driven by a pressure difference, on every platform.
+The theory is in
 [theory.md](../theory.md#open-faces), and two complete scripts are in the examples:
 [Couette flow](examples.md#couette-flow-between-two-open-faces) and
 [flow in a duct](examples.md#flow-in-a-duct-driven-by-a-pressure-difference).
@@ -223,7 +223,10 @@ Reference platform; the GPU platforms refuse them for now. The theory is in
      along the face is a moving plate; zero is a wall at rest.
    - `LBMForce.Density`: the fluid on the face has the density of `setFaceDensity(face, density)`, and moves
      only across the face. The density is the pressure: p = c_s^2 rho with c_s^2 = dx^2/(3 dt^2). The
-     default, 0, means the density of the fluid at rest (`setFluidDensity()`).
+     default, 0, means the density of the fluid at rest (`setFluidDensity()`). The velocity across the face
+     is filtered in time, half the value that the arriving fluid gives and half that of the previous step:
+     this removes a spurious oscillation from one node to the next and from one step to the next, and does
+     not change steady flows ([theory, Time filter of the Density faces](../theory.md#open-faces)).
 3. **Switch off the removal of the fluid momentum**: `setFluidMomentumRemovalFrequency(0)`. With open faces
    the fluid exchanges momentum with the outside, and the plugin refuses to create the Context otherwise.
 4. **Create the Context and run.** The velocities and densities of the faces can be changed during the run
@@ -531,12 +534,16 @@ bytes b'LBMCKPT1'
 ```
 
 Errors: a checkpoint written on another platform, with another precision, for a different grid size,
-number of coupled particles, drag scheme, wall scheme or switch of the fluid fluctuations, by a newer version of the plugin, or data that are not a
+number of coupled particles, drag scheme, wall scheme, types of the faces (`setFaceBoundary()`) or switch of the
+fluid fluctuations, by a newer version of the plugin, or data that are not a
 checkpoint or are damaged or truncated, make `loadCheckpoint()` raise an exception
 ([troubleshooting](troubleshooting.md)). A checkpoint of version 0.1.0 has no drag scheme in its header,
 and loads only in a Context with the explicit drag; checkpoints of versions 0.1 and 0.2 load only in a Context
-without fluid fluctuations and with the `BounceBack` wall scheme. The types of the faces are not in the checkpoint,
-and are not checked.
+without fluid fluctuations, with the `BounceBack` wall scheme and with periodic faces. The velocities and densities
+of the faces are not checked: those of the new Context are used. The checkpoints work with every combination of
+fluid fluctuations, wall scheme and open faces, on every platform: the restarted run is identical, bit for bit,
+to the uninterrupted one, and the time filter of the `Density` faces needs nothing more, since it reads the
+velocity of the previous step from the populations.
 
 ### `openmmlbm.saveCheckpoint(file, context, force)`, `openmmlbm.loadCheckpoint(file, context, force)`
 

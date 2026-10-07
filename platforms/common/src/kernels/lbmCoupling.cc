@@ -113,7 +113,8 @@ KERNEL void reflectParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const rea
  * with v the velocity of the leapfrog and j the momentum of the fluid after the momentum removal.  A solid node
  * has rho = 0 and is at rest.  The force is stored in particleForce and the key node*NUM_COUPLED + i in sortKeys
  * (sorted next, to sum the reactions of each node in particle order).  In a lattice step (isStep) the reaction
- * on a solid node is added to wallMomentum.  xi is noise[i]; with drawNoise it is first copied from OpenMM's
+ * on a solid node, or on a node of a regularized wall (isFluid 2), is added to wallMomentum; the reaction on a node
+ * of an open face (isFluid 3) leaves the fluid through the face.  xi is noise[i]; with drawNoise it is first copied from OpenMM's
  * random numbers, random[randomIndex + i].
  */
 KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection,
@@ -121,7 +122,7 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
         GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum,
         GLOBAL mixed* RESTRICT particleForce, GLOBAL mm_long* RESTRICT sortKeys, GLOBAL mixed* RESTRICT wallMomentum,
         GLOBAL const float4* RESTRICT random, GLOBAL float4* RESTRICT noise, int randomIndex, int drawNoise, int isStep,
-        mixed gamma, mixed kT) {
+        mixed gamma, mixed kT, GLOBAL const int* RESTRICT isFluid) {
     for (int j = GLOBAL_ID; j < NUM_ATOMS; j += GLOBAL_SIZE) {
         int i = couplingIndex[atomIndex[j]];
         if (i < 0)
@@ -157,7 +158,7 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
         particleForce[2*NUM_COUPLED+i] = fz;
         sortKeys[i] = ((mm_long) node)*NUM_COUPLED + i;
 #ifdef HAS_SOLID_NODES
-        if (isStep && rho == 0) {
+        if (isStep && (rho == 0 || isFluid[node] == 2)) {
             wallMomentum[i] -= fx;
             wallMomentum[NUM_COUPLED+i] -= fy;
             wallMomentum[2*NUM_COUPLED+i] -= fz;
@@ -269,14 +270,17 @@ KERNEL void prepareCenteredDrag(GLOBAL const real4* RESTRICT posq, GLOBAL const 
  * forces, and u~ = (j + h rho g)/rho, m_c = rho:
  *   S = [-gamma (P~ - M u~) + R]/(1 + a + a M/m_c),   u_c(t) = u~ - h S/m_c,
  *   F_k = [-gamma m_k (v~_k - u_c(t)) + R_k]/(1 + a).
- * A solid node is a wall at rest of infinite mass: u_c(t) = 0.  It writes the force of every particle of the
- * segment (one writer per particle) and, in a lattice step (isStep), the reaction -S of the node (one writer per
- * node); the reaction on a solid node goes to the walls, in wallMomentum of the first particle of the segment.
+ * A solid node is a wall at rest of infinite mass: u_c(t) = 0.  A boundary node (isFluid 2 on regularized walls, 3
+ * on open faces) is a wall of infinite mass that moves with the velocity imposed on the node, (j + F/2)/rho.  The
+ * first entry writes the force of every particle of the segment (one writer per particle) and, in a lattice step
+ * (isStep), the reaction -S of the node (one writer per node); the reaction on a solid node or on a node of a
+ * regularized wall goes to the walls, in wallMomentum of the first particle of the segment.
  */
 KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const mixed* RESTRICT particleMass,
         GLOBAL const mixed* RESTRICT knownVelocity, GLOBAL const mixed* RESTRICT randomForce,
         GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum, GLOBAL mixed* RESTRICT particleForce,
-        GLOBAL mixed* RESTRICT cellReaction, GLOBAL mixed* RESTRICT wallMomentum, int isStep, mixed gamma, mixed gx, mixed gy, mixed gz) {
+        GLOBAL mixed* RESTRICT cellReaction, GLOBAL mixed* RESTRICT wallMomentum, int isStep, mixed gamma, mixed gx, mixed gy, mixed gz,
+        GLOBAL const int* RESTRICT isFluid) {
     const mixed h = 0.5f;
     const mixed a = gamma*h;
     for (int k = GLOBAL_ID; k < NUM_COUPLED; k += GLOBAL_SIZE) {
@@ -298,7 +302,12 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
         }
         mixed rho = 1 + densityDeviation[node];
         mixed ux = 0, uy = 0, uz = 0, sx, sy, sz;
-        if (rho > 0) {
+#ifdef HAS_BOUNDARY_NODES
+        bool boundary = (isFluid[node] > 1);
+#else
+        bool boundary = false;
+#endif
+        if (rho > 0 && !boundary) {
             mixed kx = (momentum[node] + h*(rho*gx))*(1/rho);
             mixed ky = (momentum[NUM_NODES+node] + h*(rho*gy))*(1/rho);
             mixed kz = (momentum[2*NUM_NODES+node] + h*(rho*gz))*(1/rho);
@@ -311,10 +320,15 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
             uz = kz - sz*(h/rho);
         }
         else {
+            if (boundary) {
+                ux = momentum[node]*(1/rho) + h*gx;
+                uy = momentum[NUM_NODES+node]*(1/rho) + h*gy;
+                uz = momentum[2*NUM_NODES+node]*(1/rho) + h*gz;
+            }
             mixed scale = 1/(1 + a);
-            sx = (px*(-gamma) + rx)*scale;
-            sy = (py*(-gamma) + ry)*scale;
-            sz = (pz*(-gamma) + rz)*scale;
+            sx = ((px - ux*mass)*(-gamma) + rx)*scale;
+            sy = ((py - uy*mass)*(-gamma) + ry)*scale;
+            sz = ((pz - uz*mass)*(-gamma) + rz)*scale;
         }
         mixed scale = 1/(1 + a);
         for (int m = k; m < end; m++) {
@@ -329,7 +343,7 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
             cellReaction[NUM_NODES+node] = -sy;
             cellReaction[2*NUM_NODES+node] = -sz;
 #ifdef HAS_SOLID_NODES
-            if (rho == 0) {
+            if (rho == 0 || isFluid[node] == 2) {
                 int i = (int) (sortKeys[k] - ((mm_long) node)*NUM_COUPLED);
                 wallMomentum[i] -= sx;
                 wallMomentum[NUM_COUPLED+i] -= sy;

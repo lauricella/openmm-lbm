@@ -29,19 +29,26 @@ versions the API may still change.
   velocity, solid nodes) and the particles (positions, velocities, masses, coupled or not) in VTK files for
   ParaView, in OpenMM units (nm, Da/nm^3, nm/ps), with a `.pvd` file for the series; `--vtk N` in
   `examples/cocomo/diffusion.py`.
-- Regularized walls, `setWallScheme(LBMForce.Regularized)` (Reference platform only for now; the default stays the
+- Regularized walls, `setWallScheme(LBMForce.Regularized)`, on all platforms (the default stays the
   bounce-back of version 0.2): the local regularized boundary condition of Latt on the fluid nodes next to the
   solid nodes, which lie on the wall, with a density that conserves the mass exactly. Both walls are second order;
   bounce-back is exact for Poiseuille flow at tau = 7/8, the regularized wall at tau = 1. Serialization version 6
   and checkpoint version 4 record the scheme; older files are read with bounce-back. `docs/theory.md`, section 1.
+  Checkpoint version 5 also records the types of the faces, and refuses a Context with other faces; older
+  checkpoints are read with periodic faces. Checkpoints and `setFluidState()` restart a run exactly with every
+  combination of fluid fluctuations, walls and open faces.
 - Open faces, `setFaceBoundary(face, LBMForce.Velocity | LBMForce.Density)` with `setFaceVelocity()` and
-  `setFaceDensity()`, six independent faces (Reference platform only for now): inlets, outlets, moving plates and
+  `setFaceDensity()`, six independent faces, on all platforms: inlets, outlets, moving plates and
   flows driven by a pressure difference, with the local regularized boundary condition of Latt on the nodes of
   the faces; the Density faces damp the staggered mode that the lattice otherwise keeps. The velocities and
   densities can be changed with `updateParametersInContext()`. Serialization version 7. With open faces the
-  removal of the fluid momentum must be off. The CUDA, OpenCL and HIP platforms refuse regularized walls and open
-  faces with an exception when the Context is created. Examples: Couette flow and a duct driven by a pressure difference
+  removal of the fluid momentum must be off. Examples: Couette flow and a duct driven by a pressure difference
   (`docs/user_guide/examples.md`).
+- On the CUDA, OpenCL and HIP platforms the regularized walls and the open faces have the arithmetic of the
+  Reference platform: the boundary nodes are found by the same code (`internal/LBMBoundaries.h`) and rebuilt by
+  the kernel `applyBoundaries`, one thread per node. All the tests of the walls and of the faces run on every
+  platform, and `test_fluid_agrees_with_reference` compares the GPU platforms with the Reference platform also
+  with regularized walls and with open faces.
 
 ### Changed
 - Build: the OpenMM library and the platform libraries are linked by their full path in `OPENMM_DIR`, for the

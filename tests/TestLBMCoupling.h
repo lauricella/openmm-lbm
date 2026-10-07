@@ -457,9 +457,12 @@ void testWallMomentumBalance(Platform& platform, LBMForce::DragScheme drag=LBMFo
     ASSERT(wall.dot(wall) > 1.0);
     Vec3 balance = p1 + wall - p0;
     // The regularized walls rebuild all populations of the boundary nodes at every step, which adds rounding:
-    // 1e-13..1e-12 against 2e-14 with bounce-back, depending on the drag and on the OpenMM version.
-    double tolerance = (wallScheme == LBMForce::Regularized ? 1e-11 : 1e-12);
-    ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, getCouplingTolerance(platform, tolerance));
+    // 1e-13..1e-12 against 2e-14 with bounce-back in double precision, depending on the drag and on the OpenMM
+    // version, and up to 4e-6 in single precision.
+    double tolerance = getCouplingTolerance(platform, wallScheme == LBMForce::Regularized ? 1e-11 : 1e-12);
+    if (wallScheme == LBMForce::Regularized && getStorageTolerance(platform) > 1e-12)
+        tolerance = 1e-5;
+    ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, tolerance);
     delete system;
 }
 
@@ -735,8 +738,7 @@ void runCouplingTests(Platform& platform) {
     testWallReflection(platform);
     testWallReflectionDirection(platform);
     testWallMomentumBalance(platform);
-    if (platform.getName() == "Reference")
-        testWallMomentumBalance(platform, LBMForce::Explicit, LBMForce::Regularized);
+    testWallMomentumBalance(platform, LBMForce::Explicit, LBMForce::Regularized);
     testRestartWithParticles(platform);
     testCheckpointWithRandomForce(platform);
     testCheckpointMismatch(platform);

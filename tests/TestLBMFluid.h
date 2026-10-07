@@ -795,7 +795,7 @@ void testPressureDrivenDuct(Platform& platform) {
             change = max(change, fabs(velocity[1][node][1]-velocity[0][node][1])*fluidDt/fluidDx);
         }
     ASSERT(error < 0.02*umax);
-    ASSERT(change < 1e-9*umax);
+    ASSERT(change < getFluidTolerance(platform, 1e-9, 1e-4)*umax);
     delete system;
 }
 
@@ -825,26 +825,6 @@ void testFaceChecks(Platform& platform) {
     }
 }
 
-/**
- * The Regularized wall scheme is not yet implemented on the GPU platforms: creating a Context fails.
- */
-void testRegularizedWallsRefused(Platform& platform) {
-    LBMForce* force;
-    System* system = createFluidSystem(force, 4, 4, 4, 0.8);
-    force->setSolidNodes(wallPlane(4, 4, 4));
-    force->setWallScheme(LBMForce::Regularized);
-    VerletIntegrator integrator(fluidDt);
-    bool thrown = false;
-    try {
-        Context context(*system, integrator, platform);
-    }
-    catch (const OpenMMException& e) {
-        thrown = (string(e.what()).find("Regularized") != string::npos);
-    }
-    ASSERT(thrown);
-    delete system;
-}
-
 void runFluidTests(Platform& platform) {
     testUniformFlowIsSteady(platform);
     testFluidConservation(platform);
@@ -863,6 +843,90 @@ void runFluidTests(Platform& platform) {
     testRelaxationTimeWarning(platform);
 }
 
+/**
+ * A checkpoint records the wall scheme and the boundary types of the faces: it is loaded by a Context with the same
+ * ones, and refused by a Context with another wall scheme or other faces.
+ */
+void testCheckpointBoundaries(Platform& platform) {
+    auto create = [&](LBMForce*& force, LBMForce::WallScheme scheme, LBMForce::BoundaryType yFaces) {
+        System* system = createFluidSystem(force, 4, 5, 4, 0.8);
+        force->setSolidNodes(wallPlane(4, 5, 4));
+        force->setWallScheme(scheme);
+        force->setFaceBoundary(LBMForce::YMin, yFaces);
+        force->setFaceBoundary(LBMForce::YMax, yFaces);
+        return system;
+    };
+    LBMForce* force;
+    System* system = create(force, LBMForce::Regularized, LBMForce::Density);
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 1.2, 0.3)));
+    integrator.step(3);
+    stringstream checkpoint;
+    force->createCheckpoint(context, checkpoint);
+    string data = checkpoint.str();
+    const char* expected[3] = {NULL, "wall scheme", "boundary types of the faces"};
+    LBMForce::WallScheme schemes[3] = {LBMForce::Regularized, LBMForce::BounceBack, LBMForce::Regularized};
+    LBMForce::BoundaryType faces[3] = {LBMForce::Density, LBMForce::Density, LBMForce::Velocity};
+    for (int i = 0; i < 3; i++) {
+        LBMForce* force2;
+        System* system2 = create(force2, schemes[i], faces[i]);
+        VerletIntegrator integrator2(fluidDt);
+        Context context2(*system2, integrator2, platform);
+        stringstream stream(data);
+        string message;
+        try {
+            force2->loadCheckpoint(context2, stream);
+        }
+        catch (const OpenMMException& e) {
+            message = e.what();
+        }
+        if (expected[i] == NULL) {
+            ASSERT(message.empty());
+        }
+        else {
+            ASSERT(message.find(expected[i]) != string::npos);
+        }
+        delete system2;
+    }
+    delete system;
+}
+
+/**
+ * With walls and open faces (a Velocity inlet and a Density outlet, whose time filter reads the velocity of the
+ * previous step from the populations) and a body force, a run restarted from getFluidState() and setFluidState()
+ * is identical, bit for bit, to an uninterrupted run: the state of the fluid holds everything.
+ */
+void testFluidStateRestartWithBoundaries(Platform& platform, LBMForce::WallScheme scheme) {
+    int numSteps = 30, split = 11;
+    vector<double> saved, fluid[2];
+    for (int run = 0; run < 2; run++) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, 6, 5, 4, 0.8);
+        force->setSolidNodes(wallPlane(6, 5, 4));
+        force->setWallScheme(scheme);
+        force->setFaceBoundary(LBMForce::XMin, LBMForce::Velocity);
+        force->setFaceBoundary(LBMForce::XMax, LBMForce::Density);
+        force->setFaceVelocity(LBMForce::XMin, Vec3(0.4, 0.1, 0.0));
+        force->setFaceDensity(LBMForce::XMax, 1.003*fluidDensity);
+        force->setBodyAcceleration(Vec3(0.0, 0.0, 2.0));
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        context.setPositions(vector<Vec3>(1, Vec3(0.1, 1.2, 0.3)));
+        if (run == 0) {
+            integrator.step(split);
+            force->getFluidState(context, saved);
+        }
+        else
+            force->setFluidState(context, saved);
+        integrator.step(numSteps-split);
+        force->getFluidState(context, fluid[run]);
+        delete system;
+    }
+    for (int i = 0; i < (int) fluid[0].size(); i++)
+        ASSERT_EQUAL(fluid[0][i], fluid[1][i]);
+}
+
 void runWallTests(Platform& platform) {
     testSolidNodeChecks(platform);
     testPoiseuille(platform, 0.7);
@@ -870,18 +934,17 @@ void runWallTests(Platform& platform) {
     testPoiseuille(platform, 1.2);
     testWallConservation(platform);
     testWallBalance(platform, LBMForce::BounceBack);
-    if (platform.getName() == "Reference") {
-        testRegularizedPoiseuille(platform, 0.7);
-        testRegularizedPoiseuille(platform, 1.0);
-        testRegularizedPoiseuille(platform, 1.5);
-        testWallBalance(platform, LBMForce::Regularized);
-        testCouette(platform, 0.6);
-        testCouette(platform, 1.0);
-        testCouette(platform, 1.5);
-        testUniformFlowThroughFaces(platform);
-        testPressureDrivenDuct(platform);
-        testFaceChecks(platform);
-    }
-    else
-        testRegularizedWallsRefused(platform);
+    testRegularizedPoiseuille(platform, 0.7);
+    testRegularizedPoiseuille(platform, 1.0);
+    testRegularizedPoiseuille(platform, 1.5);
+    testWallBalance(platform, LBMForce::Regularized);
+    testCouette(platform, 0.6);
+    testCouette(platform, 1.0);
+    testCouette(platform, 1.5);
+    testUniformFlowThroughFaces(platform);
+    testPressureDrivenDuct(platform);
+    testFaceChecks(platform);
+    testCheckpointBoundaries(platform);
+    testFluidStateRestartWithBoundaries(platform, LBMForce::BounceBack);
+    testFluidStateRestartWithBoundaries(platform, LBMForce::Regularized);
 }

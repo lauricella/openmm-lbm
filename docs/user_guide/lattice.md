@@ -38,7 +38,7 @@ divides it into cubic cells:
 - the lattice spacing is dx = Lx/nx, and Ly/ny and Lz/nz must be equal to it (to a relative 1e-6);
 - node (i, j, k) sits at (i dx, j dx, k dx), with 0 <= i < nx, 0 <= j < ny and 0 <= k < nz;
 - the lattice is periodic in all three directions, like the box, unless you open the faces of the box
-  ([open faces](api_reference.md#open-faces), Reference platform only for now).
+  ([open faces](api_reference.md#open-faces)).
 
 The box is read from the default periodic box vectors of the System when the Context is created.
 For a box of 15 x 15 x 7.5 nm and dx = 0.5 nm:

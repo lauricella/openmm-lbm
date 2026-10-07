@@ -286,13 +286,15 @@ def test_fluid_fluctuations_gpu(name):
 
 
 @pytest.mark.parametrize('name,precision,walls', [(name, precision, walls) for name in ('CUDA', 'OpenCL', 'HIP')
-                                                  for precision in ('mixed', 'double') for walls in (False, True)],
-                         ids=lambda value: {False: 'periodic', True: 'walls'}.get(value, value))
+                                                  for precision in ('mixed', 'double')
+                                                  for walls in ('periodic', 'walls', 'regularized', 'faces')])
 def test_fluid_agrees_with_reference(name, precision, walls):
     # The fluid update of the GPU platforms has the arithmetic of the Reference platform: in double and mixed
     # precision the two agree to rounding (not bitwise, because of fused multiply-adds), here with a perturbed
     # fluid, a body force and the removal of the fluid momentum every third step, without and with solid nodes
-    # (the plane j = 0 and a block), whose force on the walls must agree as well.
+    # (the plane j = 0 and a block) with bounce-back or regularized walls, whose force on the walls must agree as
+    # well, and with regularized walls and open faces along x (a Velocity inlet and a Density outlet, without the
+    # removal).
     import numpy as np
     try:
         platform = mm.Platform.getPlatformByName(name)
@@ -308,10 +310,17 @@ def test_fluid_agrees_with_reference(name, precision, walls):
         force.setKinematicViscosity((0.8 - 0.5)/3*0.25/0.01)
         force.setBodyAcceleration(mm.Vec3(0.5, -0.2, 0.1))
         force.setInitialFluidVelocity(mm.Vec3(0.5, 0.2, -0.3))
-        force.setFluidMomentumRemovalFrequency(3)
-        if walls:
+        force.setFluidMomentumRemovalFrequency(0 if walls == 'faces' else 3)
+        if walls != 'periodic':
             force.setSolidNodes([i + 6*5*k for k in range(4) for i in range(6)] +
                                 [i + 6*(j + 5*k) for k in (1, 2) for j in (2, 3) for i in (2, 3)])
+        if walls in ('regularized', 'faces'):
+            force.setWallScheme(LBMForce.Regularized)
+        if walls == 'faces':
+            force.setFaceBoundary(LBMForce.XMin, LBMForce.Velocity)
+            force.setFaceBoundary(LBMForce.XMax, LBMForce.Density)
+            force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.5, 0.1, 0.0))
+            force.setFaceDensity(LBMForce.XMax, 605.0)
         system.addForce(force)
         integrator = mm.VerletIntegrator(0.01)
         try:

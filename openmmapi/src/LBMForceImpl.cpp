@@ -286,12 +286,13 @@ void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& sta
 /**
  * A checkpoint starts with a header that identifies it: a tag, the format version, the platform, the grid size,
  * the number of coupled particles, (from version 2) the drag scheme, (from version 3) whether the fluid
- * fluctuates and (from version 4) the wall scheme.  The kernel writes the rest, which is the same in all versions.
- * Version 1 was written before the drag scheme existed, with the explicit drag, versions 1 and 2 before the fluid
- * fluctuations, without them, and versions 1 to 3 before the wall schemes, with bounce-back.
+ * fluctuates, (from version 4) the wall scheme and (from version 5) the boundary types of the six faces.  The
+ * kernel writes the rest.  Version 1 was written before the drag scheme existed, with the explicit drag, versions 1
+ * and 2 before the fluid fluctuations, without them, versions 1 to 3 before the wall schemes, with bounce-back, and
+ * versions 1 to 4 with periodic faces.
  */
 static const char checkpointTag[8] = {'L', 'B', 'M', 'C', 'K', 'P', 'T', '1'};
-static const int checkpointVersion = 4;
+static const int checkpointVersion = 5;
 
 void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     stream.write(checkpointTag, sizeof(checkpointTag));
@@ -300,8 +301,10 @@ void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     int length = platform.size();
     stream.write((const char*) &length, sizeof(int));
     stream.write(platform.c_str(), length);
-    int header[7] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme,
-                     (int) lattice.fluidFluctuations, (int) lattice.wallScheme};
+    int header[13] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme,
+                      (int) lattice.fluidFluctuations, (int) lattice.wallScheme};
+    for (int face = 0; face < 6; face++)
+        header[7+face] = (int) lattice.faceBoundary[face];
     stream.write((const char*) header, sizeof(header));
     kernel.getAs<CalcLBMForceKernel>().createCheckpoint(context, stream);
     if (!stream)
@@ -325,8 +328,10 @@ void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
     if (platform != context.getPlatform().getName())
         throw OpenMMException("LBMForce: the checkpoint was written on the platform " + platform + ", not on " +
                 context.getPlatform().getName());
-    int header[7] = {0, 0, 0, 0, (int) LBMForce::Explicit, 0, (int) LBMForce::BounceBack};
-    stream.read((char*) header, (version+3)*sizeof(int));
+    int header[13] = {0, 0, 0, 0, (int) LBMForce::Explicit, 0, (int) LBMForce::BounceBack};
+    for (int face = 0; face < 6; face++)
+        header[7+face] = (int) LBMForce::Periodic;
+    stream.read((char*) header, (version <= 4 ? version+3 : 13)*sizeof(int));
     if (!stream || header[0] != lattice.nx || header[1] != lattice.ny || header[2] != lattice.nz ||
             header[3] != (int) lattice.particles.size())
         throw OpenMMException("LBMForce: the checkpoint was written for a different grid size or number of coupled particles");
@@ -337,6 +342,9 @@ void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
                 " fluid fluctuations, and this Context has them " + (lattice.fluidFluctuations ? "on" : "off"));
     if (header[6] != (int) lattice.wallScheme)
         throw OpenMMException("LBMForce: the checkpoint was written with a different wall scheme");
+    for (int face = 0; face < 6; face++)
+        if (header[7+face] != (int) lattice.faceBoundary[face])
+            throw OpenMMException("LBMForce: the checkpoint was written with different boundary types of the faces (setFaceBoundary())");
     kernel.getAs<CalcLBMForceKernel>().loadCheckpoint(context, stream);
     if (!stream)
         throw OpenMMException("LBMForce: the checkpoint is truncated");

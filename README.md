@@ -7,9 +7,9 @@ with each other, and the explicit drag with the reference CUDA library of the Dr
 [user guide](docs/user_guide/README.md#what-works-in-this-version) and `docs/validation.md`).
 
 **Development version** (not yet released, [CHANGELOG](CHANGELOG.md)): thermal fluctuations of the fluid
-(`setFluidFluctuations()`) on all platforms, VTK files of the fluid and of the particles for ParaView
-(`openmmlbm.LBMVTKReporter`), and, on the Reference platform only for now, regularized walls
-(`setWallScheme()`) and open faces with an imposed velocity or density (`setFaceBoundary()`).
+(`setFluidFluctuations()`), regularized walls (`setWallScheme()`) and open faces with an imposed velocity or
+density (`setFaceBoundary()`), all on all platforms, and VTK files of the fluid and of the particles for
+ParaView (`openmmlbm.LBMVTKReporter`).
 
 ## Requirements
 

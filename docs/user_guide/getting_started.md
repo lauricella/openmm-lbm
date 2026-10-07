@@ -145,9 +145,8 @@ print(force.getFluidDensity())    # 602.214... Da/nm^3
 
 ## Platforms
 
-The fluid, the solid nodes and the coupling of the particles run on every platform; the regularized walls and
-the open faces run only on the Reference platform for now (see the
-[status table](README.md#what-works-in-this-version)). The Reference platform is for tests and small
+The fluid, the solid nodes with both wall schemes, the open faces and the coupling of the particles run on
+every platform (see the [status table](README.md#what-works-in-this-version)). The Reference platform is for tests and small
 systems; CUDA, OpenCL and HIP are for production. On those platforms the fluid is stored in the "mixed"
 type of the platform:
 

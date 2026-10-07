@@ -594,15 +594,14 @@ Notes:
   Context; none of them advances the fluid.
 - **Which particles to couple.** Only the particles passed to `addParticle()` interact with the fluid.
 - **GPU platforms.** To run on CUDA, replace the platform with `mm.Platform.getPlatformByName('CUDA')`
-  and pass `{'Precision': 'mixed'}`. Every example above runs unchanged (the two examples with open faces
-  below need the Reference platform for now); the random forces, and therefore
+  and pass `{'Precision': 'mixed'}`. Every example above runs unchanged, and so do the two examples with open
+  faces below; the random forces, and therefore
   the outputs with T > 0, differ from those of the Reference platform (see the
   [status table](README.md#what-works-in-this-version)).
 
 ## Couette flow between two open faces
 
-The faces of the box can be open instead of periodic ([open faces](api_reference.md#open-faces); on the
-Reference platform only for now, the other platforms refuse them when the Context is created). Here the
+The faces of the box can be open instead of periodic ([open faces](api_reference.md#open-faces)). Here the
 bottom face z = 0 holds the fluid at rest and the top face moves along x with the velocity U: the fluid
 between them is sheared, and in the steady state its velocity grows linearly from 0 to U. x and y stay
 periodic, so the two plates are infinite.

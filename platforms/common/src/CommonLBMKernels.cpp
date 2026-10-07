@@ -10,6 +10,7 @@
 #include "CommonLBMKernels.h"
 #include "CommonLBMKernelSources.h"
 #include "internal/D3Q19.h"
+#include "internal/LBMBoundaries.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/common/ContextSelector.h"
 #include "openmm/common/IntegrationUtilities.h"
@@ -79,12 +80,6 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
-    if (!lattice.solidNodes.empty() && lattice.wallScheme == LBMForce::Regularized)
-        throw OpenMMException("LBMForce: the Regularized wall scheme is not yet implemented on the " + getPlatform().getName() +
-                " platform; use the Reference platform or the BounceBack wall scheme");
-    if (lattice.hasOpenFaces())
-        throw OpenMMException("LBMForce: open faces (setFaceBoundary()) are not yet implemented on the " + getPlatform().getName() +
-                " platform; use the Reference platform");
     this->lattice = lattice;
     forceGroup = force.getForceGroup();
     bool centered = (lattice.dragScheme == LBMForce::Centered);
@@ -114,26 +109,76 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         for (int node = 0; node < numNodes; node++)
             f[q*numNodes+node] = dfeq[q];
 
-    // Solid nodes hold no fluid: their populations start at zero, that is at the deviation -w_q.  The part w of
-    // the populations gives the walls the same momentum in every step (the static pressure): it is computed
-    // here once, in double precision, with the links from the solid nodes to the fluid nodes.
+    // Solid nodes hold no fluid: their populations start at zero, that is at the deviation -w_q.  With bounce-back
+    // the part w of the populations gives the walls the same momentum in every step (the static pressure): it is
+    // computed here once, in double precision, with the links from the solid nodes to the fluid nodes that do not
+    // cross an open face.
 
     int numSolidNodes = lattice.solidNodes.size();
+    int size[3] = {lattice.nx, lattice.ny, lattice.nz};
     isFluidHost.assign(numNodes, 1);
     for (int node : lattice.solidNodes)
         isFluidHost[node] = 0;
     staticWallMomentum = Vec3();
     for (int node : lattice.solidNodes) {
-        int i = node%lattice.nx, j = (node/lattice.nx)%lattice.ny, k = node/(lattice.nx*lattice.ny);
+        int index[3] = {node%lattice.nx, (node/lattice.nx)%lattice.ny, node/(lattice.nx*lattice.ny)};
         for (int q = 0; q < D3Q19::numVelocities; q++)
             f[q*numNodes+node] = -D3Q19::w[q];
+        if (lattice.wallScheme != LBMForce::BounceBack)
+            continue;
         for (int q = 1; q < D3Q19::numVelocities; q++) {
-            int di = (i + D3Q19::cx[q] + lattice.nx)%lattice.nx;
-            int dj = (j + D3Q19::cy[q] + lattice.ny)%lattice.ny;
-            int dk = (k + D3Q19::cz[q] + lattice.nz)%lattice.nz;
-            if (isFluidHost[di + lattice.nx*(dj + lattice.ny*dk)])
-                staticWallMomentum -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*D3Q19::w[q]);
+            int c[3] = {D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]}, target[3];
+            bool crossesFace = false;
+            for (int a = 0; a < 3; a++) {
+                target[a] = index[a] + c[a];
+                crossesFace = crossesFace || (lattice.isOpenAxis(a) && (target[a] < 0 || target[a] >= size[a]));
+                target[a] = (target[a] + size[a])%size[a];
+            }
+            if (!crossesFace && isFluidHost[target[0] + lattice.nx*(target[1] + lattice.ny*target[2])])
+                staticWallMomentum -= Vec3(c[0], c[1], c[2])*(2.0*D3Q19::w[q]);
         }
+    }
+
+    // Boundary nodes (docs/theory.md, section 1, and internal/LBMBoundaries.h): with regularized walls the fluid
+    // nodes next to the solid nodes, and the fluid nodes on the open faces.  isFluid is 2 at the nodes of regularized
+    // walls and 3 at the nodes of open faces.  As on the Reference platform the wall nodes start at rest, with the
+    // velocity -g/2 of their populations.  The part w of the populations of a wall node gives the wall the same
+    // momentum in every step: sum of c_q w_q over the known directions minus the sum over the solid ones.
+
+    LBMBoundaries boundaries;
+    boundaries.find(lattice, isFluidHost);
+    int numBoundaryNodes = boundaries.nodes.size();
+    staticBoundaryMomentum = Vec3();
+    D3Q19::equilibriumDeviation(0.0, -0.5*lattice.bodyAcceleration[0], -0.5*lattice.bodyAcceleration[1],
+            -0.5*lattice.bodyAcceleration[2], dfeq);
+    vector<int> kindAndFace(numBoundaryNodes);
+    for (int b = 0; b < numBoundaryNodes; b++) {
+        int node = boundaries.nodes[b];
+        isFluidHost[node] = 1 + boundaries.type[node];
+        kindAndFace[b] = boundaries.kind[b] + 4*(boundaries.face[b] + 1);
+        if (boundaries.kind[b] != LBMBoundaries::Wall)
+            continue;
+        for (int q = 0; q < D3Q19::numVelocities; q++) {
+            f[q*numNodes+node] = dfeq[q];
+            Vec3 c(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]);
+            if (!(boundaries.unknown[b] & (1<<q)))
+                staticBoundaryMomentum += c*D3Q19::w[q];
+            else if (boundaries.solid[b] & (1<<q))
+                staticBoundaryMomentum -= c*D3Q19::w[q];
+        }
+    }
+    if (numBoundaryNodes > 0) {
+        boundaryNodes.initialize<int>(cc, numBoundaryNodes, "lbmBoundaryNodes");
+        boundaryNodes.upload(boundaries.nodes);
+        boundaryUnknown.initialize<int>(cc, numBoundaryNodes, "lbmBoundaryUnknown");
+        boundaryUnknown.upload(boundaries.unknown);
+        boundarySolid.initialize<int>(cc, numBoundaryNodes, "lbmBoundarySolid");
+        boundarySolid.upload(boundaries.solid);
+        boundaryKindAndFace.initialize<int>(cc, numBoundaryNodes, "lbmBoundaryKindAndFace");
+        boundaryKindAndFace.upload(kindAndFace);
+        boundaryExchange.initialize(cc, 3*numBoundaryNodes, elementSize, "lbmBoundaryExchange");
+        boundaryExchange.upload(vector<double>(3*numBoundaryNodes, 0.0), true);
+        faceParameters.initialize(cc, 24, elementSize, "lbmFaceParameters");
     }
     populations.upload(f, true);
     isFluid.initialize<int>(cc, numNodes, "lbmIsFluid");
@@ -217,6 +262,14 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         defines["HAS_COUPLED_PARTICLES"] = "1";
     if (lattice.fluidFluctuations)
         defines["FLUID_FLUCTUATIONS"] = "1";
+    if (numBoundaryNodes > 0) {
+        defines["HAS_BOUNDARY_NODES"] = "1";
+        defines["NUM_BOUNDARY_NODES"] = cc.intToString(numBoundaryNodes);
+    }
+    const char* openAxis[3] = {"OPEN_X", "OPEN_Y", "OPEN_Z"};
+    for (int a = 0; a < 3; a++)
+        if (lattice.isOpenAxis(a))
+            defines[openAxis[a]] = "1";
     ComputeProgram program = cc.compileProgram(CommonLBMKernelSources::lbmFluid, defines);
     computeMomentsKernel = program->createKernel("computeFluidMoments");
     computeMomentsKernel->addArg(populations);
@@ -228,6 +281,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     sumMomentumKernel->addArg(densityDeviation);
     sumMomentumKernel->addArg(momentum);
     sumMomentumKernel->addArg(partialSums);
+    sumMomentumKernel->addArg(isFluid);
     centerVelocityKernel = program->createKernel("computeFluidCenterVelocity");
     centerVelocityKernel->addArg(partialSums);
     centerVelocityKernel->addArg(numGroups);
@@ -236,6 +290,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     removeMomentumKernel->addArg(densityDeviation);
     removeMomentumKernel->addArg(momentum);
     removeMomentumKernel->addArg(centerVelocity);
+    removeMomentumKernel->addArg(isFluid);
     collideKernel = program->createKernel("collideAndStream");
     collideKernel->addArg(populations);
     collideKernel->addArg(isFluid);
@@ -251,12 +306,26 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         collideKernel->addArg();        // mu = kT/cs^2, set by setFluidParameters()
         collideKernel->addArg(0);       // index of the random numbers, set in every step
     }
-    if (numSolidNodes > 0) {
+    if (numSolidNodes > 0 && lattice.wallScheme == LBMForce::BounceBack) {
         bounceBackKernel = program->createKernel("bounceBack");
         bounceBackKernel->addArg(populations);
         bounceBackKernel->addArg(isFluid);
         bounceBackKernel->addArg(solidNodes);
         bounceBackKernel->addArg(wallExchange);
+    }
+    if (numBoundaryNodes > 0) {
+        applyBoundariesKernel = program->createKernel("applyBoundaries");
+        applyBoundariesKernel->addArg(populations);
+        applyBoundariesKernel->addArg(boundaryNodes);
+        applyBoundariesKernel->addArg(boundaryUnknown);
+        applyBoundariesKernel->addArg(boundarySolid);
+        applyBoundariesKernel->addArg(boundaryKindAndFace);
+        applyBoundariesKernel->addArg(densityDeviation);
+        applyBoundariesKernel->addArg(momentum);
+        applyBoundariesKernel->addArg(faceParameters);
+        applyBoundariesKernel->addArg(boundaryExchange);
+        for (int i = 0; i < 3; i++)
+            applyBoundariesKernel->addArg();    // the body acceleration, set by setFluidParameters()
     }
     maxSpeedKernel = program->createKernel("computeMaxFluidSpeed");
     maxSpeedKernel->addArg(populations);
@@ -300,6 +369,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         coupleKernel->addArg(noise);
         for (int i = 0; i < 5; i++)
             coupleKernel->addArg();     // index of the random numbers, drawNoise, isStep, gamma and kT, set later
+        coupleKernel->addArg(isFluid);
         sumReactionsKernel = coupling->createKernel("sumCellReactions");
         sumReactionsKernel->addArg(sortKeys);
         sumReactionsKernel->addArg(particleForce);
@@ -343,6 +413,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             solveCenteredKernel->addArg(particleWallMomentum);
             for (int i = 0; i < 5; i++)
                 solveCenteredKernel->addArg();      // isStep, gamma and the body acceleration, set later
+            solveCenteredKernel->addArg(isFluid);
         }
     }
     setFluidParameters();
@@ -366,6 +437,22 @@ void CommonCalcLBMForceKernel::setFluidParameters() {
             collideKernel->setArg(6+i, values[i]);
         else
             collideKernel->setArg(6+i, (float) values[i]);
+    }
+    if (applyBoundariesKernel) {
+        // The velocity (lattice units) and the density minus 1 of each face.
+        vector<double> faces(24);
+        for (int face = 0; face < 6; face++) {
+            for (int k = 0; k < 3; k++)
+                faces[4*face+k] = lattice.faceVelocity[face][k];
+            faces[4*face+3] = lattice.faceDensity[face]-1.0;
+        }
+        faceParameters.upload(faces, true);
+        for (int i = 0; i < 3; i++) {
+            if (useDouble)
+                applyBoundariesKernel->setArg(9+i, values[1+i]);
+            else
+                applyBoundariesKernel->setArg(9+i, (float) values[1+i]);
+        }
     }
     if (lattice.fluidFluctuations) {
         double mu = 3.0*lattice.fluidKT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
@@ -466,8 +553,10 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     collideKernel->execute(numNodes);
     if (numCoupled > 0)
         clearReactionsKernel->execute(numCoupled);
-    if (!lattice.solidNodes.empty())
+    if (bounceBackKernel)
         bounceBackKernel->execute(lattice.solidNodes.size());
+    if (applyBoundariesKernel)
+        applyBoundariesKernel->execute(boundaryNodes.getSize());
     hasAdvanced = true;
     stepForcesCurrent = true;
     stepIndex++;
@@ -599,8 +688,9 @@ void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<doubl
 
 Vec3 CommonCalcLBMForceKernel::getWallForce(ContextImpl& context) {
     // The momentum given to the solid nodes in the last step, divided by dt: the part of the deviations f - w,
-    // summed over the solid nodes in the order of the list, plus the static part of the weights w, plus the
-    // reflections and reactions of the coupled particles, summed in particle order.
+    // summed over the solid nodes in the order of the list (bounce-back) or over the boundary nodes of the walls
+    // in the order of their list (regularized walls), plus the static part of the weights w, plus the reflections
+    // and reactions of the coupled particles, summed in particle order.
     int numSolidNodes = lattice.solidNodes.size();
     if (numSolidNodes == 0 || !hasAdvanced)
         return Vec3();
@@ -611,6 +701,13 @@ Vec3 CommonCalcLBMForceKernel::getWallForce(ContextImpl& context) {
     for (int i = 0; i < numSolidNodes; i++)
         momentum += Vec3(exchange[i], exchange[numSolidNodes+i], exchange[2*numSolidNodes+i]);
     momentum += staticWallMomentum;
+    if (boundaryExchange.isInitialized()) {
+        int numBoundaryNodes = boundaryNodes.getSize();
+        downloadAsDouble(boundaryExchange, exchange);
+        for (int b = 0; b < numBoundaryNodes; b++)
+            momentum += Vec3(exchange[b], exchange[numBoundaryNodes+b], exchange[2*numBoundaryNodes+b]);
+        momentum += staticBoundaryMomentum;
+    }
     int numCoupled = lattice.particles.size();
     if (numCoupled > 0) {
         vector<double> particles;
@@ -672,6 +769,7 @@ void CommonCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& s
     writeArray(noise, stream);
     writeArray(particleWallMomentum, stream);
     writeArray(wallExchange, stream);
+    writeArray(boundaryExchange, stream);
 }
 
 void CommonCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& stream) {
@@ -689,5 +787,6 @@ void CommonCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& str
     readArray(noise, stream);
     readArray(particleWallMomentum, stream);
     readArray(wallExchange, stream);
+    readArray(boundaryExchange, stream);
 }
 

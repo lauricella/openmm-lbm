@@ -93,6 +93,8 @@ private:
     /** Momentum (lattice units) given to the walls in every step by the part w of the populations, the static
         pressure: it depends only on the geometry. */
     OpenMM::Vec3 staticWallMomentum;
+    /** The same for the nodes of regularized walls: the part w of the populations that they receive and send. */
+    OpenMM::Vec3 staticBoundaryMomentum;
     /** Work group size and number of work groups of the reductions. */
     int blockSize, numGroups;
     /** Deviations of the populations from the rest equilibrium, f_q - w_q, at [q*numNodes + node]. */
@@ -102,9 +104,15 @@ private:
     OpenMM::ComputeArray densityDeviation, momentum, piNeq;
     /** Partial sums and maxima of the work groups, and the velocity of the centre of mass of the fluid. */
     OpenMM::ComputeArray partialSums, partialMax, centerVelocity;
-    /** 1 for fluid nodes and 0 for solid nodes; the list of the solid nodes; the momentum given to each solid
-        node by the deviations f - w in the last step (3 components of numSolidNodes each). */
+    /** 1 for fluid nodes, 0 for solid nodes, 2 for the nodes of regularized walls and 3 for the nodes of open faces;
+        the list of the solid nodes; the momentum given to each solid node by the deviations f - w in the last step
+        (3 components of numSolidNodes each). */
     OpenMM::ComputeArray isFluid, solidNodes, wallExchange;
+    /** Boundary nodes (regularized walls and open faces, internal/LBMBoundaries.h): the nodes, the bits of their
+        unknown and solid directions, kind + 4*(face + 1), the momentum given to the wall by each node in the last
+        step (deviations f - w, 3 components of numBoundaryNodes each), and the velocity and density minus 1 of the
+        six faces (lattice units, 4 per face). */
+    OpenMM::ComputeArray boundaryNodes, boundaryUnknown, boundarySolid, boundaryKindAndFace, boundaryExchange, faceParameters;
     /** Coupled particles: index in the list of the force of every atom of the System (-1 if not coupled); masses
         (lattice units); coupling forces (lattice units, 3 components of numCoupled each), those of the step in
         its force evaluation and those of the next step between steps; sort keys node*numCoupled + i; momentum
@@ -121,7 +129,7 @@ private:
     OpenMM::ComputeArray fluctuationBasis;
     OpenMM::ComputeSort sort;
     OpenMM::ComputeKernel computeMomentsKernel, sumMomentumKernel, centerVelocityKernel, removeMomentumKernel;
-    OpenMM::ComputeKernel collideKernel, bounceBackKernel, maxSpeedKernel;
+    OpenMM::ComputeKernel collideKernel, bounceBackKernel, applyBoundariesKernel, maxSpeedKernel;
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel;
 };

@@ -57,8 +57,8 @@ accurate only when it is small: below 0.1; above 0.3 (the default limit) the plu
 ([lattice](lattice.md#mach-number-and-stability)).
 
 **Open face.** A face of the box that is not periodic: the fluid on it has a velocity or a density that you
-choose, to build inlets, outlets and moving plates. Set with `setFaceBoundary()`; Reference platform only for
-now ([API](api_reference.md#open-faces)).
+choose, to build inlets, outlets and moving plates. Set with `setFaceBoundary()`
+([API](api_reference.md#open-faces)).
 
 **Platform.** Where OpenMM computes: `Reference` (one processor core, slow, the reference for correctness),
 `CUDA` and `OpenCL` (GPUs), `HIP` (AMD GPUs).
@@ -66,8 +66,8 @@ now ([API](api_reference.md#open-faces)).
 **Precision.** The number format used on a GPU platform: `single`, `mixed` (recommended) or `double`.
 
 **Regularized wall.** The other rule at solid nodes (`setWallScheme(LBMForce.Regularized)`): the wall lies on the
-first fluid node next to the solid nodes, whose populations are rebuilt at every step. Reference platform only
-for now ([API](api_reference.md#setwallschemescheme-getwallscheme)).
+first fluid node next to the solid nodes, whose populations are rebuilt at every step
+([API](api_reference.md#setwallschemescheme-getwallscheme)).
 
 **Relaxation time (tau).** The parameter of the lattice Boltzmann method that corresponds to the viscosity:
 tau = 3 nu dt/dx^2 + 1/2. It must stay between about 0.505 and 2, and below about 1.7 with coupled particles
