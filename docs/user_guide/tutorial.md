@@ -16,7 +16,7 @@ export EX=~/src/openmm-lbm/examples      # a short name for the folder of the ex
 ```
 
 The commands below use `--platform Reference`, which works on every computer. With a GPU, leave it
-out: the scripts then take the fastest platform. For the figures, install matplotlib once:
+out: the scripts then take CUDA, or OpenCL if there is no CUDA (on an AMD GPU pass `--platform HIP`). For the figures, install matplotlib once:
 
 ```bash
 conda install -c conda-forge matplotlib
@@ -118,7 +118,7 @@ bead, the change of the total momentum, and the kinetic energies of bead and flu
 initial one.
 
 - The bead reaches the velocity of the fluid in about 1/gamma = 0.1 ps.
-- `p_total/p0 - 1` stays at 1e-14 or less: momentum is conserved exactly, apart from rounding.
+- `p_total/p0 - 1` stays at the level of rounding, below 1e-13: momentum is conserved exactly.
 - `E_total/E0` decreases: kinetic energy is not conserved. The friction turns it into heat, and so
   does the viscosity of the fluid. The fluid of the lattice Boltzmann method has a constant
   temperature, so that heat leaves the model.
@@ -132,8 +132,8 @@ Exercises:
 
 ## 5. Lesson 3: temperature (`thermal.py`)
 
-The fluid also works as a thermostat. One bead at rest is brought to 300 K by the friction and the
-random force:
+The fluid also works as a thermostat. One bead, started with the velocity sqrt(kT/m) along x, is brought
+to 300 K by the friction and the random force:
 
 ```bash
 python $EX/particle/thermal.py --platform Reference --seed 1
@@ -146,9 +146,11 @@ mean temperature computed in two ways:
 - from the velocities that OpenMM stores, which with `VerletIntegrator` are half a step behind the
   positions ("half step");
 - from the mean of two consecutive velocities, the velocity at the same time as the positions ("full
-  step"). This is the temperature of the coupled particles, and it is also the one that OpenMM itself
-  reports, for example in `StateDataReporter`, because OpenMM shifts the stored velocities by half a step
-  with the forces of the next step (see [examples](examples.md#temperature-of-coupled-particles)).
+  step"). With the explicit drag (the default) this is the temperature of the coupled particles, and it
+  is also the one that OpenMM itself reports, for example in `StateDataReporter`, because OpenMM shifts the
+  stored velocities by half a step with the forces of the next step (see
+  [examples](examples.md#temperature-of-coupled-particles)). With `--drag Centered` the half-step
+  temperature is the right one ([choosing the drag](lattice.md#choosing-the-drag)).
 
 With one bead and a small friction the mean converges slowly. A gas of 100 beads with a larger
 friction gives a precise value in a few seconds, on a GPU or on the Reference platform:
@@ -159,7 +161,7 @@ python $EX/particle/thermal.py --beads 100 --friction 10 --steps 20000 --equilib
 
 ```
 Mean temperature over 18000 steps: full step 297.6 K, half step 299.1 K
-Free bead in a fluid at rest: full step 300.0 K, half step T/(1 - gamma dt/2) = 301.5 K
+Free bead in a fluid at rest, explicit drag: full step 300.0 K, half step T/(1 - gamma dt/2) = 301.5 K
 ```
 
 (on an A100 GPU; another platform gives slightly different numbers, because the random numbers are
@@ -175,7 +177,7 @@ Exercises:
 
 ## 6. Lesson 4: the fluid alone (`initial_state.py`)
 
-The last example has no coupled particles. It starts the fluid from a wave, u_x = U sin(2 pi y / L),
+This example has no coupled particles. It starts the fluid from a wave, u_x = U sin(2 pi y / L),
 and prints its amplitude while the viscosity damps it:
 
 ```bash

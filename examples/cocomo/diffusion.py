@@ -24,7 +24,8 @@ All use a lattice spacing of 0.5 nm, water density, 298 K and the removal of the
 every step.
 
 The protocol is that of the original scripts: velocities at T, energy minimization, new velocities at
-T, production.  Files written, with the prefix given by --output:
+T, production.  Files written, with the prefix given by --output (default <preset>_lb_on, <preset>_lb_on_centered with
+--drag Centered, or <preset>_lb_off):
   <prefix>.dcd               trajectory (DCD), every --report steps
   <prefix>.log               step, time, potential energy, temperature, speed (OpenMM's StateDataReporter;
                              its temperature is that of the full step, docs/theory.md, section 2)
@@ -89,8 +90,9 @@ def parse_arguments():
     parser.add_argument('--enm-domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
                         help='residues joined by the elastic network (sod1: 2 109)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
-    parser.add_argument('--precision', default='mixed', help='precision on CUDA and OpenCL (default mixed)')
-    parser.add_argument('--output', help='prefix of the output files (default <preset>_lb_on or _lb_off)')
+    parser.add_argument('--precision', default='mixed', help='precision on CUDA, OpenCL and HIP (default mixed)')
+    parser.add_argument('--output', help='prefix of the output files (default <preset>_lb_on, <preset>_lb_on_centered '
+                        'with --drag Centered, or <preset>_lb_off)')
     parser.add_argument('--checkpoint', type=int,
                         help='steps between checkpoints in <prefix>.chk (default 100 reports, 0 = none)')
     parser.add_argument('--restart', action='store_true',
@@ -113,7 +115,7 @@ def parse_arguments():
 
 
 def select_platform(name, precision):
-    """The named platform, or the fastest available one; the precision property on CUDA and OpenCL."""
+    """The named platform, or the fastest available one; the precision property on CUDA, OpenCL and HIP."""
     names = [name] if name else ['CUDA', 'OpenCL', 'Reference']
     for candidate in names:
         try:
@@ -122,7 +124,7 @@ def select_platform(name, precision):
             if name:
                 raise
             continue
-        properties = {'Precision': precision} if candidate in ('CUDA', 'OpenCL') else {}
+        properties = {'Precision': precision} if candidate in ('CUDA', 'OpenCL', 'HIP') else {}
         return platform, properties
 
 

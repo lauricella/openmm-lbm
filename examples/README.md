@@ -30,7 +30,8 @@ mkdir -p ~/lbm-runs && cd ~/lbm-runs
 python /path/to/openmm-lbm/examples/particle/kick.py
 ```
 
-The output files are written in the current directory. Options common to all scripts:
+The output files are written in the current directory. Options common to the simulation scripts (not
+`cocomo/msd.py` and `plot.py`, which analyse their output):
 
 - `--platform NAME`: `Reference`, `CUDA`, `OpenCL` or `HIP`. Without it the script takes CUDA, then
   OpenCL, then Reference, the first that is available.
@@ -60,7 +61,7 @@ the two cases.
 
 ### particle/thermal.py
 
-One bead at rest in a box of 3 nm with 10^3 nodes; the friction and the random force of `LBMForce`
+One bead, started with the velocity sqrt(kT/m) along x, in a box of 3 nm with 10^3 nodes; the friction and the random force of `LBMForce`
 (the Euler-Maruyama scheme) bring it to 300 K. At the end the script prints the temperature computed
 from the velocities that OpenMM stores, which are half a step behind the positions, and from the
 full-step velocities (the mean of two consecutive steps). With `--beads N` there are N beads at random
@@ -98,6 +99,7 @@ friction, without hydrodynamics.
 python $EX/cocomo/diffusion.py --preset smoke            # SOD1, 2000 steps: a quick check
 python $EX/cocomo/diffusion.py --preset sod1 --seed 1    # SOD1, 200 ns, about 30 minutes on an A100
 python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient of the protein
+# with --drag Centered the prefix of the files is sod1_lb_on_centered
 ```
 
 - `--preset sod1` reproduces the runs of the DragOpenMM project with the folded protein SOD1 (box

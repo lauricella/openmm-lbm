@@ -2,8 +2,9 @@
 
 This document describes the physics implemented by `LBMForce`, the conversion between OpenMM and
 lattice units, and the conventions every platform must follow. Each section says whether it is
-already implemented (version 0.1.0) or still to be implemented; the target scheme is the one of the
-CUDA lattice Boltzmann library of the DragOpenMM project, which this plugin reproduces.
+already implemented or still to be implemented. The fluid and the explicit drag reproduce the CUDA
+lattice Boltzmann library of the DragOpenMM project; the centred drag (section 2) is an extension of this
+plugin.
 
 ## 1. Fluid model (implemented on all platforms)
 
@@ -91,12 +92,14 @@ measured with the momentum exchange method of Ladd [9, 10] ([11], section 5.4.3.
   f c - f (-c) = 2 f c.
 - The sum over all boundary links, times m_c dx/dt, is the momentum given to the walls in one step.
 - On the CUDA, OpenCL and HIP platforms one thread per solid node computes the part of the deviations,
-  -2 sum c (f - w), and the host sums it over the solid nodes in the order of the list. The part of the
+  -2 sum c_q (f - w), with c_q pointing from the solid node to its fluid neighbour, and the host sums it over
+  the solid nodes in the order of the list. The part of the
   weights, -2 sum c w, is the static pressure: it depends only on the geometry and is computed once, in
   double precision. Kept apart, it does not hide the hydrodynamic part in single precision.
 - The coupled particles also exchange momentum with the walls. The reaction -F of a particle whose
   nearest node is solid goes to the wall, and the reflection of a particle gives the wall the momentum
-  2 m v. On the GPU platforms each particle stores its contribution of the last step, and the host sums
+  2 m v. On the GPU platforms each particle stores its contribution of the last step (with the centred
+  drag the reaction -S of a solid node is stored with the first particle of the node), and the host sums
   them in particle order.
 
 `getWallForce()` returns the sum of these contributions over the last lattice step, divided by dt. With
@@ -112,7 +115,8 @@ multiplying the whole Hermite expansion.
 
 ## 2. Particle-fluid coupling (implemented on all platforms)
 
-**Euler-Maruyama scheme with the explicit drag** (the default). Each coupled particle k of mass m_k feels
+**Euler-Maruyama scheme with the explicit drag** (the default; a frictional coupling at the nearest node,
+as in Ahlrichs and Dünweg [5], reviewed in [6]). Each coupled particle k of mass m_k feels
 
   F_k = -gamma m_k (v_k - u(x_k)) + R_k,   <R_k R_k> = 2 gamma m_k kT/dt (per component).
 
@@ -150,7 +154,8 @@ in cells m_c):
   finite differences;
 - the drag dissipation in one step follows from the discrete update: the particle loses -F.(v_n + v_n+1)/2
   and the fluid, with Guo's forcing, receives -F at the velocity u - F/(2 rho) of the node, so the energy
-  dissipated is -F.[(v_n + v_n+1)/2 - u + F/(2 rho)], with F = -gamma m (v_n - u) the force on the particle.
+  dissipated is -F.[(v_n + v_n+1)/2 - u + F/(2 rho)], with F = m (v_n+1 - v_n)/dt the coupling force on
+  the particle, which holds for both drags.
 
 Measured on the Reference platform (`python/tests/TestEnergyBudget.py`, tau = 1.1):
 - a shear wave without particles closes to -3.1% of the initial energy with 16 nodes per wavelength and to
@@ -235,7 +240,9 @@ statistics; at T = 0 (or with the NVE scheme) the platforms agree to rounding.
 
 **Stability of the explicit drag.** In one step the drag multiplies the velocity of a particle
 relative to the fluid by 1 - gamma dt. It changes sign at every step for gamma dt > 1, and it grows
-without bound for gamma dt >= 2. A warning is printed when a Context is created with gamma dt > 1.
+without bound for gamma dt >= 2. A warning is printed when a Context with coupled particles and the
+explicit drag is created with gamma dt > 1. The centred drag is stable for any friction (Which velocity has
+the right temperature, below).
 
 **Self-mobility and relaxation time.** The mobility of a dragged particle is 1/(m gamma) + y, where y is
 the hydrodynamic self-mobility from the fluid around its node. y should depend only on the viscosity
@@ -248,7 +255,8 @@ gamma = 5/ps, protocol of `docs/validation.md`):
 |---|---|---|---|---|---|---|---|---|---|---|
 | y eta dx | 0.0609 | 0.0577 | 0.0442 | 0.0202 | 0.0134 | 0.0065 | -0.0007 | -0.0080 | -0.0154 | -0.1406 |
 
-y vanishes at tau = 1.79 (1.79 also for m = 100 Da, gamma = 10/ps), the value found with the reference
+(The scan with both drags below gives 0.0443 at tau = 1.1, a separate run with the same analysis.) y
+vanishes at tau = 1.79 (1.79 also for m = 100 Da, gamma = 10/ps), the value found with the reference
 library. Above it, particles move less than Langevin particles with the same friction. A warning is
 printed when a Context with coupled particles and the explicit drag has tau > 1.7.
 
@@ -266,7 +274,8 @@ the particle in the same step, h S/m_c, so y grows by dt/(2 m_c), that is by (ta
 centred drag y is positive at every tau, but y eta dx grows with tau: neither drag gives a self-mobility
 independent of tau. A relaxation of the ghost moments independent of tau is the next candidate correction.
 
-**Kinetic temperature.** OpenMM's leapfrog stores the velocities at half steps.
+**Kinetic temperature.** OpenMM's leapfrog stores the velocities at half steps. This paragraph is about
+the explicit drag; for the centred drag see Which velocity has the right temperature, below.
 - For a free particle with fluid at rest, the temperature measured from half-step velocities is
   T/(1 - gamma dt/2). Measured from full-step velocities v(t) = (v(t - dt/2) + v(t + dt/2))/2, it is T.
 - The fluid has no thermal fluctuations of its own and takes part of the momentum of the particles, so
@@ -276,8 +285,10 @@ independent of tau. A relaxation of the ghost moments independent of tau is the 
 - **The temperature reported by OpenMM is the full-step one.** The kinetic energy of a State, used by
   `StateDataReporter`, is computed by OpenMM from v(t - dt/2) + dt F(t)/(2m) with the coupling force of the
   next step (see above), which is the full-step velocity: it equals the temperature from full-step
-  velocities to rounding (`testFullStepKineticEnergy`; 293.98 K both, within 4e-12 K, for 200 beads at
-  300 K on the Reference platform). Before version 0.1.0 of this plugin the forces between steps were
+  velocities to rounding (checked by `testFullStepKineticEnergy` on every platform and with both drags;
+  measured once: 293.98 K both, within 4e-12 K, on 200 samples of 200 beads at 300 K on the Reference
+  platform, `docs/validation.md`). With the explicit drag this is the right temperature; with the centred
+  drag it is lower than the half-step one. Before version 0.1.0 of this plugin the forces between steps were
   those of the last step, and this temperature was wrong for coupled particles: for a free particle
   T [(1 - 3a/2)^2/(1 - a/2) + 9a/2] with a = gamma dt, 363 K at 300 K and a = 0.1.
 
@@ -331,8 +342,9 @@ platform (`test_centered_drag_sees_all_forces`).
   post-computation does nothing. The lattice step is done in the repeated evaluation, with the complete
   forces (`testCenteredRepeatedEvaluation`).
 - The arithmetic is that of the Reference platform: one thread per particle computes v~_k, its random force
-  and its key node*N + k; the keys are sorted with OpenMM's `ComputeSort`; the first key of each node solves
-  the node and writes the forces of its particles and the reaction -S.
+  and its key node*N_p + i; the keys are sorted with OpenMM's `ComputeSort`, in every force evaluation; the
+  first key of each node solves the node and writes the forces of its particles and, in a lattice step, the
+  reaction -S (to the walls at a solid node).
 
 **Which velocity has the right temperature.** Consider the particles of a node and their cell alone,
 without other forces, streaming and viscosity (a closed system with a fluctuation-dissipation balance). Its
@@ -375,7 +387,7 @@ temperature is T/(1 + zeta y). The centred drag has y larger by dt/(2 m_c) (Self
 zeta (y_centred - y_explicit) = gamma dt m/(2 m_c): measured 0.032, 0.063 and 0.127 at gamma dt = 0.05, 0.1
 and 0.2 with 10 particles, against 0.033, 0.066 and 0.133. With a fluid that does not respond (10^4 times
 denser) both drags give the exact values of their discretization, at gamma dt = 0.1, 0.5 and 1.5, within
-1e-4 (`docs/validation.md`). A fluid with thermal fluctuations is needed for the right temperature with either
+2e-4, the statistical error (`docs/validation.md`). A fluid with thermal fluctuations is needed for the right temperature with either
 scheme; it would make y appear in the diffusion coefficient, D = kT (1/zeta + y), instead.
 
 The extra deficit of the centred drag grows with gamma dt m/m_c, so it is large for heavy particles or large
@@ -412,10 +424,14 @@ Kassen et al. [16] (their case of a single node per point):
    to the node: one writer per node;
 4. after the collision the nodes that received a reaction are set back to zero.
 
-The result is reproducible bit for bit, and the sum is taken in the order of the Reference platform.
+With the centred drag, step 1 computes v~_k and the random force R_k, the keys are sorted in every force
+evaluation, and in step 3 the first entry solves the node, writes the forces of its particles and, in a
+lattice step, the reaction -S. The result is reproducible bit for bit, and the sum is taken in the order of
+the Reference platform.
 
-**Forces on the particles.** The forces of the last lattice step are added to OpenMM's force buffer, in
-fixed point (resolution 2^-32 kJ/mol/nm), at every force evaluation. OpenMM handles the forces in its
+**Forces on the particles.** The coupling forces (in the evaluation of a step those of the step, between
+steps those of the next step: When the coupling forces are computed, above) are added to OpenMM's force buffer, in fixed point
+(resolution 2^-32 kJ/mol/nm), at every force evaluation; with the centred drag in the post-computation. OpenMM handles the forces in its
 "real" type: on the OpenCL platform, in single and mixed precision, the total force on a particle is
 rounded to single precision, while the fluid receives the exact reaction, so the total momentum is
 conserved there to about 1e-8. With CUDA in mixed or double precision, and with OpenCL in double
@@ -435,14 +451,17 @@ operations.
 `ContextImpl::updateContextState()` before computing the forces of each step; `LBMForceImpl` uses that
 call to mark the next force evaluation as the one that advances the fluid. This is how OpenMM's own
 forces with internal state (`CMMotionRemover`, `AndersenThermostat`, `MonteCarloBarostat`) act once
-per step. Other force evaluations (`getState(getForces=True)`, `setVelocitiesToTemperature()`) do not
-advance the fluid and will reuse the coupling forces already computed.
+per step. Other force evaluations (`getState(getForces=True)`, for example) do not advance the fluid: they
+compute the coupling force of the next step without its reaction on the fluid, with the random numbers of
+that step drawn once (When the coupling forces are computed, above).
 
 ## 3. Units and conversions (implemented)
 
 The public API uses OpenMM units: nm, ps, Da (g/mol), K and kJ/mol. Internally the plugin works in
-lattice units only, as is usual for lattice Boltzmann [7]. The conversion is computed in one place,
-`LBMForceImpl::computeLatticeParameters()`:
+lattice units only, as is usual for lattice Boltzmann [7]. `LBMForceImpl::computeLatticeParameters()`
+computes the lattice parameters of the fluid (tau, omega, the initial velocity and the body acceleration)
+and passes dx, dt, rho0, the friction and kT, from which every kernel converts the quantities of the
+particles with the same factors:
 
 | Quantity | Lattice unit | OpenMM value |
 |---|---|---|
@@ -541,7 +560,11 @@ so it is rejected.
   what they miss: the populations, the random numbers already drawn for the next step, the momentum given
   to the walls in the last step and, on the Reference platform, the random number generator of the force
   (on the GPU platforms it is OpenMM's, which the OpenMM checkpoint contains). With both checkpoints a run
-  continues bit for bit (`testCheckpointWithRandomForce`).
+  continues bit for bit (`testCheckpointWithRandomForce`). `LBMForceImpl` writes a header before the data
+  of the kernel: a tag, the format version (2), the platform, the grid size, the number of coupled particles
+  and the drag scheme. A checkpoint is refused on another platform, with another grid, number of coupled
+  particles or drag scheme, and on the GPU platforms with another precision; a checkpoint of version 1
+  (plugin version 0.1.0) is read as one of the explicit drag.
 - **Fluid state.** `getFluidState()` returns the deviations df_q in this layout, in lattice units: a
   population is the value plus w_q. Saving and restoring them is exact, so a restarted run is identical
   to an uninterrupted one.
@@ -567,9 +590,12 @@ The model is accurate only in the quasi-incompressible regime and for relaxation
 range. The plugin checks both.
 
 **At Context creation.**
-- A relaxation time tau <= 1/2 is an error, as it is today.
+- tau > 1/2 holds by construction, since a viscosity that is not positive is an error.
 - A warning is printed on stderr if tau is outside [0.505, 2], the range used by the reference
   implementation.
+- With coupled particles and the explicit drag, warnings for tau > 1.7 and friction*dt > 1 (section 2);
+  with the centred drag, an error if `LBMForce` is not the last force or the System has virtual sites
+  (section 2, Solution of the centred drag).
 
 **During the simulation.**
 - Every N steps the plugin computes the largest Mach number of the fluid, Ma = max |u|/c_s, with
@@ -578,8 +604,8 @@ range. The plugin checks both.
 - If Ma exceeds the limit set with `setMachNumberLimit()` (default 0.3), the plugin throws an
   `OpenMMException` that reports the step and the value.
 - `getFluidMachNumber(context)` returns the current value, for monitoring.
-- The check runs after the lattice steps whose number is a multiple of N, with the steps numbered by
-  the step count of the Context, as for the momentum removal. On the CUDA, OpenCL and HIP
+- The check runs after a lattice step that brings the step count of the Context to a multiple of N (the
+  momentum removal, instead, uses the step count at the start of the step). On the CUDA, OpenCL and HIP
   platforms the maximum is taken by work group on the device and then over the work groups on the host,
   without atomic operations.
 

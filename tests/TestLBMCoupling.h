@@ -652,21 +652,25 @@ void testEquipartition(Platform& platform, LBMForce::DragScheme drag=LBMForce::E
 }
 
 /**
- * A warning is printed when tau > 1.7 and particles are coupled: the self-mobility of a particle becomes small,
- * and negative above tau = 1.79.
+ * A warning is printed when tau > 1.7 and particles are coupled with the explicit drag: the self-mobility of a
+ * particle becomes small, and negative above tau = 1.79.  With the centred drag it stays positive.
  */
 void testSelfMobilityWarning(Platform& platform) {
     double taus[] = {1.6, 1.75};
     for (double tau : taus)
-        for (bool coupled : {false, true}) {
+        for (int coupling = 0; coupling < 3; coupling++) {
+            // 0: one particle, not coupled; 1: coupled with the explicit drag; 2: coupled with the centred drag.
+            bool coupled = (coupling > 0);
             LBMForce* force;
             System* system;
             if (coupled) {
                 system = createCoupledSystem(force, 1, 1.0, 0.0);
                 force->setKinematicViscosity((tau-0.5)/3.0*fluidDx*fluidDx/fluidDt);
+                if (coupling == 2)
+                    force->setDragScheme(LBMForce::Centered);
             }
             else
-                system = createFluidSystem(force, 8, 8, 8, tau);     // one particle, not coupled
+                system = createFluidSystem(force, 8, 8, 8, tau);
             VerletIntegrator integrator(fluidDt);
             stringstream captured;
             streambuf* original = cerr.rdbuf(captured.rdbuf());
@@ -679,34 +683,37 @@ void testSelfMobilityWarning(Platform& platform) {
             }
             cerr.rdbuf(original);
             bool warned = (captured.str().find("> 1.7") != string::npos);
-            ASSERT(warned == (tau > 1.7 && coupled));
+            ASSERT(warned == (tau > 1.7 && coupling == 1));
             delete system;
         }
 }
 
 /**
- * A warning is printed when friction*dt > 1 and particles are coupled.
+ * A warning is printed when friction*dt > 1, particles are coupled and the drag is explicit; the centred drag is
+ * stable for any friction.
  */
 void testFrictionWarning(Platform& platform) {
     double frictions[] = {50.0, 150.0};
-    for (double friction : frictions) {
-        LBMForce* force;
-        System* system = createCoupledSystem(force, 1, friction, 0.0);
-        VerletIntegrator integrator(fluidDt);
-        stringstream captured;
-        streambuf* original = cerr.rdbuf(captured.rdbuf());
-        try {
-            Context context(*system, integrator, platform);
-        }
-        catch (...) {
+    for (double friction : frictions)
+        for (LBMForce::DragScheme drag : {LBMForce::Explicit, LBMForce::Centered}) {
+            LBMForce* force;
+            System* system = createCoupledSystem(force, 1, friction, 0.0);
+            force->setDragScheme(drag);
+            VerletIntegrator integrator(fluidDt);
+            stringstream captured;
+            streambuf* original = cerr.rdbuf(captured.rdbuf());
+            try {
+                Context context(*system, integrator, platform);
+            }
+            catch (...) {
+                cerr.rdbuf(original);
+                throw;
+            }
             cerr.rdbuf(original);
-            throw;
+            bool warned = (captured.str().find("friction*dt") != string::npos);
+            ASSERT(warned == (friction*fluidDt > 1.0 && drag == LBMForce::Explicit));
+            delete system;
         }
-        cerr.rdbuf(original);
-        bool warned = (captured.str().find("friction*dt") != string::npos);
-        ASSERT(warned == (friction*fluidDt > 1.0));
-        delete system;
-    }
 }
 
 void runCouplingTests(Platform& platform) {

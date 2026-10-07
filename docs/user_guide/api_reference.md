@@ -17,6 +17,7 @@ has units.
 - [Solid nodes](#solid-nodes)
 - [Coupled particles](#coupled-particles)
 - [Reading and writing the fluid of a Context](#reading-and-writing-the-fluid-of-a-context)
+- [Checkpoints](#checkpoints)
 - [Changing parameters in a Context](#changing-parameters-in-a-context)
 - [Other methods](#other-methods)
 - [Serialization](#serialization)
@@ -168,7 +169,8 @@ force.setSolidNodes(index[(j == 0) | (j == ny - 1)])     # walls on the planes j
 
 Each coupled particle feels a friction force -gamma m (v - u) relative to the fluid velocity u at the
 nearest lattice node, plus a random force at the given temperature, and the fluid at that node receives
-the opposite force (explicit Euler-Maruyama scheme,
+the opposite force (Euler-Maruyama random force, with the explicit or the centred drag of
+[`setDragScheme()`](#setdragschemescheme-getdragscheme);
 [theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)), on every platform.
 
 - **Forces between steps.** The fluid advances once per integration step. Between steps, a force
@@ -179,12 +181,15 @@ the opposite force (explicit Euler-Maruyama scheme,
 - **Walls.** A coupled particle whose nearest node is solid and that moves into the wall has every
   component of its velocity reversed at the start of the step, as for a no-slip wall. A particle that
   already moves out of the wall keeps its velocity. Uncoupled particles do not see the walls.
-- **Stability.** In one step the drag multiplies the velocity of a particle relative to the fluid by
-  1 - friction*dt. A warning is printed when friction*dt > 1, and the motion is unstable for
-  friction*dt >= 2.
+- **Stability.** With the explicit drag (the default), in one step the drag multiplies the velocity of a
+  particle relative to the fluid by 1 - friction*dt. A warning is printed when friction*dt > 1, and the
+  motion is unstable for friction*dt >= 2. The centred drag is stable for any friction and prints no
+  warning.
 - **Temperature.** The temperature that OpenMM reports for the System (`StateDataReporter`, the kinetic
-  energy of a State) is that of the full step, which is the temperature of the coupled particles
-  ([temperature example](examples.md#temperature-of-coupled-particles)).
+  energy of a State) is that of the full step. With the explicit drag it is the temperature of the coupled
+  particles ([temperature example](examples.md#temperature-of-coupled-particles)); with the centred drag
+  the right one is that of the half step, which
+  [`LBMTemperatureReporter`](#openmmlbmlbmtemperaturereporterfile-reportinterval-force) reports.
 
 ### `addParticle(particle)`
 
@@ -352,9 +357,11 @@ Output:
 bytes b'LBMCKPT1'
 ```
 
-Errors: a checkpoint written on another platform, with another precision, or for a different grid size or
-number of coupled particles, or data that are not a checkpoint, make `loadCheckpoint()` raise an exception
-([troubleshooting](troubleshooting.md)).
+Errors: a checkpoint written on another platform, with another precision, for a different grid size,
+number of coupled particles or drag scheme, by a newer version of the plugin, or data that are not a
+checkpoint or are damaged or truncated, make `loadCheckpoint()` raise an exception
+([troubleshooting](troubleshooting.md)). A checkpoint of version 0.1.0 has no drag scheme in its header,
+and loads only in a Context with the explicit drag.
 
 ### `openmmlbm.saveCheckpoint(file, context, force)`, `openmmlbm.loadCheckpoint(file, context, force)`
 
@@ -419,13 +426,16 @@ that the integrator evaluates; by default the integrator evaluates all groups.
 ## Serialization
 
 `openmm.XmlSerializer` saves and loads an `LBMForce`, alone or as part of a System, with all its
-parameters: grid, fluid properties, body acceleration, initial velocity, frequencies, Mach limit, solid
-nodes and coupled particles. The fluid of a Context is not part of it. Import `openmmlbm` before
+parameters: grid, fluid properties, friction, temperature, random number seed, body acceleration, initial
+velocity, frequencies, Mach limit, coupling and drag schemes, solid nodes, coupled particles, force group
+and name. The fluid of a Context is not part of it. The XML has version 4; the versions 1 to 3 written by
+version 0.1.0 load with the explicit drag, while version 0.1.0 cannot read version 4. Import `openmmlbm` before
 deserializing. A force deserialized on its own is returned as a generic `openmm.Force`; obtain the
 `LBMForce` with `LBMForce.cast()` (see the [serialization example](examples.md#serialization)).
 
 ## Errors
 
 Invalid settings raise a Python `Exception` with the messages listed in
-[troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created. A
-relaxation time outside [0.505, 2] only prints a warning on stderr.
+[troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created. Three
+conditions only print a warning on stderr: a relaxation time outside [0.505, 2], and, with coupled
+particles and the explicit drag, tau > 1.7 and friction*dt > 1.

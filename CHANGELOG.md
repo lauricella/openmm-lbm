@@ -38,8 +38,9 @@ versions the API may still change.
   the force of the step again (`testRepeatedForceEvaluation`).
 
 ### Changed
-- The warning for tau > 1.7 (small or negative self-mobility) is printed only with the explicit drag: with the
-  centred drag the self-mobility is positive at every tau (`docs/theory.md`, section 2).
+- The warnings for tau > 1.7 (small or negative self-mobility) and for friction*dt > 1 are printed only with the
+  explicit drag: with the centred drag the self-mobility is positive at every tau and the drag is stable for
+  any friction (`docs/theory.md`, section 2; `testSelfMobilityWarning`, `testFrictionWarning`).
 - README: the fluid is described as thread-safe; full name of Luis Enrique Coronas-Serna in README,
   `CITATION.cff` and the examples.
 - `docs/theory.md` and `CONTRIBUTING.md` cite Kassen, Shankar and Fogelson (2022) for the sorting of keys

@@ -9,16 +9,18 @@ openmm-lbm follows the structure of the OpenMM example plugin
 |---|---|
 | `openmmapi/include/LBMForce.h`, `openmmapi/src/LBMForce.cpp` | public API: parameters, coupled particles, access to the fluid |
 | `openmmapi/include/LBMKernels.h` | `CalcLBMForceKernel`, the interface every platform implements, and `LBMLatticeParameters` |
-| `openmmapi/include/internal/LBMForceImpl.h`, `openmmapi/src/LBMForceImpl.cpp` | checks the setup and converts all parameters to lattice units once, for all platforms |
+| `openmmapi/include/internal/LBMForceImpl.h`, `openmmapi/src/LBMForceImpl.cpp` | checks the setup, computes the lattice parameters for all platforms (Invariants, below), prints the warnings, writes and checks the header of the checkpoints |
 | `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium and its deviation from the rest equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing (host code) |
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
-| `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform, and the tests |
-| `serialization/` | XML proxy of `LBMForce` (parameters only) |
-| `python/` | SWIG wrapper `openmmlbm` and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
+| `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform (on OpenCL its subclass `OpenCLCalcLBMForceKernel`, step 3 below), and the tests |
+| `serialization/` | XML proxy of `LBMForce` (parameters only; version 4, which reads versions 1 to 3) |
+| `python/` | SWIG wrapper `openmmlbm`, with the Python helpers `LBMTemperatureReporter`, `saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter`, and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
 | `examples/` | example scripts, ports of the examples of the DragOpenMM plugin (`examples/README.md`) |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
 | `tests/TestLBMFluid.h` | tests of the fluid on its own, `runFluidTests()`, and of the solid nodes, `runWallTests()`, on every platform (`docs/validation.md`) |
+| `tests/TestLBMCoupling.h` | tests of the particle-fluid coupling, `runCouplingTests()`, on every platform |
+| `tests/TestLBMCentered.h` | tests of the centred drag, `runCenteredTests()`, which also runs the coupling tests that do not depend on the drag with the centred one, on every platform |
 
 ## Libraries
 
@@ -45,10 +47,15 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
    kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
    step (moments, momentum removal, coupling of the particles, collision and streaming, bounce-back at
-   solid nodes; see `docs/theory.md` sections 1 and 2) and computes the coupling forces; every
-   `execute()` adds those forces to the particles, so other force evaluations neither advance the fluid
-   nor draw new random numbers. `beginStep()` also reverses the velocity of a coupled particle that has
-   entered a solid node. Every platform does all of this.
+   solid nodes; see `docs/theory.md` sections 1 and 2) and adds the coupling forces of the step to the
+   particles. The other force evaluations (`getState()`, for example) do not advance the fluid: they add the
+   coupling forces of the next step, computed on the current fluid without its reaction, as OpenMM does for
+   every force. The random numbers of a step are drawn once, by the first evaluation that needs them, and
+   reused by the step. Before the first step of the Context the coupling forces are zero. A repeated
+   evaluation of a step (OpenMM repeats all the evaluations of a step when it enlarges the neighbor list of a
+   nonbonded force) is recognized because the step count of the Context has not been incremented yet, and
+   it adds the forces of the step again. `beginStep()` also reverses the velocity of a coupled particle whose
+   nearest node is solid and that moves into the wall (v.n > 0). Every platform does all of this.
    With the centred drag (`LBMForce::Centered`) the coupling needs the other forces on the particles:
    `LBMForceImpl::initialize()` checks that `LBMForce` is the last force of the System and that there are
    no virtual sites. On the Reference platform, when its `execute()` runs, OpenMM's force array already
@@ -68,15 +75,16 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    | `sumFluidMomentum` (when the removal is due) | work groups of 64 | rho - 1, j | one partial sum per group |
    | `computeFluidCenterVelocity` | one work group | partial sums | u_cm |
    | `removeFluidMomentum` | one per node | rho - 1, u_cm | j |
-   | `coupleParticles` (explicit drag, with coupled particles) | one per atom | positions, velocities, moments of the nearest node, OpenMM's random numbers | force of the particle, its key node*N_p + i |
-   | `prepareCenteredDrag` (centred drag, with coupled particles) | one per atom | positions, velocities, OpenMM's force buffers (the other forces), OpenMM's random numbers | v~ = v + dt Fc/(2m) and random force of the particle, its key node*N_p + i |
-   | OpenMM's `ComputeSort` | | keys | sorted keys |
-   | `sumCellReactions` (explicit drag) | one per key | sorted keys, forces | the reaction of each node, written by its first key |
-   | `solveCenteredDrag` (centred drag) | one per key | sorted keys, v~, random forces, moments of the node | the forces of the particles of each node and its reaction -S, written by its first key |
-   | `collideAndStream` | one per fluid node | moments and reaction of the node | the 19 populations it sends to the neighbours |
+   | `coupleParticles` (explicit drag, with coupled particles) | one per atom | positions, velocities, moments of the nearest node, OpenMM's random numbers | force of the particle, its key node*N_p + i, the random numbers of the step (`noise`) when it draws them, the reaction at a solid node (wall momentum) |
+   | `prepareCenteredDrag` (centred drag, with coupled particles) | one per atom | positions, velocities, OpenMM's force buffers (the other forces), OpenMM's random numbers | v~ = v + dt Fc/(2m) and random force of the particle, its key node*N_p + i, `noise` when it draws the random numbers |
+   | OpenMM's `ComputeSort` (explicit drag: in a lattice step; centred drag: in every evaluation) | | keys | sorted keys |
+   | `sumCellReactions` (explicit drag, in a lattice step) | one per key | sorted keys, forces | the reaction of each node, written by its first key |
+   | `solveCenteredDrag` (centred drag) | one per key | sorted keys, v~, random forces, moments of the node, body acceleration | the forces of the particles of each node, written by its first key; in a lattice step also the reaction -S of the node, and at a solid node -S as wall momentum |
+   | `collideAndStream` | one per node (solid nodes do nothing) | moments and reaction of the node | the 19 populations it sends to the neighbours |
    | `clearCellReactions` | one per key | sorted keys | zero reaction at the nodes of the step |
    | `bounceBack` (with solid nodes) | one per solid node | populations of the solid node | the populations it returns to the fluid neighbours, and its momentum exchange |
    | `computeMaxFluidSpeed` (when the Mach check is due) | work groups of 64 | populations | one maximum per group, reduced on the host |
+   | `applyCouplingForces` (with coupled particles, in every force evaluation that includes forces) | one per atom | coupling forces | OpenMM's fixed point force buffer |
 
    The moments are stored component by component, [k numNodes + node], so that consecutive threads read
    consecutive addresses; the Reference platform stores them node by node. With solid nodes, the kernels
@@ -84,24 +92,30 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `getWallForce()` sums the momentum exchange of the solid nodes of the last step on the host, so a step
    costs no transfer. The atoms are addressed through OpenMM's atom index array, since OpenMM may reorder
    them: every per-particle array is indexed by the position of the particle in the list of the force.
-   Every force evaluation runs `applyCouplingForces`, which adds the coupling forces to OpenMM's force
-   buffer: in the evaluation of a step, those of the step; between steps, those of the next step, computed
-   by `computeFluidMoments`, the momentum removal if due and `coupleParticles` without the reaction on the
-   fluid. The random numbers of a step are copied from OpenMM's generator into the array `noise` once, by the
-   first `coupleParticles` or `prepareCenteredDrag` that needs them (`drawNoise`), and reused by the step.
+   Every force evaluation that includes forces runs `applyCouplingForces`, which adds the coupling forces to
+   OpenMM's force buffer: in the evaluation of a step, those of the step; between steps, those of the next
+   step, computed by `computeFluidMoments`, the momentum removal if due and `coupleParticles` (explicit drag)
+   or `prepareCenteredDrag`, the sort and `solveCenteredDrag` (centred drag), without the reaction on the
+   fluid; in a repeated evaluation of a step, those of the step again, without computing them. The random
+   numbers of a step are copied from OpenMM's generator into the array `noise` once, by the first
+   `coupleParticles` or `prepareCenteredDrag` that needs them (`drawNoise`), and reused by the step.
    With the centred drag all of this runs in the post-computation, which reads the other forces from
    OpenMM's fixed point buffer and, on the OpenCL platform, also from its floating point buffers, which
    OpenCL adds to the fixed point one only after the post-computations. The OpenCL factory creates a
    subclass of the common kernel, `OpenCLCalcLBMForceKernel`, whose `hasFloatForceBuffers()` returns true;
-   the kernels are compiled with `HAS_FLOAT_FORCE_BUFFERS` and get the buffers on first use, since OpenMM
-   creates them after the forces are initialized. The post-computation does nothing if `LBMForce`'s force
+   with the centred drag the coupling kernels are then compiled with `HAS_FLOAT_FORCE_BUFFERS`, and
+   `prepareCenteredDrag` gets the buffers and their number on first use, since OpenMM creates them after the
+   forces are initialized. The post-computation does nothing if `LBMForce`'s force
    group is not requested, or if OpenMM has marked the evaluation as invalid (neighbor list overflow): the
    repeated evaluation then does the step.
 4. **Checkpoints.** `LBMForce::createCheckpoint()` and `loadCheckpoint()` go through `LBMForceImpl`, which
    writes and checks a header (tag, version, platform, grid size, number of coupled particles and, from
-   version 2, drag scheme; version 1 is read as the explicit drag), to the
-   kernel, which writes its arrays as they are: populations, random numbers drawn for the next step, wall
-   momentum and, on the Reference platform, its SFMT generator. The Python module adds
+   version 2, drag scheme; version 1 is read as the explicit drag), to the kernel, which writes its state as
+   it is. The common kernel writes the size of its floating point type (a checkpoint is refused in another
+   precision), whether the random numbers of the next step are already drawn and whether the fluid has
+   advanced, then the populations, those random numbers and the wall momentum of the particles and of the
+   solid nodes. The Reference kernel writes the populations, the random numbers of the next step, the wall
+   momentum and its SFMT generator, with the Gaussian number kept by its Box-Muller transform. The Python module adds
    `openmmlbm.saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter` (in `python/openmmlbm.i`),
    which store an OpenMM checkpoint and the checkpoint of the force in one file.
 5. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
@@ -110,8 +124,12 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
 
 ## Invariants
 
-- **Unit conversion in one place.** It happens only in `LBMForceImpl::computeLatticeParameters()`;
-  kernels receive lattice units.
+- **Unit conversion in two documented steps.** `LBMForceImpl::computeLatticeParameters()` validates the
+  setup and computes tau, omega and the initial velocity and body acceleration in lattice units; it passes
+  dx, dt, the density, the friction and kT in OpenMM units (`LBMLatticeParameters`). The kernels convert the
+  per-particle quantities with the same factors on every platform: masses in units of the cell mass
+  m_c = rho0 dx^3, gamma = friction dt, kT dt^2/(m_c dx^2), velocities with `getVelocityScale()` = dx/dt and
+  forces with m_c dx/dt^2 (`docs/theory.md`, section 3).
 - **Same conventions everywhere.** Every platform uses the population ordering and the node index of
   `D3Q19.h`, and stores the populations as deviations f_q - w_q from the rest equilibrium, so
   `getFluidState()` is portable across platforms.
@@ -128,5 +146,21 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
 3. Compile it at runtime with `cc.compileProgram(CommonLBMKernelSources::<file>, defines)` in
    `CommonCalcLBMForceKernel`.
 4. Add the same algorithm to `ReferenceCalcLBMForceKernel`, and a test that compares the two: the shared
-   C++ tests run on every platform, and the Python test `test_fluid_agrees_with_reference` compares the
-   fluid of each GPU platform with the Reference platform directly.
+   C++ tests run on every platform, and the Python tests `test_fluid_agrees_with_reference`,
+   `test_coupling_agrees_with_reference` (both drags) and `test_centered_drag_sees_all_forces` compare each
+   GPU platform with the Reference platform, or with the closed form, directly.
+
+## Adding a platform
+
+1. Write a kernel factory in `platforms/<platform>/src/`, like `CudaLBMKernelFactory.cpp`, that creates
+   `CommonCalcLBMForceKernel` with the `ComputeContext` of the platform. If the platform keeps part of the
+   forces in floating point buffers that it adds to the fixed point buffer only after the
+   post-computations (as OpenCL does), create a subclass whose `hasFloatForceBuffers()` returns true, as
+   `OpenCLCalcLBMForceKernel` does.
+2. Add the library in `platforms/<platform>/CMakeLists.txt` and an option `LBM_BUILD_<PLATFORM>_LIB` in the
+   top `CMakeLists.txt`.
+3. Add `platforms/<platform>/tests/Test<Platform>LBMForce.cpp`, which calls `runPlatformTests()`,
+   `runFluidTests()`, `runWallTests()`, `runCouplingTests()` and `runCenteredTests()` and takes the
+   precision as its argument, and register it in `platforms/<platform>/tests/CMakeLists.txt` in the three
+   precision modes.
+4. Add the platform to the Python tests that compare the GPU platforms with the Reference platform.

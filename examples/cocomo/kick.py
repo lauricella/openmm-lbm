@@ -55,7 +55,7 @@ def parse_arguments():
     parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
                         help='drag scheme of LBMForce (default Explicit)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
-    parser.add_argument('--precision', default='mixed', help='precision on CUDA and OpenCL (default mixed)')
+    parser.add_argument('--precision', default='mixed', help='precision on CUDA, OpenCL and HIP (default mixed)')
     parser.add_argument('--output', help='output file (default kick_<preset>_lb_on.txt or _lb_off.txt)')
     args = parser.parse_args()
     if args.output is None:
@@ -64,7 +64,7 @@ def parse_arguments():
 
 
 def select_platform(name, precision):
-    """The named platform, or the fastest available one; the precision property on CUDA and OpenCL."""
+    """The named platform, or the fastest available one; the precision property on CUDA, OpenCL and HIP."""
     names = [name] if name else ['CUDA', 'OpenCL', 'Reference']
     for candidate in names:
         try:
@@ -73,7 +73,7 @@ def select_platform(name, precision):
             if name:
                 raise
             continue
-        properties = {'Precision': precision} if candidate in ('CUDA', 'OpenCL') else {}
+        properties = {'Precision': precision} if candidate in ('CUDA', 'OpenCL', 'HIP') else {}
         return platform, properties
 
 

@@ -210,8 +210,9 @@ What each command does:
    `-- OpenMM 8.6.1 in /home/<you>/miniforge3/envs/lbm`, and it ends with
    `-- Build files have been written to: ...`. It stops with an error if OpenMM is older than 8.3 (the
    message gives the version found), and warns if it is newer than 8.6, the newest tested version. It
-   also stops if the SWIG version is wrong: the message names the version to install
-   (`conda install -c conda-forge swig=<version>`); then run `cmake` again.
+   also stops if the SWIG version is wrong: the message names the version of SWIG (major and minor) that
+   made the OpenMM Python module; install it (for OpenMM 8.6.1 from conda-forge,
+   `conda install -c conda-forge swig=4.5.1`) and run `cmake` again.
 2. `make -j4` compiles, using 4 processor cores. It takes a few minutes and ends with
    `[100%] Built target ...`. Lines with `warning` are not errors; a line with `error` stops the build.
 3. `make install` copies the libraries into the environment.
@@ -249,7 +250,8 @@ cd ~/src/openmm-lbm/python/tests
 python -m pytest
 ```
 
-The last line counts the tests, for example `36 passed, 13 skipped` on a computer without a GPU. "Skipped" tests are those of
+The last line counts the tests, for example `50 passed, 19 skipped` on a computer without a GPU (the
+numbers depend on the platforms and packages available). "Skipped" tests are those of
 platforms that are not available on your computer: that is normal. "Failed" is not: see the next
 section.
 

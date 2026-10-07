@@ -203,7 +203,10 @@ reports (`StateDataReporter`) is that of the full step, because OpenMM shifts th
 step with the coupling force of the next step
 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)). The
 reporter below computes both temperatures explicitly: the full-step one from the mean of the velocities
-of two consecutive steps, and the half-step one from the stored velocities.
+of two consecutive steps, and the half-step one from the stored velocities. With the explicit drag (the
+default) the full-step temperature is the right one; with the centred drag it is the half-step one, and
+`openmmlbm.LBMTemperatureReporter` reports the right one for either drag
+([API](api_reference.md#openmmlbmlbmtemperaturereporterfile-reportinterval-force)).
 
 ```python
 import numpy as np
@@ -294,6 +297,9 @@ Notes:
   311.7 +- 0.4 K over 20000 steps.
 - **OpenMM's own temperature.** `StateDataReporter(..., temperature=True)` gives the full-step
   temperature at the report step; the reporter above computes it one step earlier, from steps n - 1 and n.
+- **Centred drag.** With `setDragScheme(LBMForce.Centered)` the half-step temperature is the right one; for
+  a particle in a fluid at rest the full-step one is lower by 1/(1 + gamma dt/2), and the particles are
+  colder than with the explicit drag ([choosing the drag](lattice.md#choosing-the-drag)).
   On this system the means over the same reports are 292 K and 293 K, equal within the statistical error.
 - **Using the reporter.** It works with any Simulation: pass the indices of the coupled particles. It
   stops one step before each report to record the velocities.

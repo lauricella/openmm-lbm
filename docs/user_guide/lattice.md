@@ -14,7 +14,7 @@ examples. The rest of this page explains each of them.
 | Lattice spacing dx | 0.5 nm | about the size of a residue bead. Each bead is coupled to its nearest node |
 | Time step dt | 0.01 ps (10 fs) | the time step of the coarse-grained model; it is also the lattice time step |
 | Box | a whole number of dx along each side; at least 3 times the size of the protein and 2 times the cutoff of the nonbonded forces | the box is periodic: a protein feels its images through the fluid |
-| Kinematic viscosity | 1.0035 nm^2/ps (water, tau = 0.62 with the values above), or larger | tau = 3 nu dt/dx^2 + 1/2 must stay between about 0.505 and 1.7 ([relaxation time](#relaxation-time)) |
+| Kinematic viscosity | 1.0035 nm^2/ps (water, tau = 0.62 with the values above), or larger | tau = 3 nu dt/dx^2 + 1/2 must stay between about 0.505 and 2, and below about 1.7 with coupled particles and the explicit drag ([relaxation time](#relaxation-time)) |
 | Friction | 5 to 10 /ps, so that friction x dt = 0.05 to 0.1 | with the explicit drag (the default) friction x dt must be below 1 (warning) and below 2 (stability), at 0.1 or below it is accurate; for larger values use the centred drag ([choosing the drag](#choosing-the-drag)) |
 | Temperature | that of the simulation, e.g. 298 K | the fluid is the thermostat of the coupled particles: no other thermostat |
 | Integrator | `VerletIntegrator(dt)` | friction and random force are part of `LBMForce` |
@@ -26,8 +26,9 @@ examples. The rest of this page explains each of them.
    prints a warning when it is not);
 2. run a few hundred steps and print `force.getFluidMachNumber(context)`: it should stay below 0.1
    ([Mach number](#mach-number-and-stability));
-3. check the temperature in the log of `StateDataReporter`: a few percent below the set temperature is
-   normal ([limitations](README.md#limitations-of-the-model)), much more is not.
+3. check the temperature in the log of `StateDataReporter` (with the centred drag, that of
+   `openmmlbm.LBMTemperatureReporter`): a few percent below the set temperature is normal with the explicit
+   drag ([limitations](README.md#limitations-of-the-model)), much more is not.
 
 ## Geometry
 

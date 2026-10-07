@@ -76,6 +76,11 @@ density, velocity = force.getFluidFields(context)
 The fluid is stored in the "mixed" type of the platform: single precision in `single` mode, double
 precision in `mixed` and `double` mode. `mixed` is recommended for production.
 
+The drag has two time discretizations, chosen with `force.setDragScheme()` before the Context is created:
+`LBMForce.Explicit`, the default, and `LBMForce.Centered`, stable for any friction, which requires
+`LBMForce` to be the last force of the System. See
+[choosing the drag](docs/user_guide/lattice.md#choosing-the-drag).
+
 The state of the fluid is not part of OpenMM checkpoints: save and continue a run with
 `openmmlbm.saveCheckpoint()`, `openmmlbm.loadCheckpoint()` or `openmmlbm.LBMCheckpointReporter`, which keep
 the OpenMM checkpoint and the fluid together ([restart](docs/user_guide/restart.md)).
@@ -83,11 +88,12 @@ the OpenMM checkpoint and the fluid together ([restart](docs/user_guide/restart.
 ## Documentation
 
 - [docs/user_guide/](docs/user_guide/README.md): user guide. Installation step by step, a tutorial
-  for newcomers to OpenMM, every method of `LBMForce` explained, how to choose the lattice parameters,
-  and complete examples (channel flow between walls, monitoring, restarts, serialization,
+  for newcomers to OpenMM, every method of `LBMForce` explained, how to choose the lattice parameters
+  and the drag, and complete examples (channel flow between walls, monitoring, restarts, serialization,
   `openmm.app.Simulation`).
 - [examples/](examples/README.md): example scripts (a kicked bead, thermalization, a bead in a uniform
-  flow, a fluid started from a shear wave), compared with the DragOpenMM plugin.
+  flow, a fluid started from a shear wave, and proteins with the COCOMO2 model: diffusion of SOD1 and
+  of a disordered protein, kicks of a peptide and of ubiquitin), compared with the DragOpenMM plugin.
 - [docs/theory.md](docs/theory.md): model, units and conventions.
 - [docs/architecture.md](docs/architecture.md): structure of the code.
 - [docs/validation.md](docs/validation.md): tests, tolerances and measured values.

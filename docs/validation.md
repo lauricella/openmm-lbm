@@ -70,9 +70,11 @@ the platform runs in double precision (`docs/theory.md`, section 2).
 | Test | Checks | Tolerance |
 |---|---|---|
 | First step | a particle in a fluid at rest: v1 = v0 (1 - gamma dt); `getState()` then returns the force of the step, m (v1 - v0)/dt | 1e-14, 1e-12 relative |
+| Full-step kinetic energy | with drag, random force and momentum removal, the kinetic energy of the State is that of the full-step velocities, because the force between steps is that of the next step (`testFullStepKineticEnergy`) | 1e-10 relative |
 | Momentum conservation | particles and fluid with drag and random force, 50 steps, two particles at the same node, one crossing the periodic boundary, lattice densities 1, 0.98 and 1.02 | 1e-11 of the particle momentum (measured 7e-13: rounding of the sum over 19x512 populations) |
 | Moving with the fluid | particle and fluid at the same velocity along x, y, z and a diagonal, two cells crossed | 1e-13 |
 | Partial coupling | uncoupled particles keep their velocity and feel no force | rounding of OpenMM's Verlet |
+| NVE scheme | at 300 K the first step is the deterministic drag, and two runs with different seeds are identical (`testNVEScheme`) | 1e-14, bitwise |
 | Force evaluations and seeds | `getState()` before and after every step does not change the trajectory; two runs with seed 0 differ | bitwise |
 | Walls | a coupled particle reaching a solid node: v2 = -v0 (1 - gamma dt)^2; an uncoupled one passes | 1e-14 |
 | Walls, direction | at a wall one node thick, a particle is reversed only if it moves into the wall, from either side | 1e-14 |
@@ -80,9 +82,9 @@ the platform runs in double precision (`docs/theory.md`, section 2).
 | Restart | checkpoint plus `setFluidState()` at step 13, removal every 5 steps, T = 0 | bitwise |
 | Checkpoint with random force | OpenMM checkpoint plus `createCheckpoint()` at step 9, 300 K, a wall, removal every 4 steps, a force evaluation just before (random numbers already drawn), 14 more steps (`testCheckpointWithRandomForce`) | bitwise, also the wall force |
 | Checkpoint refused | different number of coupled particles, or data that are not a checkpoint (`testCheckpointMismatch`) | exception |
-| Warning | friction*dt > 1 is reported at Context creation | |
+| Warning | friction*dt > 1 with coupled particles and the explicit drag is reported at Context creation, not with the centred drag (`testFrictionWarning`) | |
 | Equipartition | 100 free particles, gamma dt = 0.1, T = 300 K: full-step temperature close to T, half-step temperature close to T/(1 - gamma dt/2) | 10% (measured 4% below, from the missing fluid fluctuations) |
-| Warning on tau | tau > 1.7 with coupled particles and the explicit drag is reported at Context creation | |
+| Warning on tau | tau > 1.7 with coupled particles and the explicit drag is reported at Context creation, not without coupled particles or with the centred drag (`testSelfMobilityWarning`) | |
 | Repeated force evaluation | 8000 particles with a short-range `CustomNonbondedForce`, compressed into a cube of 2 nm so that the neighbor list overflows and the GPU platforms repeat the force evaluation of the step: the total momentum is conserved in that step (`testRepeatedForceEvaluation`; GPU platforms only) | 1e-11 relative (1.3e-2 before the fix, on CUDA and OpenCL) |
 
 The tests that do not depend on the drag (full-step kinetic energy, momentum conservation, moving with the

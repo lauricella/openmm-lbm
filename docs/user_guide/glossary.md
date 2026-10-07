@@ -24,7 +24,9 @@ friction and random force; `NVE`: friction only, as at zero temperature ([API](a
 **Euler-Maruyama.** The simple explicit rule used to add friction and random force over one time step.
 
 **Friction (gamma).** How strongly a coupled particle is dragged towards the velocity of the fluid, in 1/ps.
-The product friction x dt must be below 1, and is best at 0.1 or below ([recipe](lattice.md#quick-recipe)).
+With the explicit drag (the default) the product friction x dt must be below 1, and is best at 0.1 or below;
+the centred drag is stable for any friction ([recipe](lattice.md#quick-recipe),
+[choosing the drag](lattice.md#choosing-the-drag)).
 
 **Full step, half step.** `VerletIntegrator` (a "leapfrog" integrator) stores the velocities half a step
 behind the positions. The velocity at the same time as the positions, the full step, is the mean of two
@@ -55,7 +57,8 @@ accurate only when it is small: below 0.1; above 0.3 the plugin stops
 **Precision.** The number format used on a GPU platform: `single`, `mixed` (recommended) or `double`.
 
 **Relaxation time (tau).** The parameter of the lattice Boltzmann method that corresponds to the viscosity:
-tau = 3 nu dt/dx^2 + 1/2. It must stay between about 0.505 and 1.7 ([lattice](lattice.md#relaxation-time)).
+tau = 3 nu dt/dx^2 + 1/2. It must stay between about 0.505 and 2, and below about 1.7 with coupled particles
+and the explicit drag ([lattice](lattice.md#relaxation-time)).
 
 **Removal of the fluid momentum.** At regular steps the plugin subtracts the mean velocity of the fluid,
 so that the fluid as a whole stays at rest ([lattice](lattice.md#removal-of-the-fluid-momentum)).

@@ -24,19 +24,24 @@ the plugin converts the parameters to lattice units.
 | `the integrator step size changed after the Context was created; reinitialize the Context` | The step size is the lattice time step and cannot change. Create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()`. |
 | `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration or the forces on the fluid, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). |
 | `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have 19 nx ny nz values. |
-| `the checkpoint was written on the platform X, not on Y` | A checkpoint can only be loaded on the platform where it was written. | Use the same platform, or move the run with `saveState()` and `getFluidState()` ([restart](restart.md#moving-a-run-to-another-platform)). |
-| `the checkpoint was written with a different precision` | The precision (single, mixed, double) differs from that of the checkpoint. | Create the Context with the same `Precision` property. |
-| `the checkpoint was written for a different grid size or number of coupled particles` | The System built for the restart is not the same as the one of the checkpoint. | Build the System exactly as in the first run. |
-| `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by openmmlbm.saveCheckpoint()` | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). | Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
+| `the checkpoint was written on the platform X, not on Y` | A checkpoint can only be loaded on the platform where it was written. Use the same platform, or move the run with `saveState()` and `getFluidState()` ([restart](restart.md#moving-a-run-to-another-platform)). |
+| `the checkpoint was written with a different precision` | The precision (single, mixed, double) differs from that of the checkpoint. Create the Context with the same `Precision` property. |
+| `the checkpoint was written for a different grid size or number of coupled particles` | The System built for the restart is not the same as the one of the checkpoint. Build the System exactly as in the first run. |
+| `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by openmmlbm.saveCheckpoint()` | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
+| `unsupported checkpoint version`, `the checkpoint is damaged`, `the checkpoint is truncated`, `... is truncated or damaged` | The checkpoint was written by a newer version of the plugin, or the file was cut or changed (for example by a job that stopped while writing it). Use the version that wrote it, or an earlier checkpoint. |
+| `the checkpoint must be bytes` | `LBMForce.loadCheckpoint(context, data)` takes the bytes returned by `createCheckpoint()`; to read a file, use `openmmlbm.loadCheckpoint(file, context, force)`. |
+| `Unsupported version number` (from `XmlSerializer.deserialize()`) | The XML was written by a newer version of the plugin: version 0.1.0 cannot read the XML of version 0.2.0. Use the newer version. |
+| `unknown coupling scheme`, `unknown drag scheme` | `setCouplingScheme()` or `setDragScheme()` received a number that is not a scheme. Use `LBMForce.EulerMaruyama` or `LBMForce.NVE`, and `LBMForce.Explicit` or `LBMForce.Centered`. |
 | `with the Centered drag scheme LBMForce must be the last force of the System; add it after all the other forces` | The centred drag reads the other forces on the particles, which are complete only when `LBMForce` comes last. Call `system.addForce(force)` after adding every other force. |
 | `the Centered drag scheme does not support virtual sites` | OpenMM moves the forces of virtual sites to their particles after the forces are computed, so the centred drag would miss them. Use the explicit drag. |
-| `the checkpoint was written with a different drag scheme` | The drag scheme of the restarted run differs from that of the checkpoint. | Use the same `setDragScheme()` as in the first run. |
+| `the checkpoint was written with a different drag scheme` | The drag scheme of the restarted run differs from that of the checkpoint (a checkpoint of version 0.1.0 has the explicit drag). Use the same `setDragScheme()` as in the first run. |
 | `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles, the solid nodes and the drag scheme) | These parameters are fixed when the Context is created. Create a new Context. |
 | `IntegrationUtilities::initRandomNumberGenerator(): Requested two different values for the random number seed` | On the CUDA, OpenCL and HIP platforms the random force uses OpenMM's generator, which has one seed per Context. Another component of the System (an `AndersenThermostat`, for example) uses it with a different seed: give both the same seed. |
 
 The warning `tau = ... > 1.7: with the explicit drag at the nearest node the hydrodynamic self-mobility of
-a coupled particle is small` is printed when particles are coupled and the relaxation time is large:
-above tau = 1.79 the hydrodynamic mobility of a particle is negative. Reduce the viscosity or the time
+a coupled particle is small` is printed when particles are coupled with the explicit drag (the default)
+and the relaxation time is large: above tau = 1.79 the hydrodynamic mobility of a particle is negative.
+With the centred drag it is not printed. Reduce the viscosity or the time
 step, or use a coarser lattice; see [relaxation time](lattice.md#relaxation-time).
 
 The warning `friction*dt = ... > 1` is printed on stderr when the explicit drag overshoots: the velocity
@@ -73,11 +78,15 @@ come from different generators, so the trajectories differ while their statistic
 the NVE scheme, the platforms agree to rounding in double precision.
 
 **The temperature in the log is a little below the set temperature.** The temperature that OpenMM
-reports for coupled particles is the full-step one. It is below T because the fluid has no thermal
-fluctuations of its own and takes part of the momentum of the particles: about 1-2% with friction*dt =
-0.1, more with a large friction (13% for the disordered protein of `examples/cocomo/diffusion.py
---preset rlp`, friction 100/ps). See [validation.md](../validation.md). The velocities that OpenMM stores
-are those of the half step, whose temperature is higher, T/(1 - friction*dt/2) for a free particle.
+reports for coupled particles is the full-step one. With the explicit drag (the default) it is the right
+one, and it is below T because the fluid has no thermal fluctuations of its own and takes part of the
+momentum of the particles: about 1-2% with friction*dt = 0.1, more with a large friction (13% for the
+disordered protein of `examples/cocomo/diffusion.py --preset rlp`, friction 100/ps). See
+[validation.md](../validation.md). The velocities that OpenMM stores are those of the half step, whose
+temperature is higher, T/(1 - friction*dt/2) for a free particle. With the centred drag the right
+temperature is that of the half step, which `openmmlbm.LBMTemperatureReporter` reports, and the log of
+`StateDataReporter` is lower still; the centred drag is colder than the explicit one
+([choosing the drag](lattice.md#choosing-the-drag)).
 
 **Particles that are not coupled cross the walls.** Only coupled particles are reflected at solid
 nodes.
