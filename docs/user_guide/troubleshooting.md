@@ -28,7 +28,11 @@ the plugin converts the parameters to lattice units.
 | `the checkpoint was written with a different precision` | The precision (single, mixed, double) differs from that of the checkpoint. | Create the Context with the same `Precision` property. |
 | `the checkpoint was written for a different grid size or number of coupled particles` | The System built for the restart is not the same as the one of the checkpoint. | Build the System exactly as in the first run. |
 | `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by openmmlbm.saveCheckpoint()` | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). | Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
-| `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles and the solid nodes) | These parameters are fixed when the Context is created. Create a new Context. |
+| `with the Centered drag scheme LBMForce must be the last force of the System; add it after all the other forces` | The centred drag reads the other forces on the particles, which are complete only when `LBMForce` comes last. Call `system.addForce(force)` after adding every other force. |
+| `the Centered drag scheme does not support virtual sites` | OpenMM moves the forces of virtual sites to their particles after the forces are computed, so the centred drag would miss them. Use the explicit drag. |
+| `the Centered drag scheme is not yet available on this platform; use the Reference platform` | In this version the centred drag runs only on the Reference platform. |
+| `the checkpoint was written with a different drag scheme` | The drag scheme of the restarted run differs from that of the checkpoint. | Use the same `setDragScheme()` as in the first run. |
+| `updateParametersInContext: the grid size cannot be changed` (and the similar messages for the density and viscosity, the coupled particles, the solid nodes and the drag scheme) | These parameters are fixed when the Context is created. Create a new Context. |
 | `IntegrationUtilities::initRandomNumberGenerator(): Requested two different values for the random number seed` | On the CUDA, OpenCL and HIP platforms the random force uses OpenMM's generator, which has one seed per Context. Another component of the System (an `AndersenThermostat`, for example) uses it with a different seed: give both the same seed. |
 
 The warning `tau = ... > 1.7: with the explicit drag at the nearest node the hydrodynamic self-mobility of
@@ -38,7 +42,8 @@ step, or use a coarser lattice; see [relaxation time](lattice.md#relaxation-time
 
 The warning `friction*dt = ... > 1` is printed on stderr when the explicit drag overshoots: the velocity
 of a particle relative to the fluid changes sign at every step, and grows without bound for
-friction*dt >= 2. Reduce the friction or the time step.
+friction*dt >= 2. Reduce the friction or the time step, or use the centred drag
+(`setDragScheme(LBMForce.Centered)`), which is stable for any friction.
 
 The warning `the relaxation time tau = ... is outside the range [0.505, 2]` is printed on stderr and
 does not stop the simulation. See [relaxation time](lattice.md#relaxation-time) for how to bring tau

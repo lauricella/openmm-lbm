@@ -25,8 +25,9 @@ namespace LBMPlugin {
  * The fluid is a D3Q19 lattice Boltzmann model with regularized collision and Guo forcing.  Each
  * coupled particle feels a friction force -gamma*m*(v-u) relative to the fluid velocity u at the
  * nearest lattice node, plus a random force that satisfies the fluctuation-dissipation theorem at
- * the given temperature (Euler-Maruyama scheme), and the fluid receives the opposite force.  Drag
- * and noise are part of this force, so the System must be integrated with a VerletIntegrator.
+ * the given temperature (Euler-Maruyama scheme), and the fluid receives the opposite force.  The
+ * drag is explicit or centred in time (setDragScheme()).  Drag and noise are part of this force, so
+ * the System must be integrated with a VerletIntegrator.
  *
  * The lattice spans the periodic box of the System: the box must be rectangular and the lattice
  * cells must be cubic, that is, the box lengths divided by the grid sizes must be equal.  The
@@ -51,6 +52,25 @@ public:
          * through the drag at zero temperature, with no thermostat.
          */
         NVE = 1
+    };
+    /**
+     * The time discretization of the drag between a particle and the fluid (docs/theory.md, section 2).
+     */
+    enum DragScheme {
+        /**
+         * Explicit drag: the velocity of the particle half a step before the force and the velocity of the fluid
+         * before the force of the step (Groot and Warren 1997).  The kinetic energy that OpenMM reports
+         * (StateDataReporter) has the right temperature.  The velocity of a particle relative to the fluid changes
+         * sign at every step for friction*dt > 1 and grows without bound for friction*dt >= 2.  This is the default.
+         */
+        Explicit = 0,
+        /**
+         * Centred drag: the velocities of the particle and of the fluid at the time of the force, solved exactly for
+         * all the particles of a node (Brunger, Brooks and Karplus 1984).  The velocities of the State, half a step
+         * after the force, have the right temperature.  Stable for any friction.  LBMForce must be the last force of
+         * the System, and the System must not contain virtual sites.
+         */
+        Centered = 1
     };
     /**
      * Create an LBMForce.  The grid size must be set with setGridSize() before the force is used.
@@ -115,6 +135,15 @@ public:
      * friction and random force, or NVE, with friction only and no random force.
      */
     void setCouplingScheme(CouplingScheme scheme);
+    /**
+     * Get the time discretization of the drag.
+     */
+    DragScheme getDragScheme() const;
+    /**
+     * Set the time discretization of the drag: Explicit (the default) or Centered.  It is fixed when a Context is
+     * created: updateParametersInContext() cannot change it.
+     */
+    void setDragScheme(DragScheme scheme);
     /**
      * Get the random number seed.  See setRandomNumberSeed() for details.
      */
@@ -300,11 +329,10 @@ public:
     /**
      * Update the parameters of a Context to match those stored in this Force object: the friction,
      * the temperature, the coupling scheme, the body acceleration, the frequency of the removal of the
-     * fluid momentum, and the
-     * frequency and limit of the Mach number check.  The grid, the fluid density and viscosity, the solid
-     * nodes and the set of coupled particles cannot be changed this way, and an exception is thrown if
-     * they differ.  The initial fluid velocity and the random number seed are used only when a Context
-     * is created.  The fluid itself is not modified.
+     * fluid momentum, and the frequency and limit of the Mach number check.  The grid, the fluid density
+     * and viscosity, the solid nodes, the set of coupled particles and the drag scheme cannot be changed
+     * this way, and an exception is thrown if they differ.  The initial fluid velocity and the random
+     * number seed are used only when a Context is created.  The fluid itself is not modified.
      */
     void updateParametersInContext(OpenMM::Context& context);
     /**
@@ -320,6 +348,7 @@ private:
     int nx, ny, nz, randomNumberSeed, momentumRemovalFrequency, machCheckFrequency;
     double density, viscosity, friction, temperature, machNumberLimit;
     CouplingScheme couplingScheme;
+    DragScheme dragScheme;
     OpenMM::Vec3 bodyAcceleration, initialVelocity;
     std::vector<int> particles, solidNodes;
 };

@@ -25,7 +25,7 @@ namespace LBMPlugin {
  *  1. moments: density, momentum, non-equilibrium second moment and body force at every node;
  *  2. removal of the fluid momentum, in the steps whose index (the step count of the Context) is a multiple
  *     of momentumRemovalFrequency;
- *  3. coupling: each coupled particle feels the explicit Euler-Maruyama drag and random force at its nearest
+ *  3. coupling: each coupled particle feels the drag (explicit or centred) and the random force at its nearest
  *     node, and the node receives the opposite force (docs/theory.md, section 2);
  *  4. collision and streaming: the populations are rebuilt from the moments of their own node and pushed
  *     to the neighbours.  The collision reads only moments, so a single population array is enough;
@@ -53,7 +53,11 @@ private:
     void computeNextStepForces(OpenMM::ContextImpl& context);
     void computeMoments();
     void removeFluidMomentum();
+    void couple(OpenMM::ContextImpl& context, bool isStep);
     void coupleParticles(OpenMM::ContextImpl& context, bool isStep);
+    void coupleParticlesCentered(OpenMM::ContextImpl& context, bool isStep);
+    void drawNoise();
+    void applyReaction();
     int nearestNode(const OpenMM::Vec3& position) const;
     OpenMM::Vec3 wallNormal(const OpenMM::Vec3& position) const;
     double getGaussianRandom();

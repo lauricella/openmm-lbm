@@ -58,7 +58,7 @@ reproducible and understandable by someone who arrives without any prior context
 
 ## Determinism and portability
 
-- **No atomic operations in the plugin kernels.** Per-cell sums use sorting with unique keys followed by segmented reductions. Given the same input and seed, results are bitwise identical on the same device. Tests use fixed seeds.
+- **No atomic operations in the plugin kernels.** Per-cell sums use sorting with unique keys followed by segmented reductions, with one writer per cell (as in A. Kassen, V. Shankar and A. L. Fogelson, Int. J. High Perform. Comput. Appl. 36, 443 (2022); `docs/theory.md`, section 2). Given the same input and seed, results are bitwise identical on the same device. Tests use fixed seeds.
 - **Portable kernels.** They are written only in the OpenMM common compute dialect (`platforms/common/src/kernels/*.cc`). No CUDA-specific code is allowed outside the kernel factories.
 - **Dependencies.** OpenMM in the supported range (see above), CMake, SWIG and Python only. No thrust or CUB.
 

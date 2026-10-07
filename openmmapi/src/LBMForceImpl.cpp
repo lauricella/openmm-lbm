@@ -99,6 +99,9 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
         throw OpenMMException("LBMForce: unknown coupling scheme");
     // The NVE scheme has friction only: no random force, whatever the temperature.
     lattice.kT = (force.getCouplingScheme() == LBMForce::NVE ? 0.0 : BOLTZ*force.getTemperature());
+    if (force.getDragScheme() != LBMForce::Explicit && force.getDragScheme() != LBMForce::Centered)
+        throw OpenMMException("LBMForce: unknown drag scheme");
+    lattice.dragScheme = force.getDragScheme();
     lattice.randomNumberSeed = force.getRandomNumberSeed();
     lattice.momentumRemovalFrequency = force.getFluidMomentumRemovalFrequency();
     set<int> seen;
@@ -122,6 +125,21 @@ void LBMForceImpl::initialize(ContextImpl& context) {
         throw OpenMMException("LBMForce requires a VerletIntegrator: drag and random forces are part of the force");
     lattice = computeLatticeParameters(owner, context.getSystem(), context.getIntegrator().getStepSize());
 
+    // The centred drag needs the other forces on the coupled particles at the time of the step.  OpenMM computes
+    // the forces in the order of the System, so on the Reference platform they are complete only when LBMForce
+    // comes last; the GPU platforms read them in a post-computation that runs after those of the other forces
+    // only when LBMForce comes last.  The forces on virtual sites are moved to the particles that define them
+    // after the post-computations, so they would be missing.
+    if (lattice.dragScheme == LBMForce::Centered) {
+        const System& system = context.getSystem();
+        if (&system.getForce(system.getNumForces()-1) != &owner)
+            throw OpenMMException("LBMForce: with the Centered drag scheme LBMForce must be the last force of the System; "
+                    "add it after all the other forces");
+        for (int i = 0; i < system.getNumParticles(); i++)
+            if (system.isVirtualSite(i))
+                throw OpenMMException("LBMForce: the Centered drag scheme does not support virtual sites");
+    }
+
     // The model is accurate for moderate relaxation times (docs/theory.md, section 6).
 
     if (lattice.tau < 0.505 || lattice.tau > 2.0)
@@ -139,10 +157,10 @@ void LBMForceImpl::initialize(ContextImpl& context) {
              << "lattice." << endl;
 
     // The explicit drag multiplies the velocity of a particle relative to the fluid by 1 - gamma*dt in one step
-    // (docs/theory.md, section 2).
+    // (docs/theory.md, section 2).  The centred drag is stable for any friction.
 
     double gammaDt = lattice.friction*lattice.dt;
-    if (!lattice.particles.empty() && gammaDt > 1.0)
+    if (!lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && gammaDt > 1.0)
         cerr << "Warning: LBMForce: friction*dt = " << gammaDt << " > 1: with the explicit drag the velocity of a "
              << "particle relative to the fluid changes sign at every step" << (gammaDt >= 2.0 ? ", and grows without "
              "bound since friction*dt >= 2" : "") << ". Reduce the friction or the time step." << endl;
@@ -188,6 +206,8 @@ void LBMForceImpl::updateParametersInContext(ContextImpl& context) {
         throw OpenMMException("updateParametersInContext: the set of coupled particles cannot be changed");
     if (updated.solidNodes != lattice.solidNodes)
         throw OpenMMException("updateParametersInContext: the solid nodes cannot be changed");
+    if (updated.dragScheme != lattice.dragScheme)
+        throw OpenMMException("updateParametersInContext: the drag scheme cannot be changed");
     lattice = updated;
     kernel.getAs<CalcLBMForceKernel>().copyParametersToContext(context, lattice);
 }
@@ -205,11 +225,12 @@ void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& sta
 }
 
 /**
- * A checkpoint starts with a header that identifies it: a tag, the format version, the platform, the grid size
- * and the number of coupled particles.  The kernel writes the rest.
+ * A checkpoint starts with a header that identifies it: a tag, the format version, the platform, the grid size,
+ * the number of coupled particles and (from version 2) the drag scheme.  The kernel writes the rest, which is the
+ * same in both versions.  Version 1 was written before the drag scheme existed, with the explicit drag.
  */
 static const char checkpointTag[8] = {'L', 'B', 'M', 'C', 'K', 'P', 'T', '1'};
-static const int checkpointVersion = 1;
+static const int checkpointVersion = 2;
 
 void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     stream.write(checkpointTag, sizeof(checkpointTag));
@@ -218,7 +239,7 @@ void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     int length = platform.size();
     stream.write((const char*) &length, sizeof(int));
     stream.write(platform.c_str(), length);
-    int header[4] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size()};
+    int header[5] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme};
     stream.write((const char*) header, sizeof(header));
     kernel.getAs<CalcLBMForceKernel>().createCheckpoint(context, stream);
     if (!stream)
@@ -232,7 +253,7 @@ void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
         throw OpenMMException("LBMForce: the data are not a checkpoint written by LBMForce::createCheckpoint()");
     int version, length;
     stream.read((char*) &version, sizeof(int));
-    if (version != checkpointVersion)
+    if (version < 1 || version > checkpointVersion)
         throw OpenMMException("LBMForce: unsupported checkpoint version");
     stream.read((char*) &length, sizeof(int));
     if (!stream || length < 0 || length > 1000)
@@ -242,11 +263,13 @@ void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
     if (platform != context.getPlatform().getName())
         throw OpenMMException("LBMForce: the checkpoint was written on the platform " + platform + ", not on " +
                 context.getPlatform().getName());
-    int header[4];
-    stream.read((char*) header, sizeof(header));
+    int header[5] = {0, 0, 0, 0, (int) LBMForce::Explicit};
+    stream.read((char*) header, (version == 1 ? 4 : 5)*sizeof(int));
     if (!stream || header[0] != lattice.nx || header[1] != lattice.ny || header[2] != lattice.nz ||
             header[3] != (int) lattice.particles.size())
         throw OpenMMException("LBMForce: the checkpoint was written for a different grid size or number of coupled particles");
+    if (header[4] != (int) lattice.dragScheme)
+        throw OpenMMException("LBMForce: the checkpoint was written with a different drag scheme");
     kernel.getAs<CalcLBMForceKernel>().loadCheckpoint(context, stream);
     if (!stream)
         throw OpenMMException("LBMForce: the checkpoint is truncated");

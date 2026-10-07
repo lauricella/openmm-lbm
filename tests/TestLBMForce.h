@@ -93,6 +93,9 @@ void testParameters() {
     ASSERT_EQUAL(LBMForce::EulerMaruyama, force.getCouplingScheme());
     force.setCouplingScheme(LBMForce::NVE);
     ASSERT_EQUAL(LBMForce::NVE, force.getCouplingScheme());
+    ASSERT_EQUAL(LBMForce::Explicit, force.getDragScheme());
+    force.setDragScheme(LBMForce::Centered);
+    ASSERT_EQUAL(LBMForce::Centered, force.getDragScheme());
     ASSERT_EQUAL(0.3, force.getMachNumberLimit());
     force.setMachCheckFrequency(50);
     force.setMachNumberLimit(0.25);

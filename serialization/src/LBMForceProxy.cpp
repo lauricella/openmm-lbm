@@ -20,7 +20,7 @@ LBMForceProxy::LBMForceProxy() : SerializationProxy("LBMForce") {
 }
 
 void LBMForceProxy::serialize(const void* object, SerializationNode& node) const {
-    node.setIntProperty("version", 3);
+    node.setIntProperty("version", 4);
     const LBMForce& force = *reinterpret_cast<const LBMForce*>(object);
     node.setIntProperty("forceGroup", force.getForceGroup());
     node.setStringProperty("name", force.getName());
@@ -37,6 +37,7 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     node.setIntProperty("momentumRemovalFrequency", force.getFluidMomentumRemovalFrequency());
     node.setIntProperty("machCheckFrequency", force.getMachCheckFrequency());
     node.setIntProperty("couplingScheme", force.getCouplingScheme());
+    node.setIntProperty("dragScheme", force.getDragScheme());
     node.setDoubleProperty("machNumberLimit", force.getMachNumberLimit());
     Vec3 g = force.getBodyAcceleration();
     node.createChildNode("BodyAcceleration").setDoubleProperty("x", g[0]).setDoubleProperty("y", g[1]).setDoubleProperty("z", g[2]);
@@ -54,7 +55,7 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
 
 void* LBMForceProxy::deserialize(const SerializationNode& node) const {
     int version = node.getIntProperty("version");
-    if (version < 1 || version > 3)
+    if (version < 1 || version > 4)
         throw OpenMMException("Unsupported version number");
     LBMForce* force = new LBMForce();
     try {
@@ -73,6 +74,9 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
         }
         if (version >= 3)
             force->setCouplingScheme((LBMForce::CouplingScheme) node.getIntProperty("couplingScheme"));
+        // Versions 1 to 3 were written before the drag scheme existed, with the explicit drag.
+        if (version >= 4)
+            force->setDragScheme((LBMForce::DragScheme) node.getIntProperty("dragScheme"));
         const SerializationNode& g = node.getChildNode("BodyAcceleration");
         force->setBodyAcceleration(Vec3(g.getDoubleProperty("x"), g.getDoubleProperty("y"), g.getDoubleProperty("z")));
         const SerializationNode& u = node.getChildNode("InitialFluidVelocity");

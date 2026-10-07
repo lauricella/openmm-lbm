@@ -49,6 +49,12 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `execute()` adds those forces to the particles, so other force evaluations neither advance the fluid
    nor draw new random numbers. `beginStep()` also reverses the velocity of a coupled particle that has
    entered a solid node. Every platform does all of this.
+   With the centred drag (`LBMForce::Centered`, Reference platform only in this version) the coupling needs
+   the other forces on the particles: `LBMForceImpl::initialize()` checks that `LBMForce` is the last force
+   of the System and that there are no virtual sites, so that when its `execute()` runs OpenMM's force
+   array already holds the sum of the other forces. `ReferenceCalcLBMForceKernel::coupleParticlesCentered()`
+   reads them, sorts the keys node*N_p + i, solves the drag of each node in closed form
+   (`docs/theory.md` section 2, Solution of the centred drag) and gives the node the reaction -S.
 3. **Lattice step on the CUDA, OpenCL and HIP platforms** (`CommonCalcLBMForceKernel::advanceFluid()`,
    kernels in `platforms/common/src/kernels/lbmFluid.cc` and `lbmCoupling.cc`):
 
@@ -79,7 +85,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    fluid. The random numbers of a step are copied from OpenMM's generator into the array `noise` once, by the
    first `coupleParticles` that needs them (`drawNoise`), and reused by the step.
 4. **Checkpoints.** `LBMForce::createCheckpoint()` and `loadCheckpoint()` go through `LBMForceImpl`, which
-   writes and checks a header (tag, version, platform, grid size, number of coupled particles), to the
+   writes and checks a header (tag, version, platform, grid size, number of coupled particles and, from
+   version 2, drag scheme; version 1 is read as the explicit drag), to the
    kernel, which writes its arrays as they are: populations, random numbers drawn for the next step, wall
    momentum and, on the Reference platform, its SFMT generator. The Python module adds
    `openmmlbm.saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter` (in `python/openmmlbm.i`),

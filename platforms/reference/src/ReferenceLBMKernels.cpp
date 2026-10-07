@@ -141,7 +141,7 @@ void ReferenceCalcLBMForceKernel::advanceFluid(ContextImpl& context) {
     if (lattice.momentumRemovalFrequency > 0 && stepIndex%lattice.momentumRemovalFrequency == 0)
         removeFluidMomentum();
     if (!lattice.particles.empty())
-        coupleParticles(context, true);
+        couple(context, true);
     collideAndStream();
     if (!isFluid.empty())
         bounceBack();
@@ -158,7 +158,14 @@ void ReferenceCalcLBMForceKernel::computeNextStepForces(ContextImpl& context) {
     long long nextStep = context.getStepCount();
     if (lattice.momentumRemovalFrequency > 0 && nextStep%lattice.momentumRemovalFrequency == 0)
         removeFluidMomentum();
-    coupleParticles(context, false);
+    couple(context, false);
+}
+
+void ReferenceCalcLBMForceKernel::couple(ContextImpl& context, bool isStep) {
+    if (lattice.dragScheme == LBMForce::Centered)
+        coupleParticlesCentered(context, isStep);
+    else
+        coupleParticles(context, isStep);
 }
 
 void ReferenceCalcLBMForceKernel::checkMachNumber() {
@@ -245,7 +252,6 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
     // particle receives F and the node -F: the reactions of the particles of a node are summed in particle
     // order, then added to the force density of the node.  A solid node has rho = 0 and is at rest; the
     // reaction it receives leaves the fluid.  The random numbers are drawn once per step, in particle order.
-    int numNodes = lattice.getNumNodes();
     vector<Vec3>& positions = extractPositions(context);
     vector<Vec3>& velocities = extractVelocities(context);
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
@@ -254,15 +260,8 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
     double velocityScale = lattice.getVelocityScale();
     double forceScale = cellMass*lattice.dx/(lattice.dt*lattice.dt);
     bool randomForce = (kT > 0 && gamma > 0);
-    if (randomForce && !noiseDrawn) {
-        for (int i = 0; i < (int) lattice.particles.size(); i++) {
-            double xi0 = getGaussianRandom();
-            double xi1 = getGaussianRandom();
-            double xi2 = getGaussianRandom();
-            noise[i] = Vec3(xi0, xi1, xi2);
-        }
-        noiseDrawn = true;
-    }
+    if (randomForce)
+        drawNoise();
     if (isStep)
         fill(reaction.begin(), reaction.end(), 0.0);
     for (int i = 0; i < (int) lattice.particles.size(); i++) {
@@ -281,14 +280,107 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
             for (int k = 0; k < 3; k++)
                 reaction[3*node+k] -= f[k];
     }
-    if (!isStep)
+    if (isStep)
+        applyReaction();
+}
+
+void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, bool isStep) {
+    // Centred drag at the nearest node (docs/theory.md, section 2), in lattice units (time step 1, h = 1/2):
+    //   F_k = -gamma m_k [v_k(t) - u_c(t)] + sqrt(2 gamma m_k kT) xi_k,
+    // with v_k(t) = v_k(t - h) + h (Fc_k + F_k)/m_k the velocity of particle k at the time of the force, Fc_k the
+    // other forces on it, and u_c(t) = (j_c + h G_c)/rho_c the velocity of its node c that the collision puts in
+    // the equilibrium, G_c being the total force on the node.  The system is linear and couples only the
+    // particles of the same node.  With a = gamma h, v~_k = v_k(t - h) + h Fc_k/m_k, u~ = (j_c + h Fbody_c)/rho_c,
+    // m_c = rho_c, and M, P~ and R the sums of m_k, m_k v~_k and of the random forces over the particles of the
+    // node, the sum S of their forces and the velocity of the node are
+    //   S = [-gamma (P~ - M u~) + R]/(1 + a + a M/m_c),   u_c(t) = u~ - h S/m_c,
+    // and then F_k = [-gamma m_k (v~_k - u_c(t)) + R_k]/(1 + a).  The node receives -S, so that G_c = Fbody_c - S.
+    // A solid node is a wall at rest of infinite mass: u_c(t) = 0.  Fc_k is read from the forces of OpenMM, to which
+    // the other forces of the System have been added since LBMForce is the last one.  The particles of a node are
+    // summed in particle order, as on the GPU platforms (keys node*N + k, sorted).
+    int numParticles = lattice.particles.size();
+    vector<Vec3>& positions = extractPositions(context);
+    vector<Vec3>& velocities = extractVelocities(context);
+    vector<Vec3>& forces = extractForces(context);
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    double gamma = lattice.friction*lattice.dt;
+    double kT = lattice.kT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
+    double velocityScale = lattice.getVelocityScale();
+    double forceScale = cellMass*lattice.dx/(lattice.dt*lattice.dt);
+    double h = 0.5, a = gamma*h;
+    bool randomForce = (kT > 0 && gamma > 0);
+    if (randomForce)
+        drawNoise();
+    vector<long long> keys(numParticles);
+    vector<Vec3> knownVelocity(numParticles), randomForces(numParticles);
+    for (int i = 0; i < numParticles; i++) {
+        int particle = lattice.particles[i];
+        double m = particleMass[i];
+        knownVelocity[i] = velocities[particle]*(1.0/velocityScale) + forces[particle]*(h/(m*forceScale));
+        if (randomForce)
+            randomForces[i] = noise[i]*sqrt(2.0*gamma*m*kT);
+        keys[i] = nearestNode(positions[particle])*(long long) numParticles + i;
+    }
+    sort(keys.begin(), keys.end());
+    if (isStep)
+        fill(reaction.begin(), reaction.end(), 0.0);
+    for (int first = 0; first < numParticles; ) {
+        int node = keys[first]/numParticles;
+        int end = first;
+        double mass = 0;
+        Vec3 particleMomentum, random;
+        for (; end < numParticles && keys[end]/numParticles == node; end++) {
+            int i = keys[end]%numParticles;
+            mass += particleMass[i];
+            particleMomentum += knownVelocity[i]*particleMass[i];
+            random += randomForces[i];
+        }
+        Vec3 u, sum;
+        if (rho[node] > 0) {
+            const double* j = &momentum[3*node];
+            const double* F = &forceDensity[3*node];
+            Vec3 known = Vec3(j[0] + h*F[0], j[1] + h*F[1], j[2] + h*F[2])*(1.0/rho[node]);
+            sum = ((particleMomentum - known*mass)*(-gamma) + random)*(1.0/(1.0 + a + a*mass/rho[node]));
+            u = known - sum*(h/rho[node]);
+        }
+        else
+            sum = (particleMomentum*(-gamma) + random)*(1.0/(1.0 + a));
+        for (int k = first; k < end; k++) {
+            int i = keys[k]%numParticles;
+            Vec3 f = ((knownVelocity[i] - u)*(-gamma*particleMass[i]) + randomForces[i])*(1.0/(1.0 + a));
+            particleForces[i] = f*forceScale;
+        }
+        if (isStep)
+            for (int k = 0; k < 3; k++)
+                reaction[3*node+k] = -sum[k];
+        first = end;
+    }
+    if (isStep)
+        applyReaction();
+}
+
+void ReferenceCalcLBMForceKernel::drawNoise() {
+    // The random numbers of a step are drawn once, three per coupled particle in particle order, by the first
+    // evaluation that needs them.
+    if (noiseDrawn)
         return;
+    for (int i = 0; i < (int) lattice.particles.size(); i++) {
+        double xi0 = getGaussianRandom();
+        double xi1 = getGaussianRandom();
+        double xi2 = getGaussianRandom();
+        noise[i] = Vec3(xi0, xi1, xi2);
+    }
+    noiseDrawn = true;
+}
+
+void ReferenceCalcLBMForceKernel::applyReaction() {
+    // At the end of the coupling of a lattice step: the random numbers have been used, and the reaction of the
+    // particles is added to the force density of the nodes.  The reaction on a solid node goes to the wall.
+    int numNodes = lattice.getNumNodes();
     noiseDrawn = false;
     for (int k = 0; k < 3*numNodes; k++)
         forceDensity[k] += reaction[k];
-
-    // The reaction on a solid node goes to the wall.
-
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     double momentumScale = cellMass*lattice.dx/lattice.dt;
     for (int node : lattice.solidNodes)
         wallMomentum += Vec3(reaction[3*node], reaction[3*node+1], reaction[3*node+2])*momentumScale;

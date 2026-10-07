@@ -19,7 +19,7 @@ using namespace std;
 
 LBMForce::LBMForce() : nx(0), ny(0), nz(0), randomNumberSeed(0), momentumRemovalFrequency(1), machCheckFrequency(100),
         density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0), machNumberLimit(0.3),
-        couplingScheme(EulerMaruyama), bodyAcceleration(0, 0, 0), initialVelocity(0, 0, 0) {
+        couplingScheme(EulerMaruyama), dragScheme(Explicit), bodyAcceleration(0, 0, 0), initialVelocity(0, 0, 0) {
 }
 
 LBMForce::CouplingScheme LBMForce::getCouplingScheme() const {
@@ -28,6 +28,14 @@ LBMForce::CouplingScheme LBMForce::getCouplingScheme() const {
 
 void LBMForce::setCouplingScheme(CouplingScheme scheme) {
     couplingScheme = scheme;
+}
+
+LBMForce::DragScheme LBMForce::getDragScheme() const {
+    return dragScheme;
+}
+
+void LBMForce::setDragScheme(DragScheme scheme) {
+    dragScheme = scheme;
 }
 
 void LBMForce::getGridSize(int& nx, int& ny, int& nz) const {

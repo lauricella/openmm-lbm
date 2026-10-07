@@ -42,6 +42,9 @@ def test_parameters_with_units():
     assert force.getCouplingScheme() == LBMForce.EulerMaruyama
     force.setCouplingScheme(LBMForce.NVE)
     assert force.getCouplingScheme() == LBMForce.NVE
+    assert force.getDragScheme() == LBMForce.Explicit
+    force.setDragScheme(LBMForce.Centered)
+    assert force.getDragScheme() == LBMForce.Centered
 
 
 def test_fluid_fields_and_state():
@@ -106,6 +109,65 @@ def test_coupling_first_step():
     v = context.getState(getVelocities=True).getVelocities()[0].value_in_unit(unit.nanometer/unit.picosecond)
     for found, initial in zip(v, (0.3, -0.2, 0.1)):
         assert found == pytest.approx(initial*(1 - 5.0*0.01), rel=1e-12)
+
+
+def test_centered_first_step():
+    # With the centred drag one step multiplies the velocity of a particle in a fluid at rest by
+    # (1 - a + a m/m_c)/(1 + a + a m/m_c), with a = friction*dt/2 and m_c the mass of the fluid in a cell.
+    system, force, positions = create_system(num_particles=1)
+    force.setFriction(50.0/unit.picosecond)
+    force.setTemperature(0.0)
+    force.setDragScheme(LBMForce.Centered)
+    integrator = mm.VerletIntegrator(0.01)
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+    context.setPositions(positions)
+    context.setVelocities([mm.Vec3(0.3, -0.2, 0.1)])
+    integrator.step(1)
+    v = context.getState(getVelocities=True).getVelocities()[0].value_in_unit(unit.nanometer/unit.picosecond)
+    a = 0.5*50.0*0.01
+    b = a*100.0/(602.214*0.5**3)
+    for found, initial in zip(v, (0.3, -0.2, 0.1)):
+        assert found == pytest.approx(initial*(1 - a + b)/(1 + a + b), rel=1e-12)
+
+
+def test_centered_requires_last_force():
+    system, force, positions = create_system()
+    force.setDragScheme(LBMForce.Centered)
+    system.addForce(mm.CustomExternalForce('0'))
+    with pytest.raises(Exception, match='last force'):
+        mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+
+
+@pytest.mark.parametrize('drag', ['Explicit', 'Centered'])
+def test_temperature_reporter(drag, tmp_path):
+    # The reporter gives the temperature of the full-step velocity with the explicit drag (the same as
+    # StateDataReporter) and that of the State velocity with the centred drag.
+    import numpy as np
+    from openmm import app
+    from openmmlbm import LBMTemperatureReporter
+    system, force, positions = create_system(num_particles=20)
+    force.setRandomNumberSeed(3)
+    force.setDragScheme(getattr(LBMForce, drag))
+    simulation = app.Simulation(app.Topology(), system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+    simulation.context.setPositions(positions)
+    path = tmp_path/'temperature.txt'
+    reporter = LBMTemperatureReporter(str(path), 5, force)
+    simulation.reporters.append(reporter)
+    simulation.step(20)
+    del simulation.reporters[:]
+    del reporter
+    lines = path.read_text().splitlines()
+    assert lines[0].startswith('#')
+    step, time, temperature = (float(x) for x in lines[-1].split())
+    assert step == 20 and time == pytest.approx(0.2)
+    state = simulation.context.getState(getVelocities=True, getEnergy=True)
+    kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole/unit.kelvin)
+    if drag == 'Explicit':
+        expected = 2*state.getKineticEnergy().value_in_unit(unit.kilojoule_per_mole)/(3*20*kB)
+    else:
+        v = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)
+        expected = 100.0*np.sum(v**2)/(3*20*kB)
+    assert temperature == pytest.approx(expected, abs=1e-3)       # written with three decimals
 
 
 def test_wall_force():

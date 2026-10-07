@@ -112,7 +112,7 @@ multiplying the whole Hermite expansion.
 
 ## 2. Particle-fluid coupling (implemented on all platforms)
 
-**Euler-Maruyama scheme.** Each coupled particle k of mass m_k feels
+**Euler-Maruyama scheme with the explicit drag** (the default). Each coupled particle k of mass m_k feels
 
   F_k = -gamma m_k (v_k - u(x_k)) + R_k,   <R_k R_k> = 2 gamma m_k kT/dt (per component).
 
@@ -122,8 +122,8 @@ multiplying the whole Hermite expansion.
 - In lattice units (time step 1): F = -gamma m (v - u) + sqrt(2 gamma m kT) xi, with xi three
   independent N(0, 1) numbers.
 - Drag and noise are part of the force, so the System is integrated with `VerletIntegrator`.
-- This is the explicit scheme of the reference CUDA library. openmm-lbm reproduces it first, and studies
-  changes (time-centred drag, relaxation of the ghost moments) only afterwards.
+- This is the explicit scheme of the reference CUDA library. openmm-lbm reproduces it, and offers a
+  time-centred drag as an alternative (Drag schemes, below).
 
 **Coupling schemes** (`setCouplingScheme()`).
 - `EulerMaruyama`, the default: friction and random force as above.
@@ -241,8 +241,9 @@ gamma = 5/ps, protocol of `docs/validation.md`):
 
 y vanishes at tau = 1.79 (1.79 also for m = 100 Da, gamma = 10/ps), the value found with the reference
 library. Above it, particles move less than Langevin particles with the same friction. A warning is
-printed when a Context with coupled particles has tau > 1.7. Time-centred drag and a relaxation of the
-ghost moments independent of tau are the candidate corrections, to be studied.
+printed when a Context with coupled particles has tau > 1.7. The centred drag (below) and a relaxation of
+the ghost moments independent of tau are the candidate corrections; the self-mobility of the centred drag
+is still to be measured.
 
 **Kinetic temperature.** OpenMM's leapfrog stores the velocities at half steps.
 - For a free particle with fluid at rest, the temperature measured from half-step velocities is
@@ -259,8 +260,86 @@ ghost moments independent of tau are the candidate corrections, to be studied.
   those of the last step, and this temperature was wrong for coupled particles: for a free particle
   T [(1 - 3a/2)^2/(1 - a/2) + 9a/2] with a = gamma dt, 363 K at 300 K and a = 0.1.
 
+**Drag schemes** (`setDragScheme()`, fixed when the Context is created). Two time discretizations of the
+drag, with the same random force (same variance, numbers drawn in the same order).
+- `Explicit`, the default: the scheme above, F_k = -gamma m_k (v_k(t - dt/2) - u(t - dt/2)) + R_k. Among the
+  discrete Langevin integrators it is the scheme of Groot and Warren [12] with lambda = 1/2: velocity of the
+  particle half a step before the force, new random numbers at every step.
+- `Centered`: the velocities of particle and fluid at the time t of the force,
+
+    F_k = -gamma m_k (v_k(t) - u_c(t)) + R_k,
+
+  with v_k(t) = v_k(t - dt/2) + dt (Fc_k + F_k)/(2 m_k), where Fc_k is the sum of the other forces on the
+  particle, and u_c(t) = (j_c + G_c/2)/rho_c, the velocity that the collision puts in the equilibrium of the
+  node c (Guo forcing, section 1), G_c being the total force on the node, body force minus the forces of its
+  particles. For a particle in a fluid at rest it is the scheme of Brünger, Brooks and Karplus [13] (midpoint
+  drag, new random numbers at every step).
+
+**Solution of the centred drag.** The system is implicit but linear, and couples only the particles of
+the same node. In lattice units (dt = 1, h = 1/2, a = gamma h, masses in cell masses), with
+v~_k = v_k(t - h) + h Fc_k/m_k, u~ = (j_c + h rho_c g)/rho_c, m_c = rho_c, and M, P~ and R the sums over the
+particles of the node of m_k, m_k v~_k and R_k:
+
+    S = [-gamma (P~ - M u~) + R]/(1 + a + a M/m_c),   u_c(t) = u~ - h S/m_c,
+    F_k = [-gamma m_k (v~_k - u_c(t)) + R_k]/(1 + a).
+
+S is the sum of the forces F_k and the node receives -S, so the total momentum is conserved exactly, random
+force included. A solid node is a wall at rest of infinite mass: u_c(t) = 0, and the term a M/m_c drops out.
+The particles of a node are summed in particle order, as for the reaction of the explicit drag. The force
+Fc_k is read from OpenMM's forces after the other forces of the System have been computed, so:
+- `LBMForce` must be the last force of the System (checked when the Context is created). On the Reference
+  platform the forces are summed in the order of the System.
+- The System must not contain virtual sites: OpenMM moves their forces to the particles that define them
+  only after all the forces have been computed.
+- When `getState()` asks for the forces of a subset of the force groups, the coupling force returned between
+  steps is computed with the forces of those groups only.
+- Constraints are applied by the integrator after the forces, and the drag does not see them.
+
+The centred drag runs on the Reference platform; on the CUDA, OpenCL and HIP platforms it is not yet
+available, and a Context with it is refused.
+
+**Which velocity has the right temperature.** Consider the particles of a node and their cell alone,
+without other forces, streaming and viscosity (a closed system with a fluctuation-dissipation balance). Its
+dissipative modes have the rates lambda = gamma (relative motion of the particles) and
+gamma (1 + M/m_c) (particles against the cell); let z = lambda dt/2.
+- With the centred drag the velocities at the half steps, those of the State, are canonical for every
+  gamma dt and number of particles, and the update is stable for every gamma dt (amplification factor
+  (1 - z)/(1 + z); for z > 1 the relaxation alternates in sign, which is stable but not accurate). The
+  full-step velocities have the temperature T/(1 + z) per mode: for one particle, between T/(1 + gamma dt/2)
+  when the cell is heavy and T/(1 + gamma dt (1 + m/m_c)/2) when the cell keeps the momentum.
+- With the explicit drag the full-step velocities are canonical and the half-step ones have T/(1 - z); the
+  closed system is stable only for gamma dt (1 + M/m_c)/2 < 1. In the lattice the streaming carries the
+  momentum of the node away, and the bound of a single particle, gamma dt < 2, is the one always required.
+- For a harmonic force (frequency w) both have a configurational error of order (w dt)^2: <x^2> is
+  1/(1 - (w dt)^2/4) times the exact value for the centred drag, 1/(1 - (w dt)^2/(2 (2 - gamma dt))) for the
+  explicit one. In coarse-grained models w dt <~ 0.1, so the error is below 0.3%. Schemes with exact
+  configurations exist (the family analysed in [14, 15]), but none of them has an on-site velocity with the
+  exact temperature [14].
+
+`StateDataReporter` reports the temperature of the full-step velocity (section 2, Kinetic temperature):
+right with the explicit drag, lower with the centred drag. `openmmlbm.LBMTemperatureReporter` reports the
+temperature of the coupled particles with the right velocity for each scheme.
+
+**Temperature with a fluid without fluctuations.** The fluid has no thermal fluctuations of its own, so
+the coupled particles are colder than T (Kinetic temperature, above). The centred drag couples a particle
+to the velocity of its own cell within the step, the cell responding to the force of the particle (the term
+h S/m_c), so the deficit is larger than with the explicit drag. Measured on the Reference platform (8^3
+nodes, dx = 0.5 nm, dt = 0.01 ps, tau = 0.8, gamma dt = 0.1, T = 300 K, particles of 100 Da, so m/m_c = 1.3;
+2000 steps after 500, seed 1):
+
+| | 100 particles | 10 particles | 100 particles, fluid 100 times denser |
+|---|---|---|---|
+| `Explicit`, full-step T (K) | 285.8 | 293.0 | 296.8 |
+| `Centered`, half-step T (K) | 269.6 | 275.9 | 296.7 |
+
+With a heavy fluid both schemes give T to 1%; at the density of water the deficit of the centred drag is
+8-10% and does not decrease with fewer particles. A fluid with thermal fluctuations is needed for the right
+temperature with either scheme.
+
 **Per-cell reaction on the GPU platforms.** The reaction forces of the particles in the same cell are
-summed without atomic operations (`platforms/common/src/kernels/lbmCoupling.cc`):
+summed without atomic operations (`platforms/common/src/kernels/lbmCoupling.cc`), by sorting keys and
+reducing segments with one writer per cell, as in the parallel spreading of the immersed boundary method of
+Kassen et al. [16] (their case of a single node per point):
 
 1. one thread per particle computes its force and the key node*N_p + i, unique, with N_p the number of
    coupled particles and i the index of the particle in the list of the force;
@@ -472,3 +551,13 @@ spacing, the lattice time step and the relaxation time, in the style of
 10. A. J. C. Ladd, J. Fluid Mech. 271, 311 (1994): part 2, numerical results.
 11. T. Krüger, H. Kusumaatmaja, A. Kuzmin, O. Shardt, G. Silva and E. M. Viggen, The Lattice Boltzmann
     Method: Principles and Practice (Springer, 2017).
+12. R. D. Groot and P. B. Warren, J. Chem. Phys. 107, 4423 (1997): dissipative particle dynamics, the
+    modified velocity-Verlet integrator with lambda.
+13. A. Brünger, C. L. Brooks III and M. Karplus, Chem. Phys. Lett. 105, 495 (1984): stochastic boundary
+    conditions, the midpoint Langevin integrator (BBK).
+14. N. Grønbech-Jensen, J. Stat. Phys. 191, 137 (2024): on the definition of velocity in discrete-time,
+    stochastic Langevin simulations.
+15. N. Grønbech-Jensen, J. Stat. Phys. 193, 12 (2026): linear analysis of stochastic Verlet-type
+    integrators for Langevin equations.
+16. A. Kassen, V. Shankar and A. L. Fogelson, Int. J. High Perform. Comput. Appl. 36, 443 (2022): a
+    fine-grained parallelization of the immersed boundary method.

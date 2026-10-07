@@ -104,10 +104,11 @@ void testFirstStepDrag(Platform& platform) {
  * the full step, sum m ((v(t - dt/2) + v(t + dt/2))/2)^2/2, also with the random force and the removal of the
  * fluid momentum: the temperature that OpenMM reports is that of the full step.
  */
-void testFullStepKineticEnergy(Platform& platform) {
+void testFullStepKineticEnergy(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
     LBMForce* force;
     int numParticles = 6;
     System* system = createCoupledSystem(force, numParticles, 10.0, 300.0);
+    force->setDragScheme(drag);
     force->setRandomNumberSeed(5);
     force->setFluidMomentumRemovalFrequency(2);
     VerletIntegrator integrator(fluidDt);
@@ -138,9 +139,10 @@ void testFullStepKineticEnergy(Platform& platform) {
  * The total momentum of particles and fluid is conserved, with drag and random forces: two particles share a
  * node and one crosses the periodic boundary.  The lattice density of the fluid is rho0.
  */
-void testMomentumConservation(Platform& platform, double rho0) {
+void testMomentumConservation(Platform& platform, double rho0, LBMForce::DragScheme drag=LBMForce::Explicit) {
     LBMForce* force;
     System* system = createCoupledSystem(force, 4, 10.0, 300.0);
+    force->setDragScheme(drag);
     VerletIntegrator integrator(fluidDt);
     Context context(*system, integrator, platform);
     vector<Vec3> positions = {Vec3(1.02, 2.01, 0.98), Vec3(0.97, 1.99, 1.03), Vec3(3.98, 0.02, 3.96), Vec3(2.3, 1.1, 0.6)};
@@ -169,11 +171,12 @@ void testMomentumConservation(Platform& platform, double rho0) {
  * A particle moving with the fluid feels no force: particle and fluid keep the same uniform velocity while the
  * particle crosses two cells, along x, y, z and a diagonal.
  */
-void testComoving(Platform& platform) {
+void testComoving(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
     vector<Vec3> flows = {Vec3(1.0, 0, 0), Vec3(0, 1.0, 0), Vec3(0, 0, 1.0), Vec3(0.6, -0.5, 0.6)};
     for (Vec3 u : flows) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 1, 10.0, 0.0);
+        force->setDragScheme(drag);
         force->setInitialFluidVelocity(u);
         VerletIntegrator integrator(fluidDt);
         Context context(*system, integrator, platform);
@@ -188,9 +191,10 @@ void testComoving(Platform& platform) {
 /**
  * Only the particles added to the force are coupled: the others keep their velocity and feel no force.
  */
-void testPartialCoupling(Platform& platform) {
+void testPartialCoupling(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
     LBMForce* force;
     System* system = createCoupledSystem(force, 4, 5.0, 0.0, {1, 3});
+    force->setDragScheme(drag);
     VerletIntegrator integrator(fluidDt);
     Context context(*system, integrator, platform);
     context.setPositions({Vec3(0.3, 0.4, 0.5), Vec3(1.3, 1.4, 1.5), Vec3(2.3, 2.4, 2.5), Vec3(3.3, 3.4, 3.5)});
@@ -215,10 +219,11 @@ void testPartialCoupling(Platform& platform) {
  * Force evaluations outside the integration steps do not change the trajectory: they neither advance the fluid
  * nor draw new random numbers.  Two simulations with the same seed are identical; with seed 0 they differ.
  */
-void testForceEvaluationsAndSeeds(Platform& platform) {
+void testForceEvaluationsAndSeeds(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
     auto run = [&](int seed, bool queries) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 3, 5.0, 300.0);
+        force->setDragScheme(drag);
         force->setRandomNumberSeed(seed);
         VerletIntegrator integrator(fluidDt);
         Context context(*system, integrator, platform);
@@ -325,9 +330,10 @@ void testWallReflectionDirection(Platform& platform) {
  * being the sum of getWallForce() dt over the steps.  The fluid flows against the walls j = 0 and j = 4, one
  * particle is reflected by a wall, and all particles feel drag and random force.
  */
-void testWallMomentumBalance(Platform& platform) {
+void testWallMomentumBalance(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
     LBMForce* force;
     System* system = createCoupledSystem(force, 4, 10.0, 300.0);
+    force->setDragScheme(drag);
     vector<int> walls = wallPlane(8, 8, 8);
     for (int node : wallPlane(8, 8, 8))
         walls.push_back(node + 8*4);                   // the plane j = 4
@@ -379,7 +385,7 @@ void testWallMomentumBalance(Platform& platform) {
  * A force evaluation just before the checkpoints has already drawn the random numbers of the next step: the
  * checkpoint of the force keeps them.  The force on the walls of the last step is restored too.
  */
-void testCheckpointWithRandomForce(Platform& platform) {
+void testCheckpointWithRandomForce(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
     int numSteps = 23, split = 9;
     vector<Vec3> uninterrupted, restarted;
     vector<double> uninterruptedFluid, restartedFluid;
@@ -388,6 +394,7 @@ void testCheckpointWithRandomForce(Platform& platform) {
     for (int run = 0; run < 2; run++) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 4, 10.0, 300.0);
+        force->setDragScheme(drag);
         force->setRandomNumberSeed(3);
         force->setFluidMomentumRemovalFrequency(4);
         vector<int> wall;
@@ -473,7 +480,7 @@ void testCheckpointMismatch(Platform& platform) {
  * identical to an uninterrupted run.  The temperature is zero, since the state of the random generator is not
  * part of the checkpoint.
  */
-void testRestartWithParticles(Platform& platform) {
+void testRestartWithParticles(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
     int numSteps = 35, split = 13;
     vector<double> uninterruptedFluid, savedFluid, restartedFluid;
     vector<Vec3> uninterrupted, restarted;
@@ -481,6 +488,7 @@ void testRestartWithParticles(Platform& platform) {
     for (int run = 0; run < 3; run++) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 3, 5.0, 0.0);
+        force->setDragScheme(drag);
         force->setFluidMomentumRemovalFrequency(5);
         VerletIntegrator integrator(fluidDt);
         Context context(*system, integrator, platform);
@@ -512,18 +520,25 @@ void testRestartWithParticles(Platform& platform) {
 }
 
 /**
- * The random force has the amplitude required by the fluctuation-dissipation theorem: free particles reach the
- * temperature T measured from full-step velocities (mean of two consecutive half-step velocities), and
- * T/(1 - gamma dt/2) measured from half-step velocities.  The fluid has no thermal fluctuations of its own and
+ * The random force has the amplitude required by the fluctuation-dissipation theorem.  With the explicit drag free
+ * particles reach the temperature T measured from full-step velocities (mean of two consecutive half-step
+ * velocities), and T/(1 - gamma dt/2) measured from half-step velocities; with the centred drag T from half-step
+ * velocities and T/(1 + gamma dt/2) from full-step velocities.  The fluid has no thermal fluctuations of its own and
  * takes part of the momentum of the particles, so both are a few per cent lower (here 100 particles of 100 Da,
  * a fifth of the mass of the fluid): the tolerance of 10% catches errors in the amplitude of the noise, which
- * would appear as factors such as 2 or 1/2.  The seed is fixed, so the test is deterministic.
+ * would appear as factors such as 2 or 1/2.  The centred drag couples a particle to its own cell within the step,
+ * and the cold cell lowers its temperature further, by 10% here, where the particles are heavier than the fluid of
+ * a cell; with that drag the fluid is made 100 times denser, which leaves the deficit at 1%.  The seed is fixed,
+ * so the test is deterministic.
  */
-void testEquipartition(Platform& platform) {
+void testEquipartition(Platform& platform, LBMForce::DragScheme drag=LBMForce::Explicit) {
     int numParticles = 100;
     double temperature = 300.0, friction = 10.0;
     LBMForce* force;
     System* system = createCoupledSystem(force, numParticles, friction, temperature);
+    force->setDragScheme(drag);
+    if (drag == LBMForce::Centered)
+        force->setFluidDensity(100*fluidDensity);
     force->setRandomNumberSeed(1);
     VerletIntegrator integrator(fluidDt);
     Context context(*system, integrator, platform);
@@ -546,8 +561,14 @@ void testEquipartition(Platform& platform) {
         previous = v;
     }
     double scale = 1.0/(3*numParticles*numSamples*BOLTZ);
-    ASSERT_EQUAL_TOL(temperature, fullStep*scale, 0.1);
-    ASSERT_EQUAL_TOL(temperature/(1-0.5*friction*fluidDt), halfStep*scale, 0.1);
+    if (drag == LBMForce::Explicit) {
+        ASSERT_EQUAL_TOL(temperature, fullStep*scale, 0.1);
+        ASSERT_EQUAL_TOL(temperature/(1-0.5*friction*fluidDt), halfStep*scale, 0.1);
+    }
+    else {
+        ASSERT_EQUAL_TOL(temperature/(1+0.5*friction*fluidDt), fullStep*scale, 0.1);
+        ASSERT_EQUAL_TOL(temperature, halfStep*scale, 0.1);
+    }
     delete system;
 }
 

@@ -36,6 +36,8 @@ has units.
 | `setMachNumberLimit(limit)` | dimensionless | 0.3 | yes |
 | `setSolidNodes(nodes)` | node indices | none | no |
 | `addParticle(particle)`, `setParticle(index, particle)` | particle indices | none | no |
+| `setCouplingScheme(scheme)` | | `EulerMaruyama` | yes |
+| `setDragScheme(scheme)` | | `Explicit` | no |
 | `setFriction(friction)` | 1/ps | 1.0 | yes |
 | `setTemperature(temperature)` | K | 300 | yes |
 | `setRandomNumberSeed(seed)` | | 0 | used only at creation |
@@ -217,6 +219,42 @@ The scheme is saved with the force by `XmlSerializer`. It can be changed in a Co
 force.setCouplingScheme(LBMForce.NVE)
 ```
 
+### `setDragScheme(scheme)`, `getDragScheme()`
+
+Time discretization of the drag
+([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), Drag schemes):
+- `LBMForce.Explicit`, the default: the drag compares the velocity of the particle half a step before the
+  force with that of the fluid before the force. The temperature that `StateDataReporter` reports is right.
+  The velocity of a particle relative to the fluid changes sign at every step for friction*dt > 1 and grows
+  without bound for friction*dt >= 2.
+- `LBMForce.Centered`: the drag compares the velocities of particle and fluid at the time of the force, and
+  is solved exactly for all the particles of a node. It is stable for any friction. The velocities of the
+  State have the right temperature, while `StateDataReporter` reports a lower one; use
+  [`LBMTemperatureReporter`](#openmmlbmlbmtemperaturereporterfile-reportinterval-force). `LBMForce` must be the
+  last force of the System, and the System must not contain virtual sites. In this version it runs only on
+  the Reference platform.
+
+The drag scheme is fixed when the Context is created and saved with the force by `XmlSerializer`; a
+checkpoint can only be loaded in a Context with the same drag scheme.
+
+```python
+force.setDragScheme(LBMForce.Centered)      # then system.addForce(force), after all the other forces
+```
+
+### `openmmlbm.LBMTemperatureReporter(file, reportInterval, force)`
+
+A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps, the step, the time (ps) and
+the temperature (K) of the particles coupled to `force`, with three degrees of freedom per particle. It uses
+the velocity that has the right temperature for the drag scheme of the force: the full-step velocity
+v + dt F/(2m) with the explicit drag (the same temperature as `StateDataReporter`), the velocity of the State
+with the centred drag. `file` is a path or an open file such as `sys.stdout`.
+
+```python
+from openmmlbm import LBMTemperatureReporter
+reporter = LBMTemperatureReporter('temperature.txt', 1000, force)
+# simulation.reporters.append(reporter)
+```
+
 ### `setFriction(friction)`, `getFriction()`
 
 Friction coefficient gamma of the coupling, in 1/ps. The default is 1/ps. It must not be negative.
@@ -351,8 +389,8 @@ It updates:
 - the frequency of the removal of the fluid momentum;
 - the frequency and the limit of the Mach number check.
 
-The grid size, the fluid density and viscosity, the solid nodes and the set of coupled particles
-cannot be changed this way: the method raises an error if they differ from those of the Context. The
+The grid size, the fluid density and viscosity, the solid nodes, the set of coupled particles and the
+drag scheme cannot be changed this way: the method raises an error if they differ from those of the Context. The
 initial velocity and the random seed are used only when the Context is created. To change any of
 these, create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()` if
 the grid is the same. `Context.reinitialize()` also restarts the fluid from its initial state.

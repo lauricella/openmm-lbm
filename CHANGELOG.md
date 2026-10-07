@@ -3,6 +3,28 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Added
+- Centred drag, `setDragScheme(LBMForce.Centered)`, beside the explicit drag of version 0.1.0
+  (`LBMForce.Explicit`, the default, unchanged bit for bit). The drag compares the velocities of particle
+  and fluid at the time of the force, the fluid velocity being the one that the collision puts in the
+  equilibrium; the implicit system is solved in closed form for all the particles of a node, and conserves
+  the total momentum exactly. It is stable for any friction, and the velocities of the State (half steps)
+  have the right temperature of the drag (`docs/theory.md`, section 2). It requires `LBMForce` to be the
+  last force of the System and no virtual sites. Reference platform only in this version.
+- `openmmlbm.LBMTemperatureReporter`: temperature of the coupled particles with the velocity that has the
+  right temperature for the drag scheme.
+- Serialization version 4 (the drag scheme; versions 1 to 3 are read with the explicit drag) and version 2
+  of the checkpoint header of `LBMForce::createCheckpoint()` (the drag scheme; version 1 is read with the
+  explicit drag, and a checkpoint is refused by a Context with the other drag scheme).
+
+### Changed
+- README: the fluid is described as thread-safe; full name of Luis Enrique Coronas-Serna in README,
+  `CITATION.cff` and the examples.
+- `docs/theory.md` and `CONTRIBUTING.md` cite Kassen, Shankar and Fogelson (2022) for the sorting of keys
+  and the segmented reduction of the per-cell reaction.
+
 ## 0.1.0 (2026-10-07)
 
 First release. A native OpenMM plugin (OpenMM 8.3 to 8.6) with a D3Q19 regularized lattice Boltzmann fluid

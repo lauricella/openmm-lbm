@@ -58,6 +58,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
+    if (lattice.dragScheme != LBMForce::Explicit)
+        throw OpenMMException("LBMForce: the Centered drag scheme is not yet available on this platform; use the Reference platform");
     this->lattice = lattice;
 
     // The fluid is stored in the mixed type: double unless the platform runs in single precision.

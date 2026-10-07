@@ -156,6 +156,10 @@ public:
         EulerMaruyama = 0,
         NVE = 1
     };
+    enum DragScheme {
+        Explicit = 0,
+        Centered = 1
+    };
     LBMForce();
 
     %apply int& OUTPUT {int& nx};
@@ -177,6 +181,8 @@ public:
     void setTemperature(double temperature);
     CouplingScheme getCouplingScheme() const;
     void setCouplingScheme(CouplingScheme scheme);
+    DragScheme getDragScheme() const;
+    void setDragScheme(DragScheme scheme);
     int getRandomNumberSeed() const;
     void setRandomNumberSeed(int seed);
     OpenMM::Vec3 getBodyAcceleration() const;
@@ -373,5 +379,62 @@ class LBMCheckpointReporter(object):
 
     def report(self, simulation, state):
         saveCheckpoint(self._file, simulation.context, self._force)
+
+
+class LBMTemperatureReporter(object):
+    """A reporter for openmm.app.Simulation that writes the temperature of the particles coupled to an LBMForce,
+    measured with the velocity that has the right temperature for the drag scheme of the force (docs/theory.md,
+    section 2).
+
+    With the Explicit drag it is the full-step velocity v + dt F/(2m), from the velocities and forces of the State:
+    the temperature that StateDataReporter reports for the same particles.  With the Centered drag it is the
+    velocity of the State, half a step after the force, while StateDataReporter reports the full-step temperature,
+    which is lower, by 1/(1 + friction*dt/2) for a particle in a fluid at rest.  The temperature counts three degrees
+    of freedom per coupled particle.  Each line holds the step, the time (ps) and the temperature (K).
+    """
+
+    def __init__(self, file, reportInterval, force):
+        """
+        Parameters
+        ----------
+        file : str or file
+            path of the file to write, or an open file (for example sys.stdout)
+        reportInterval : int
+            steps between reports
+        force : LBMForce
+            the LBMForce of the System of the Simulation
+        """
+        self._reportInterval = reportInterval
+        self._force = force
+        self._openedFile = isinstance(file, str)
+        self._out = open(file, 'w') if self._openedFile else file
+        self._particles = None
+
+    def __del__(self):
+        if self._openedFile:
+            self._out.close()
+
+    def describeNextReport(self, simulation):
+        steps = self._reportInterval - simulation.currentStep%self._reportInterval
+        include = ['velocities'] if self._force.getDragScheme() == LBMForce.Centered else ['velocities', 'forces']
+        return {'steps': steps, 'periodic': None, 'include': include}
+
+    def report(self, simulation, state):
+        import numpy as np
+        if self._particles is None:
+            self._particles = [self._force.getParticle(i) for i in range(self._force.getNumParticles())]
+            self._masses = np.array([simulation.system.getParticleMass(i).value_in_unit(unit.dalton) for i in self._particles])
+            print('#"Step","Time (ps)","Temperature (K)"', file=self._out)
+        velocities = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)[self._particles]
+        if self._force.getDragScheme() != LBMForce.Centered:
+            forces = state.getForces(asNumpy=True).value_in_unit(unit.kilojoule_per_mole/unit.nanometer)[self._particles]
+            dt = simulation.integrator.getStepSize().value_in_unit(unit.picosecond)
+            velocities = velocities + forces*(0.5*dt/self._masses[:, None])
+        energy = 0.5*np.sum(self._masses[:, None]*velocities**2)
+        kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole/unit.kelvin)
+        temperature = 2*energy/(3*len(self._particles)*kB)
+        print('%d %.4f %.3f' % (simulation.currentStep, state.getTime().value_in_unit(unit.picosecond), temperature),
+              file=self._out)
+        self._out.flush()
 %}
 

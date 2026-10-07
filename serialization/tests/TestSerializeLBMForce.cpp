@@ -36,6 +36,7 @@ void testSerialization() {
     force.setMachCheckFrequency(25);
     force.setMachNumberLimit(0.2);
     force.setCouplingScheme(LBMForce::NVE);
+    force.setDragScheme(LBMForce::Centered);
     force.setSolidNodes(vector<int>({0, 7, 42}));
     force.setBodyAcceleration(Vec3(0.1, 0.2, 0.3));
     force.setInitialFluidVelocity(Vec3(-0.1, 0.0, 0.05));
@@ -69,6 +70,7 @@ void testSerialization() {
     ASSERT_EQUAL(force.getMachCheckFrequency(), force2.getMachCheckFrequency());
     ASSERT_EQUAL(force.getMachNumberLimit(), force2.getMachNumberLimit());
     ASSERT_EQUAL(force.getCouplingScheme(), force2.getCouplingScheme());
+    ASSERT_EQUAL(force.getDragScheme(), force2.getDragScheme());
     vector<int> solid1, solid2;
     force.getSolidNodes(solid1);
     force2.getSolidNodes(solid2);
@@ -79,6 +81,21 @@ void testSerialization() {
     for (int i = 0; i < force.getNumParticles(); i++)
         ASSERT_EQUAL(force.getParticle(i), force2.getParticle(i));
     delete copy;
+
+    // A force written before the drag scheme existed (version 3) has the explicit drag.
+
+    string xml = buffer.str();
+    size_t version = xml.find("version=\"4\"");
+    ASSERT(version != string::npos);
+    xml.replace(version, 11, "version=\"3\"");
+    size_t drag = xml.find(" dragScheme=\"1\"");
+    ASSERT(drag != string::npos);
+    xml.erase(drag, 15);
+    stringstream oldBuffer(xml);
+    LBMForce* oldCopy = XmlSerializer::deserialize<LBMForce>(oldBuffer);
+    ASSERT_EQUAL(LBMForce::Explicit, oldCopy->getDragScheme());
+    ASSERT_EQUAL(force.getCouplingScheme(), oldCopy->getCouplingScheme());
+    delete oldCopy;
 }
 
 int main() {

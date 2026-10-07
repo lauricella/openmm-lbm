@@ -41,6 +41,8 @@ public:
     /** Friction (1/ps) and thermal energy kT (kJ/mol) of the coupling.  kT is 0 with the NVE scheme, which has
         no random force. */
     double friction, kT;
+    /** Time discretization of the drag, fixed when the Context is created. */
+    LBMForce::DragScheme dragScheme;
     int randomNumberSeed, momentumRemovalFrequency;
     /** Frequency (steps) of the Mach number check, 0 to disable, and the largest Mach number allowed. */
     int machCheckFrequency;
