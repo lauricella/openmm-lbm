@@ -3,7 +3,11 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.2.0 (2026-10-07)
+
+The centred drag on all platforms, beside the explicit drag of version 0.1.0, which stays the default and is
+unchanged bit for bit; and the fix of the repeated force evaluations on the GPU platforms, the known issue of
+version 0.1.0.
 
 ### Added
 - Centred drag, `setDragScheme(LBMForce.Centered)`, beside the explicit drag of version 0.1.0
