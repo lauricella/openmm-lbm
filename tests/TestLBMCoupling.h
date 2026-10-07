@@ -456,7 +456,10 @@ void testWallMomentumBalance(Platform& platform, LBMForce::DragScheme drag=LBMFo
     Vec3 p1 = momentum(scale);
     ASSERT(wall.dot(wall) > 1.0);
     Vec3 balance = p1 + wall - p0;
-    ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, getCouplingTolerance(platform, 1e-12));
+    // The regularized walls rebuild all populations of the boundary nodes at every step, which adds rounding:
+    // 1e-13..1e-12 against 2e-14 with bounce-back, depending on the drag and on the OpenMM version.
+    double tolerance = (wallScheme == LBMForce::Regularized ? 1e-11 : 1e-12);
+    ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, getCouplingTolerance(platform, tolerance));
     delete system;
 }
 
