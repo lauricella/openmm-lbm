@@ -3,7 +3,11 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.3.0 (2026-10-08)
+
+Thermal fluctuations of the fluid, regularized walls and open faces, on all platforms; VTK output from Python. With
+the fluctuations off, periodic faces and the default bounce-back walls, runs on the Reference platform are
+identical, bit for bit, to those of version 0.2.1 (walls, coupled particles, both drags, EM and NVE).
 
 ### Added
 - Thermal fluctuations of the fluid, `setFluidFluctuations(true)`, off by default, on all platforms: the ghost-mode filtered fluctuating lattice Boltzmann

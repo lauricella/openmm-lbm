@@ -1,15 +1,14 @@
 # openmm-lbm
 OpenMM plugin coupling molecular dynamics to a thread-safe lattice Boltzmann fluid (D3Q19, regularized collision, Guo forcing) for coarse-grained simulations with hydrodynamics. Particles exchange friction and thermal noise with the fluid. Native OpenMM plugin with Reference, CUDA, OpenCL and HIP platforms.
 
-**Version 0.2.1 (2026-10-07).** The fluid, solid walls and the particle-fluid coupling, with the explicit drag or
-the centred drag of version 0.2.0, run on all platforms (Reference, CUDA, OpenCL, HIP); the platforms agree
-with each other, and the explicit drag with the reference CUDA library of the DragOpenMM project (see the
-[user guide](docs/user_guide/README.md#what-works-in-this-version) and `docs/validation.md`).
-
-**Development version** (not yet released, [CHANGELOG](CHANGELOG.md)): thermal fluctuations of the fluid
-(`setFluidFluctuations()`), regularized walls (`setWallScheme()`) and open faces with an imposed velocity or
-density (`setFaceBoundary()`), all on all platforms, and VTK files of the fluid and of the particles for
-ParaView (`openmmlbm.LBMVTKReporter`).
+**Version 0.3.0 (2026-10-08).** The fluid, solid walls (bounce-back or regularized), open faces with an imposed
+velocity or density, thermal fluctuations of the fluid and the particle-fluid coupling, with the explicit or the
+centred drag, run on all platforms (Reference, CUDA, OpenCL, HIP); the platforms agree with each other, and the
+explicit drag with the reference CUDA library of the DragOpenMM project. New in this version: the fluctuating fluid
+(`setFluidFluctuations()`), the regularized walls (`setWallScheme()`), the open faces (`setFaceBoundary()`) and
+VTK files of the fluid and of the particles for ParaView (`openmmlbm.LBMVTKReporter`); see the
+[CHANGELOG](CHANGELOG.md), the [user guide](docs/user_guide/README.md#what-works-in-this-version) and
+`docs/validation.md`.
 
 ## Requirements
 
@@ -39,7 +38,7 @@ CMake builds every GPU platform (`LBM_BUILD_CUDA_LIB`, `LBM_BUILD_OPENCL_LIB`, `
 the OpenMM in `OPENMM_DIR` has (its header and its library) and the system can compile, and the Python wrapper
 (`LBM_BUILD_PYTHON_WRAPPERS`) if SWIG and Python with the OpenMM module, NumPy, setuptools and pip are
 installed. It says why it leaves a part out, and ends with the list of what it builds, for example
-`-- openmm-lbm 0.2.1: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes`. An option set to `ON`
+`-- openmm-lbm 0.3.0: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes`. An option set to `ON`
 for a part that cannot be built stops `cmake` with an error. CMake also prints the version of OpenMM it found
 and stops with an error if it is older than 8.3 (it warns if it is newer than 8.6, the newest tested version).
 All the checks, options and messages are in

@@ -157,7 +157,7 @@ rest placed on the solid node.
   allowed: the boundary nodes on both sides rebuild the populations that would come from it.
 - The boundary nodes are fluid nodes in everything else: they enter the removal of the fluid momentum, and
   the reaction of a coupled particle whose nearest node is a boundary node acts on the fluid.
-- Up to version 0.2.1 there were no regularized walls; a first version of this release used the local
+- Up to version 0.2.1 there were no regularized walls; a first version during the development of 0.3.0 used the local
   regularized boundary condition of Latt [20, 21] (section 5.2 of [20]; "BC3" of Malaspinas [22]), which
   rebuilds all 19 populations of the boundary node with the velocity of the wall imposed on the node. It
   put the wall on the boundary nodes, and next to it the fluctuations were 3 to 9 % below equilibrium
@@ -259,7 +259,7 @@ faces have independent velocities and densities.
   an open face reappears on the opposite one, so keep them away from the open faces.
 - The body acceleration (`setBodyAcceleration()`) acts on the face nodes like on the others, and the velocity
   of a face is the velocity of the fluid (j + F/2)/rho.
-- Up to the first version of this release the faces used the local regularized boundary condition of Latt
+- In a first version during the development of 0.3.0 the faces used the local regularized boundary condition of Latt
   [20] (all 19 populations of the face node rebuilt, with the velocity or the density imposed on the face node
   itself). The scheme above replaced it, with the regularized walls.
 - Validation (`docs/validation.md`): a Couette flow between a face at rest and a moving face is linear to
