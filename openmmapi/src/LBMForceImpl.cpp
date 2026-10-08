@@ -7,6 +7,7 @@
  * SPDX-License-Identifier: MIT                                               *
  * -------------------------------------------------------------------------- */
 
+#include "internal/LBMDecomposition.h"
 #include "internal/LBMForceImpl.h"
 #include "LBMKernels.h"
 #include "openmm/OpenMMException.h"
@@ -34,6 +35,12 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     force.getGridSize(lattice.nx, lattice.ny, lattice.nz);
     if (lattice.nx <= 0 || lattice.ny <= 0 || lattice.nz <= 0)
         throw OpenMMException("LBMForce: the grid size must be set to positive values with setGridSize()");
+
+    // The domains of the lattice, one per MPI rank (1, 1, 1 without MPI).
+
+    int requested[3];
+    force.getDomainDecomposition(requested[0], requested[1], requested[2]);
+    LBMDecomposition::resolve(lattice.nx, lattice.ny, lattice.nz, requested, lattice.procs);
 
     // The lattice spans the periodic box, with cubic cells.
 
@@ -260,6 +267,9 @@ void LBMForceImpl::updateParametersInContext(ContextImpl& context) {
         throw OpenMMException("updateParametersInContext: the solid nodes cannot be changed");
     if (updated.wallScheme != lattice.wallScheme)
         throw OpenMMException("updateParametersInContext: the wall scheme cannot be changed");
+    for (int axis = 0; axis < 3; axis++)
+        if (updated.procs[axis] != lattice.procs[axis])
+            throw OpenMMException("updateParametersInContext: the domain decomposition cannot be changed");
     for (int face = 0; face < 6; face++)
         if (updated.faceBoundary[face] != lattice.faceBoundary[face])
             throw OpenMMException("updateParametersInContext: the boundary types of the faces cannot be changed");

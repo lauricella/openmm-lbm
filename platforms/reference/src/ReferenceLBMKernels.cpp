@@ -37,6 +37,9 @@ static vector<Vec3>& extractForces(ContextImpl& context) {
 }
 
 void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForce& force, const LBMLatticeParameters& lattice) {
+    if (lattice.isDecomposed())
+        throw OpenMMException("LBMForce: the domain decomposition (setDomainDecomposition()) is not available yet on "
+                "the Reference platform");
     this->lattice = lattice;
 
     // The fluid starts at equilibrium, with lattice density 1 and the initial velocity.  The populations are

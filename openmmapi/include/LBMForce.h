@@ -145,6 +145,39 @@ public:
      */
     void setGridSize(int nx, int ny, int nz);
     /**
+     * Get the decomposition of the lattice into domains, one per MPI rank (setDomainDecomposition()).
+     *
+     * @param[out] px    the number of domains along x
+     * @param[out] py    the number of domains along y
+     * @param[out] pz    the number of domains along z
+     */
+    void getDomainDecomposition(int& px, int& py, int& pz) const;
+    /**
+     * Set the decomposition of the lattice into px*py*pz domains, one per MPI rank, for runs with several processes
+     * (docs/theory.md, Domain decomposition).  The default, 1, 1, 1, is one domain: the whole lattice in one process,
+     * without MPI.  A 0 lets MPI choose the number of domains along that axis (MPI_Dims_create).  Every rank runs
+     * the same script with the same System; the particles are replicated on every rank, and each rank advances the
+     * fluid of its domain.  More than one domain needs a plugin built with MPI (CMake option OPENMM_LBM_MPI), and
+     * the product must be the number of MPI ranks.  It is fixed when the Context is created.
+     *
+     * @param px    the number of domains along x
+     * @param py    the number of domains along y
+     * @param pz    the number of domains along z
+     */
+    void setDomainDecomposition(int px, int py, int pz);
+    /**
+     * Whether the plugin was built with MPI, so that setDomainDecomposition() can ask for more than one domain.
+     */
+    static bool isMPIAvailable();
+    /**
+     * The rank of this process in MPI_COMM_WORLD, the number of ranks, and the rank among the processes on the same
+     * node (to choose the GPU); 0, 1 and 0 without MPI.  The first call initializes MPI if the program has not done
+     * it, and MPI is finalized at exit.
+     */
+    static int getMPIRank();
+    static int getMPISize();
+    static int getMPILocalRank();
+    /**
      * Get the mass density of the fluid at rest, measured in Da/nm^3.
      */
     double getFluidDensity() const;
@@ -471,6 +504,7 @@ protected:
     OpenMM::ForceImpl* createImpl() const;
 private:
     int nx, ny, nz, randomNumberSeed, momentumRemovalFrequency, machCheckFrequency;
+    int decomposition[3];
     double density, viscosity, friction, temperature, machNumberLimit;
     CouplingScheme couplingScheme;
     DragScheme dragScheme;

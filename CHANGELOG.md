@@ -5,6 +5,13 @@ versions the API may still change.
 
 ## Unreleased
 
+### Added (in development for 0.4.0)
+- Decomposition of the lattice over MPI ranks, first part: CMake option `OPENMM_LBM_MPI` (off by default; only the
+  MPI C API, in `openmmapi/src/LBMDecomposition.cpp`), `setDomainDecomposition()`/`getDomainDecomposition()`,
+  `isMPIAvailable()`, `getMPIRank()`/`getMPISize()`/`getMPILocalRank()` (`openmmlbm.mpiRank()` and the like in
+  Python), serialization version 8 with the decomposition. The domains are not computed yet: a Context with more
+  than one domain raises an error on every platform. Without MPI, or with one domain, nothing changes.
+
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations
   (along the face, and in the time filter across it) included the reaction of the coupled particles whose nearest

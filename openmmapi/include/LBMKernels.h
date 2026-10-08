@@ -30,6 +30,12 @@ namespace LBMPlugin {
 class LBMLatticeParameters {
 public:
     int nx, ny, nz;
+    /** The domains of the lattice along each axis, one per MPI rank (setDomainDecomposition()), resolved when the
+        Context is created: 1, 1, 1 without decomposition. */
+    int procs[3];
+    bool isDecomposed() const {
+        return procs[0]*procs[1]*procs[2] > 1;
+    }
     /** Lattice spacing (nm) and lattice time step (ps). */
     double dx, dt;
     /** Mass density of the fluid at rest (Da/nm^3): the lattice density 1 corresponds to it. */

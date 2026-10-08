@@ -27,6 +27,7 @@ void testSerialization() {
     force.setForceGroup(3);
     force.setName("fluid");
     force.setGridSize(10, 12, 14);
+    force.setDomainDecomposition(2, 0, 3);
     force.setFluidDensity(500.0);
     force.setKinematicViscosity(2.5);
     force.setFriction(5.0);
@@ -67,6 +68,12 @@ void testSerialization() {
     ASSERT_EQUAL(nx, nx2);
     ASSERT_EQUAL(ny, ny2);
     ASSERT_EQUAL(nz, nz2);
+    int px, py, pz, px2, py2, pz2;
+    force.getDomainDecomposition(px, py, pz);
+    force2.getDomainDecomposition(px2, py2, pz2);
+    ASSERT_EQUAL(px, px2);
+    ASSERT_EQUAL(py, py2);
+    ASSERT_EQUAL(pz, pz2);
     ASSERT_EQUAL(force.getFluidDensity(), force2.getFluidDensity());
     ASSERT_EQUAL(force.getKinematicViscosity(), force2.getKinematicViscosity());
     ASSERT_EQUAL(force.getFriction(), force2.getFriction());
@@ -100,8 +107,20 @@ void testSerialization() {
     // schemes existed (version 5) has bounce-back walls, one written before the fluid fluctuations existed (version
     // 4) has none, and one written before the drag scheme existed (version 3) has the explicit drag.
 
+    // A force written before the domain decomposition existed (version 7) has one domain.
+
     string xml = buffer.str();
-    size_t version = xml.find("version=\"7\"");
+    size_t version = xml.find("version=\"8\"");
+    ASSERT(version != string::npos);
+    xml.replace(version, 11, "version=\"7\"");
+    stringstream buffer7(xml);
+    LBMForce* copy7 = XmlSerializer::deserialize<LBMForce>(buffer7);
+    copy7->getDomainDecomposition(px2, py2, pz2);
+    ASSERT_EQUAL(1, px2);
+    ASSERT_EQUAL(1, py2);
+    ASSERT_EQUAL(1, pz2);
+    delete copy7;
+    version = xml.find("version=\"7\"");
     ASSERT(version != string::npos);
     xml.replace(version, 11, "version=\"6\"");
     stringstream buffer6(xml);

@@ -80,6 +80,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
+    if (lattice.isDecomposed())
+        throw OpenMMException("LBMForce: the domain decomposition (setDomainDecomposition()) is not available yet on "
+                "the CUDA, OpenCL and HIP platforms");
     this->lattice = lattice;
     forceGroup = force.getForceGroup();
     bool centered = (lattice.dragScheme == LBMForce::Centered);

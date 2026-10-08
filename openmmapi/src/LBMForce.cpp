@@ -8,6 +8,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "LBMForce.h"
+#include "internal/LBMDecomposition.h"
 #include "internal/LBMForceImpl.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/internal/AssertionUtilities.h"
@@ -26,6 +27,8 @@ LBMForce::LBMForce() : nx(0), ny(0), nz(0), randomNumberSeed(0), momentumRemoval
         faceVelocity[face] = Vec3();
         faceDensity[face] = 0.0;
     }
+    for (int axis = 0; axis < 3; axis++)
+        decomposition[axis] = 1;
 }
 
 static void checkFace(LBMForce::Face face) {
@@ -105,6 +108,36 @@ void LBMForce::setGridSize(int nx, int ny, int nz) {
     this->nx = nx;
     this->ny = ny;
     this->nz = nz;
+}
+
+void LBMForce::getDomainDecomposition(int& px, int& py, int& pz) const {
+    px = decomposition[0];
+    py = decomposition[1];
+    pz = decomposition[2];
+}
+
+void LBMForce::setDomainDecomposition(int px, int py, int pz) {
+    if (px < 0 || py < 0 || pz < 0)
+        throw OpenMMException("LBMForce: the domain decomposition (setDomainDecomposition()) cannot be negative");
+    decomposition[0] = px;
+    decomposition[1] = py;
+    decomposition[2] = pz;
+}
+
+bool LBMForce::isMPIAvailable() {
+    return LBMDecomposition::isMPIAvailable();
+}
+
+int LBMForce::getMPIRank() {
+    return LBMDecomposition::getWorldRank();
+}
+
+int LBMForce::getMPISize() {
+    return LBMDecomposition::getWorldSize();
+}
+
+int LBMForce::getMPILocalRank() {
+    return LBMDecomposition::getLocalRank();
 }
 
 double LBMForce::getFluidDensity() const {

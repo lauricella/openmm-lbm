@@ -20,7 +20,7 @@ LBMForceProxy::LBMForceProxy() : SerializationProxy("LBMForce") {
 }
 
 void LBMForceProxy::serialize(const void* object, SerializationNode& node) const {
-    node.setIntProperty("version", 7);
+    node.setIntProperty("version", 8);
     const LBMForce& force = *reinterpret_cast<const LBMForce*>(object);
     node.setIntProperty("forceGroup", force.getForceGroup());
     node.setStringProperty("name", force.getName());
@@ -29,6 +29,11 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     node.setIntProperty("nx", nx);
     node.setIntProperty("ny", ny);
     node.setIntProperty("nz", nz);
+    int px, py, pz;
+    force.getDomainDecomposition(px, py, pz);
+    node.setIntProperty("domainsX", px);
+    node.setIntProperty("domainsY", py);
+    node.setIntProperty("domainsZ", pz);
     node.setDoubleProperty("density", force.getFluidDensity());
     node.setDoubleProperty("viscosity", force.getKinematicViscosity());
     node.setDoubleProperty("friction", force.getFriction());
@@ -64,7 +69,7 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
 
 void* LBMForceProxy::deserialize(const SerializationNode& node) const {
     int version = node.getIntProperty("version");
-    if (version < 1 || version > 7)
+    if (version < 1 || version > 8)
         throw OpenMMException("Unsupported version number");
     LBMForce* force = new LBMForce();
     try {
@@ -89,6 +94,10 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
         // Versions 1 to 4 were written before the fluid fluctuations existed, without them.
         if (version >= 5)
             force->setFluidFluctuations(node.getBoolProperty("fluidFluctuations"));
+        // Versions 1 to 7 were written before the domain decomposition existed, with one domain.
+        if (version >= 8)
+            force->setDomainDecomposition(node.getIntProperty("domainsX"), node.getIntProperty("domainsY"),
+                    node.getIntProperty("domainsZ"));
         // Versions 1 to 5 were written before the wall schemes existed, with bounce-back.
         if (version >= 6)
             force->setWallScheme((LBMForce::WallScheme) node.getIntProperty("wallScheme"));

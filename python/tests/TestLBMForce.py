@@ -223,6 +223,31 @@ def test_wall_scheme_and_faces():
     assert np.allclose(ux, 0.5*(np.arange(10)[:, None] + 1)/11, rtol=0, atol=1e-10)
 
 
+def test_domain_decomposition_api():
+    # The decomposition is one domain by default and is kept by the serialization.  In one process (without MPI, or
+    # with MPI and a single rank) the MPI helpers return rank 0 of 1, and more than one domain cannot create a
+    # Context: without MPI the plugin cannot decompose, and with one rank the product does not match.
+    import openmmlbm
+    force = LBMForce()
+    assert force.getDomainDecomposition() == [1, 1, 1]
+    force.setDomainDecomposition(2, 0, 1)
+    assert force.getDomainDecomposition() == [2, 0, 1]
+    copy = LBMForce.cast(mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(force)))
+    assert copy.getDomainDecomposition() == [2, 0, 1]
+    with pytest.raises(Exception):
+        force.setDomainDecomposition(-1, 1, 1)
+    assert (openmmlbm.mpiRank(), openmmlbm.mpiSize(), openmmlbm.mpiLocalRank()) == (0, 1, 0)
+    assert isinstance(LBMForce.isMPIAvailable(), bool)
+    system = mm.System()
+    system.setDefaultPeriodicBoxVectors(mm.Vec3(2, 0, 0), mm.Vec3(0, 2, 0), mm.Vec3(0, 0, 2))
+    system.addParticle(1.0)
+    force.setGridSize(4, 4, 4)
+    force.setDomainDecomposition(2, 1, 1)
+    system.addForce(force)
+    with pytest.raises(Exception, match='MPI'):
+        mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+
+
 def test_input_units_are_checked():
     # A Quantity is converted to the unit of the setter; one whose unit does not convert is an error instead of a
     # wrong number (OpenMM would read 1 g/cm^3 as 1e-21 Da/nm^3).

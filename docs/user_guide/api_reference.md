@@ -69,6 +69,27 @@ nx, ny, nz = force.getGridSize()
 
 See [the lattice](lattice.md#geometry) for the geometry and the numbering of the nodes.
 
+### `setDomainDecomposition(px, py, pz)`, `getDomainDecomposition()`
+
+**In development for version 0.4.0.** The decomposition of the lattice into $`p_x \times p_y \times p_z`$ domains,
+one per MPI rank, for runs of the same script in several processes (`srun` or `mpirun`). The default, 1, 1, 1, is
+one domain: the whole lattice in one process, without MPI. A 0 lets MPI choose the number of domains along that axis.
+More than one domain needs the plugin built with MPI (`-DOPENMM_LBM_MPI=ON`, [installation](installation.md)), and
+the product must be the number of MPI ranks; otherwise creating the Context raises an error. It is fixed when the
+Context is created. In this version the API, the serialization and the MPI build exist, but the domains are not
+computed yet: a Context with more than one domain raises an error on every platform.
+
+`LBMForce.isMPIAvailable()` says whether the plugin was built with MPI. `openmmlbm.mpiRank()`, `openmmlbm.mpiSize()`
+and `openmmlbm.mpiLocalRank()` (also `LBMForce.getMPIRank()`, `getMPISize()`, `getMPILocalRank()`) give the rank of
+the process, the number of ranks and the rank among the processes on the same node, to print from one rank or to
+choose the GPU; without MPI they return 0, 1 and 0. The first call initializes MPI if the program has not done it.
+
+```python
+force.setDomainDecomposition(1, 1, 1)
+px, py, pz = force.getDomainDecomposition()
+print(LBMForce.getMPIRank(), LBMForce.getMPISize())   # 0 1 in one process
+```
+
 ## Fluid properties
 
 ### `setFluidDensity(density)`, `getFluidDensity()`
@@ -625,10 +646,11 @@ that the integrator evaluates; by default the integrator evaluates all groups.
 `openmm.XmlSerializer` saves and loads an `LBMForce`, alone or as part of a System, with all its
 parameters: grid, fluid properties, friction, temperature, random number seed, body acceleration, initial
 velocity, frequencies, Mach limit, coupling and drag schemes, fluid fluctuations, wall scheme, solid nodes, the
-type, velocity and density of each face, coupled particles, force group and name. The fluid of a Context is not
-part of it. The XML has version 7. Older XML still loads: versions 1 to 3 (written by version 0.1.0) with the
-explicit drag, versions 1 to 4 (versions 0.1 and 0.2 of the plugin) without fluid fluctuations, versions 1 to 5
-with the `BounceBack` wall scheme and versions 1 to 6 with periodic faces. Older versions of the plugin cannot
+type, velocity and density of each face, coupled particles, domain decomposition, force group and name. The fluid
+of a Context is not part of it. The XML has version 8. Older XML still loads: versions 1 to 3 (written by version
+0.1.0) with the explicit drag, versions 1 to 4 (versions 0.1 and 0.2 of the plugin) without fluid fluctuations,
+versions 1 to 5 with the `BounceBack` wall scheme, versions 1 to 6 with periodic faces and versions 1 to 7 (version
+0.3 of the plugin) with one domain. Older versions of the plugin cannot
 read newer XML. Import `openmmlbm` before
 deserializing. A force deserialized on its own is returned as a generic `openmm.Force`; obtain the
 `LBMForce` with `LBMForce.cast()` (see the [serialization example](examples.md#serialization)).

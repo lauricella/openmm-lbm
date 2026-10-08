@@ -113,6 +113,9 @@ SET(CMAKE_CXX_STANDARD 17)
 # Debug diagnostics of the fluid (docs/theory.md, section 6): warning when the Mach number exceeds 0.1 and
 # lattice parameters printed at Context creation.
 OPTION(LBM_DEBUG "Print debug diagnostics of the lattice Boltzmann fluid" OFF)
+# Domain decomposition of the lattice over MPI ranks (setDomainDecomposition()).  Off by default: without it the
+# plugin needs no MPI and runs in one process.  Only the MPI C API is used (openmmapi/src/LBMDecomposition.cpp).
+OPTION(OPENMM_LBM_MPI "Build the domain decomposition of the lattice with MPI" OFF)
 IF(LBM_DEBUG)
     ADD_DEFINITIONS(-DLBM_DEBUG)
 ENDIF(LBM_DEBUG)
@@ -181,6 +184,14 @@ SET_TARGET_PROPERTIES(${SHARED_LBM_TARGET}
     PROPERTIES COMPILE_FLAGS "-DLBM_BUILDING_SHARED_LIBRARY ${EXTRA_COMPILE_FLAGS}"
     LINK_FLAGS "${EXTRA_COMPILE_FLAGS}")
 TARGET_LINK_LIBRARIES(${SHARED_LBM_TARGET} ${OPENMM_LIBRARY})
+IF(OPENMM_LBM_MPI)
+    FIND_PACKAGE(MPI REQUIRED COMPONENTS C)
+    TARGET_LINK_LIBRARIES(${SHARED_LBM_TARGET} MPI::MPI_C)
+    TARGET_COMPILE_DEFINITIONS(${SHARED_LBM_TARGET} PRIVATE OPENMM_LBM_MPI)
+    SET(LBM_MPI_BUILT "yes (MPI ${MPI_C_VERSION})")
+ELSE()
+    SET(LBM_MPI_BUILT "no")
+ENDIF()
 INSTALL(TARGETS ${SHARED_LBM_TARGET} DESTINATION lib)
 
 # install headers
@@ -317,4 +328,4 @@ IF(LBM_BUILD_PYTHON_WRAPPERS)
 ELSE()
     SET(LBM_PYTHON_BUILT "no")
 ENDIF()
-MESSAGE(STATUS "openmm-lbm ${OPENMM_LBM_VERSION}: platforms to build: ${LBM_PLATFORMS_BUILT}; Python wrapper: ${LBM_PYTHON_BUILT}")
+MESSAGE(STATUS "openmm-lbm ${OPENMM_LBM_VERSION}: platforms to build: ${LBM_PLATFORMS_BUILT}; Python wrapper: ${LBM_PYTHON_BUILT}; MPI: ${LBM_MPI_BUILT}")

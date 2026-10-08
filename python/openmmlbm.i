@@ -236,6 +236,19 @@ public:
     %clear int& nz;
     void setGridSize(int nx, int ny, int nz);
 
+    %apply int& OUTPUT {int& px};
+    %apply int& OUTPUT {int& py};
+    %apply int& OUTPUT {int& pz};
+    void getDomainDecomposition(int& px, int& py, int& pz) const;
+    %clear int& px;
+    %clear int& py;
+    %clear int& pz;
+    void setDomainDecomposition(int px, int py, int pz);
+    static bool isMPIAvailable();
+    static int getMPIRank();
+    static int getMPISize();
+    static int getMPILocalRank();
+
     double getFluidDensity() const;
     void setFluidDensity(double density);
     double getKinematicViscosity() const;
@@ -363,6 +376,21 @@ import os as _os
 import struct as _struct
 
 _CHECKPOINT_TAG = b'OPENMMLBM-CHECKPOINT-1\n'
+
+
+def mpiRank():
+    """The rank of this process in MPI_COMM_WORLD (0 without MPI): LBMForce.getMPIRank()."""
+    return LBMForce.getMPIRank()
+
+
+def mpiSize():
+    """The number of MPI ranks (1 without MPI): LBMForce.getMPISize()."""
+    return LBMForce.getMPISize()
+
+
+def mpiLocalRank():
+    """The rank among the processes on the same node (0 without MPI), to choose the GPU: LBMForce.getMPILocalRank()."""
+    return LBMForce.getMPILocalRank()
 
 
 def saveCheckpoint(file, context, force):
