@@ -390,7 +390,8 @@ and it ends with the list of what will be built:
 ```
 
 The tests of a platform that is not built are not built, so `ctest` runs fewer tests: 2 (serialization and
-Reference), plus 3 for each GPU platform. Without the Python module, `make PythonInstall` stops with
+Reference), plus 3 for each GPU platform. With `OPENMM_LBM_MPI` there is one more, `TestMPIReferenceLBMForce`, which
+`ctest` runs with `mpiexec -n 2` (the `mpiexec` that CMake found with MPI). Without the Python module, `make PythonInstall` stops with
 `No rule to make target 'PythonInstall'`.
 
 ### Choosing the parts

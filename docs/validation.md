@@ -569,6 +569,11 @@ double precision, and the readers return the strings of the `units` array of the
 
 ## Domain decomposition (`python/tests/mpi_decomposition.py`, MPI)
 
+With `-DOPENMM_LBM_MPI=ON`, `ctest` also runs `TestMPIReferenceLBMForce` (`platforms/reference/tests/mpi/`) with two
+ranks: on the Reference platform, with two domains along x, the fluid nodes of each domain, the state gathered on rank
+0, the fields of each domain with the exchanged halo and four coupled particles (one reflected at the wall) must be
+identical bit for bit to those of one domain. The script below runs the complete comparisons, on every platform.
+
 The script runs each case on every rank twice, with one domain and with the decomposition given on the command line,
 and compares the populations of the fluid nodes that the rank owns (`docs/theory.md`, section 8). Lattice
 $`8 \times 6 \times 6`$, $`\tau = 0.8`$, a body force, an initial velocity and populations perturbed by up to

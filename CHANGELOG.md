@@ -43,6 +43,7 @@ versions the API may still change.
   `getFluidFields()` does and sends them, so that the copies are identical bit for bit. The kernels of every platform
   give the fields and the state of the domain of the rank only (with its halo on request), so a rank holds those of
   the whole lattice only when they are gathered on it.
+- With `OPENMM_LBM_MPI`, the test `TestMPIReferenceLBMForce`, which `ctest` runs under `mpiexec` with two ranks.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations
