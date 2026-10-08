@@ -187,7 +187,7 @@ def test_wall_force():
 
 def test_wall_scheme_and_faces():
     # The wall scheme and the open faces, with units, survive serialization; a Couette flow between a face at rest and
-    # a moving face becomes linear.
+    # a moving face becomes linear between the nodes beyond the faces.
     import numpy as np
     force = LBMForce()
     assert force.getWallScheme() == LBMForce.BounceBack
@@ -216,10 +216,11 @@ def test_wall_scheme_and_faces():
     integrator = mm.VerletIntegrator(0.01)
     context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
     context.setPositions([mm.Vec3(0.1, 0.1, 0.1)])
-    integrator.step(2000)
+    integrator.step(4000)
     density, velocity = force.getFluidFields(context)
     ux = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))[:, 0].reshape(10, 4)
-    assert np.allclose(ux, 0.5*np.arange(10)[:, None]/9, rtol=0, atol=1e-10)
+    # the velocities of the faces hold on the nodes beyond them, z = -1 and z = 10
+    assert np.allclose(ux, 0.5*(np.arange(10)[:, None] + 1)/11, rtol=0, atol=1e-10)
 
 
 def test_open_faces_need_no_momentum_removal():

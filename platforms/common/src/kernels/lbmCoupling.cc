@@ -158,7 +158,7 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
         particleForce[2*NUM_COUPLED+i] = fz;
         sortKeys[i] = ((mm_long) node)*NUM_COUPLED + i;
 #ifdef HAS_SOLID_NODES
-        if (isStep && (rho == 0 || isFluid[node] == 2)) {
+        if (isStep && rho == 0) {
             wallMomentum[i] -= fx;
             wallMomentum[NUM_COUPLED+i] -= fy;
             wallMomentum[2*NUM_COUPLED+i] -= fz;
@@ -302,12 +302,7 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
         }
         mixed rho = 1 + densityDeviation[node];
         mixed ux = 0, uy = 0, uz = 0, sx, sy, sz;
-#ifdef HAS_BOUNDARY_NODES
-        bool boundary = (isFluid[node] > 1);
-#else
-        bool boundary = false;
-#endif
-        if (rho > 0 && !boundary) {
+        if (rho > 0) {
             mixed kx = (momentum[node] + h*(rho*gx))*(1/rho);
             mixed ky = (momentum[NUM_NODES+node] + h*(rho*gy))*(1/rho);
             mixed kz = (momentum[2*NUM_NODES+node] + h*(rho*gz))*(1/rho);
@@ -320,11 +315,6 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
             uz = kz - sz*(h/rho);
         }
         else {
-            if (boundary) {
-                ux = momentum[node]*(1/rho) + h*gx;
-                uy = momentum[NUM_NODES+node]*(1/rho) + h*gy;
-                uz = momentum[2*NUM_NODES+node]*(1/rho) + h*gz;
-            }
             mixed scale = 1/(1 + a);
             sx = ((px - ux*mass)*(-gamma) + rx)*scale;
             sy = ((py - uy*mass)*(-gamma) + ry)*scale;
@@ -343,7 +333,7 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
             cellReaction[NUM_NODES+node] = -sy;
             cellReaction[2*NUM_NODES+node] = -sz;
 #ifdef HAS_SOLID_NODES
-            if (rho == 0 || isFluid[node] == 2) {
+            if (rho == 0) {
                 int i = (int) (sortKeys[k] - ((mm_long) node)*NUM_COUPLED);
                 wallMomentum[i] -= sx;
                 wallMomentum[NUM_COUPLED+i] -= sy;

@@ -56,7 +56,7 @@ need them: the API uses OpenMM units ([lattice](lattice.md#units-on-the-lattice)
 accurate only when it is small: below 0.1; above 0.3 (the default limit) the plugin stops
 ([lattice](lattice.md#mach-number-and-stability)).
 
-**Open face.** A face of the box that is not periodic: the fluid on it has a velocity or a density that you
+**Open face.** A face of the box that is not periodic: the fluid beyond it has a velocity or a density that you
 choose, to build inlets, outlets and moving plates. Set with `setFaceBoundary()`
 ([API](api_reference.md#open-faces)).
 
@@ -66,7 +66,7 @@ choose, to build inlets, outlets and moving plates. Set with `setFaceBoundary()`
 **Precision.** The number format used on a GPU platform: `single`, `mixed` (recommended) or `double`.
 
 **Regularized wall.** The other rule at solid nodes (`setWallScheme(LBMForce.Regularized)`): the wall lies on the
-first fluid node next to the solid nodes, whose populations are rebuilt at every step
+solid nodes, and the fluid nodes next to them rebuild at every step the populations that come from the solid nodes
 ([API](api_reference.md#setwallschemescheme-getwallscheme)).
 
 **Relaxation time (tau).** The parameter of the lattice Boltzmann method that corresponds to the viscosity:

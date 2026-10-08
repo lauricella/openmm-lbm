@@ -634,26 +634,28 @@ integrator.step(20000)
 
 density, velocity = force.getFluidFields(context)
 ux = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))[:, 0].reshape(nz, ny, nx)[:, 0, 0]
-z = np.arange(nz)*dx                          # the faces are on the nodes z = 0 and z = (nz - 1) dx
+z = np.arange(nz)*dx                          # the nodes; the plates are one node beyond the faces, at -dx and nz dx
+linear = U*(z + dx)/((nz + 1)*dx)
 for k in (0, 3, 6, 9):
-    print('z = %.1f nm: u_x = %.4f nm/ps, linear profile %.4f' % (z[k], ux[k], U*z[k]/z[-1]))
-print('largest deviation from the linear profile: %.1e nm/ps' % np.abs(ux - U*z/z[-1]).max())
+    print('z = %.1f nm: u_x = %.4f nm/ps, linear profile %.4f' % (z[k], ux[k], linear[k]))
+print('largest deviation from the linear profile: %.1e nm/ps' % np.abs(ux - linear).max())
 ```
 
 Output:
 
 ```
-z = 0.0 nm: u_x = 0.0000 nm/ps, linear profile 0.0000
-z = 1.5 nm: u_x = 0.1667 nm/ps, linear profile 0.1667
-z = 3.0 nm: u_x = 0.3333 nm/ps, linear profile 0.3333
-z = 4.5 nm: u_x = 0.5000 nm/ps, linear profile 0.5000
-largest deviation from the linear profile: 1.1e-14 nm/ps
+z = 0.0 nm: u_x = 0.0455 nm/ps, linear profile 0.0455
+z = 1.5 nm: u_x = 0.1818 nm/ps, linear profile 0.1818
+z = 3.0 nm: u_x = 0.3182 nm/ps, linear profile 0.3182
+z = 4.5 nm: u_x = 0.4545 nm/ps, linear profile 0.4545
+largest deviation from the linear profile: 1.7e-14 nm/ps
 ```
 
 Notes:
 
-- **Where the plates are.** An open face is on the nodes of the face: z = 0 and z = (nz - 1) dx = 4.5 nm,
-  not at the edge of the box (5 nm). The fluid on those nodes has exactly the velocity of the face.
+- **Where the plates are.** The velocity of an open face holds one node beyond the face: the populations that
+  come from beyond the face are those of fluid moving with the face there. The plates are at z = -dx = -0.5 nm
+  and z = nz dx = 5 nm, and the nodes of the faces, z = 0 and z = 4.5 nm, are ordinary fluid nodes.
 - **Both faces of an axis.** The two faces perpendicular to an axis are both periodic or both open. Here
   both z faces are `Velocity` faces; the bottom one keeps the default velocity, zero.
 - **Momentum removal.** It must be off with open faces: the plugin refuses to create the Context otherwise.
@@ -665,7 +667,8 @@ A fluid flows from high to low pressure. In the lattice Boltzmann model the pres
 c_s^2 = dx^2/(3 dt^2), so two open faces at different densities drive a flow. Here the duct runs along y and
 has square cross-section: no-slip walls perpendicular to x and to z (solid nodes), and the faces y = 0 and
 y = (ny - 1) dx at the densities 1.01 rho0 and rho0. The script compares the velocity in the middle of the duct
-with the analytical solution for an incompressible fluid in a rectangular duct.
+with the analytical solution for an incompressible fluid in a rectangular duct, with the pressure gradient
+measured in the middle.
 
 ```python
 import numpy as np
@@ -712,9 +715,12 @@ uy = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))[:, 1].resh
 print('density on the axis of the duct / rho0:', ' '.join('%.4f' % d for d in density[nz//2, ::3, nx//2]/rho0))
 
 # The incompressible solution in a square duct of width H, centred at (nx dx/2, nz dx/2), with the pressure gradient
-# G = c_s^2 (rho_in - rho_out)/L, c_s^2 = dx^2/(3 dt^2) and L = (ny - 1) dx the distance between the faces.
-H, L, middle = (nx - 1)*dx, (ny - 1)*dx, ny//2
-G = dx**2/(3*dt**2)*0.01*rho0/L
+# G = c_s^2 |drho/dy| in the middle of the duct, c_s^2 = dx^2/(3 dt^2).
+H, middle = (nx - 1)*dx, ny//2
+gradient = (density[nz//2, middle - 2, nx//2] - density[nz//2, middle + 2, nx//2])/(4*dx)
+print('pressure gradient in the middle: that of a length of %.1f nm for the 1 %% difference of the faces'
+      % (0.01*rho0/gradient))
+G = dx**2/(3*dt**2)*gradient
 K = G/(density[nz//2, middle, nx//2]*nu)
 x, z = i[:, middle, :]*dx - nx*dx/2, k[:, middle, :]*dx - nz*dx/2
 inside = (np.abs(x) < H/2) & (np.abs(z) < H/2)     # the nodes inside the walls
@@ -733,24 +739,28 @@ print('largest deviation in the middle cross-section: %.1f %% of the centre velo
 Output:
 
 ```
-density on the axis of the duct / rho0: 1.0100 1.0080 1.0060 1.0040 1.0020 1.0000
-centre of the duct: u_y = 0.1985 nm/ps, incompressible solution 0.1996 nm/ps
+density on the axis of the duct / rho0: 1.0103 1.0081 1.0060 1.0040 1.0019 0.9997
+pressure gradient in the middle: that of a length of 7.3 nm for the 1 % difference of the faces
+centre of the duct: u_y = 0.2032 nm/ps, incompressible solution 0.2044 nm/ps
 largest deviation in the middle cross-section: 1.3 % of the centre velocity
 ```
 
 Notes:
 
-- **The pressure falls linearly** from the inlet to the outlet, as for a viscous flow in a straight duct.
-- **Accuracy.** The deviation of 1.3 % is the error of the bounce-back walls on a duct only 7 nodes wide
-  (it falls as 1/H^2 with the width H in nodes, and it vanishes at tau = 7/8; here tau = 1.1), plus the
-  compressibility of the fluid: the density changes by 1 % along the duct, and so does the velocity, since
-  rho u is the same in every cross-section. Keep the density difference small (a few percent at most).
+- **The pressure falls linearly** in the middle of the duct, as for a viscous flow in a straight duct. The
+  densities of the faces hold one node beyond the faces (y = -dx and y = ny dx), and next to the faces the flow
+  enters and leaves the duct: part of the difference of pressure goes there, and the gradient in the middle is
+  that of a duct somewhat shorter than the 8.5 nm between those points.
+- **Accuracy.** The deviation is the error of the bounce-back walls on a duct only 7 nodes wide (it falls as
+  1/H^2 with the width H in nodes, and it vanishes at tau = 7/8; here tau = 1.1), plus the compressibility of
+  the fluid: the density changes by 1 % along the duct, and so does the velocity, since rho u is the same in
+  every cross-section. Keep the density difference small (a few percent at most).
 - **Walls with Density faces.** With bounce-back walls the lattice keeps a spurious "staggered" motion, an
   oscillation from one node to the next and from one step to the next, which the `Density` faces damp
   ([theory.md](../theory.md#open-faces)). The flow above is steady to rounding.
 - **Other combinations.** A `Velocity` face at the inlet and a `Density` face at the outlet give a flow with
-  a prescribed flow rate; `setWallScheme(LBMForce.Regularized)` puts the walls on the first fluid nodes
-  instead of halfway to the solid nodes.
+  a prescribed flow rate; `setWallScheme(LBMForce.Regularized)` puts the walls on the solid nodes instead of
+  halfway between them and the first fluid nodes.
 - **Body force instead.** The same flow can be driven by `setBodyAcceleration()` in a periodic duct, as in
   the [channel example](#channel-flow-between-two-walls); open faces are needed when the inlet and the outlet
   matter, for example to impose a flow rate or a pressure.

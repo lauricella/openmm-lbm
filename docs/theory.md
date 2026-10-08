@@ -62,7 +62,7 @@ contract multiplications and additions into fused multiply-adds.
 
 `setSolidNodes()` marks lattice nodes as solid walls at run time; an empty list (the default) is a fully
 periodic fluid. `setWallScheme()` chooses the boundary condition of the fluid at the solid nodes: the
-halfway bounce-back (`BounceBack`, the default, described first) or the local regularized wall
+halfway bounce-back (`BounceBack`, the default, described first) or the regularized wall
 (`Regularized`, described below).
 - Solid nodes hold no fluid: their populations start at zero, they have no moments and no collision, and
   they do not enter the removal of the fluid momentum.
@@ -121,146 +121,169 @@ measured with the momentum exchange method of Ladd [9, 10] ([11], section 5.4.3.
 it the total momentum of particles, fluid and walls is conserved, and in a steady channel flow the force
 on the walls equals the body force on the fluid (`docs/validation.md`).
 
-**Regularized walls** (`setWallScheme(Regularized)`). The walls follow the local regularized boundary condition of Latt [20, 21] (section 5.2 of [20];
-"BC3" of Malaspinas [22], chapter 4), applied on the fluid nodes next to the solid nodes, the boundary
-nodes. A boundary node lies on the wall: the velocity of the fluid there is that of the wall, zero, and
-the wall is half a node further into the fluid than with bounce-back (in the channel between the solid
-planes j = 0 and j = ny - 1 the walls are on j = 1 and j = ny - 2).
+**Regularized walls** (`setWallScheme(Regularized)`). The fluid nodes next to the solid nodes, the
+boundary nodes, rebuild the populations that would come from the solid nodes as those of a node of fluid at
+rest placed on the solid node.
 - After the streaming, the populations of a boundary node x that come from a solid node (direction q with
-  x - c_q solid) are unknown. All 19 populations of the node are rebuilt as f^eq(rho, v) + f^neq(Pi), the
-  regularized form of the bulk, with three quantities:
-  - the velocity of the populations v = -g/2, so that the velocity of the fluid (j + F/2)/rho, with the
-    body force F = rho g, is zero. The body force acts on the boundary nodes like on the others, and the
-    collision keeps the velocity of the fluid zero there;
-  - the density rho = sum of the known populations + sum of the populations that x sent into the solid
-    nodes in this streaming (stored in the solid node x - c_q, direction opposite to q). The mass that
-    enters the wall comes back, as with bounce-back, so the mass of the fluid is conserved exactly. This
-    replaces eq. 5.3 of [20] (Zou and He [23]), which does not conserve the mass in unsteady flows: in a
-    decaying flow with walls the mass changed by 2e-5, and with fluid fluctuations it drifts at random;
-  - the stress Pi = sum_q H2(c_q) f^neq_q, with f^neq_q = f_q - f^eq_q(rho, v) for the known populations and
-    the "bounce-back of the non-equilibrium part", f^neq_q = f^neq_opp(q), for the unknown ones; zero if the
-    opposite direction is unknown as well (a node between two walls).
-- Each boundary node reads only its own populations and the solid slots that it wrote itself in the
-  streaming, so the scheme is local and thread-safe: on the CUDA, OpenCL and HIP platforms one thread per
-  boundary node rebuilds it (kernel `applyBoundaries`), with the arithmetic of the Reference platform, and
-  every platform finds the boundary nodes with the same code (`openmmapi/include/internal/LBMBoundaries.h`).
-  A solid layer one node thick is allowed: the boundary nodes on both sides rebuild the populations that
-  would come from it.
-- The removal of the fluid momentum leaves the boundary nodes out (their velocity is that of the wall),
-  and the reaction of a coupled particle whose nearest node is a boundary node goes to the wall. With the
-  centred drag a boundary node is a wall of infinite mass at the velocity of the node.
+  x - c_q solid) are unknown. Each of them is set to the post-collision population that a node at x - c_q
+  with the moments of x, except a velocity of zero, would send along c_q:
+
+    f_q(x) = f_q^eq(rho_b, 0) + (1 - omega) f_q^neq,reg(Pi_neq of x) + S_q(0, rho_b g)/2 + xi_q,
+
+  with Pi_neq the non-equilibrium stress of x in this step, S_q the Guo term of the body force and, with a
+  fluctuating fluid, xi_q the random part of a node of density rho_b, drawn for x on its own (section 7).
+  The known populations of x, and its collision, are those of any fluid node.
+- The density rho_b follows from the mass balance of the rebuilt links: their populations carry, in total,
+  the mass that x sent into the solid nodes in this streaming (stored in the solid node x - c_q, direction
+  opposite to q). The mass of the fluid is therefore conserved exactly, as with bounce-back. The balance is
+  linear in rho_b and is solved for rho_b - 1, so that small deviations keep their precision.
+- With the density of x in place of rho_b (the reconstruction alone) the mass changes in unsteady flows,
+  by 2e-5 in a decaying flow around a block, and with fluid fluctuations it falls steadily: the
+  populations that leave towards the wall carry the mean of the quadratic term rho (4.5 (c.u)^2 - 1.5 u^2)
+  of the velocity fluctuations, about kT/2 per node and step, which the rebuilt populations, at zero
+  velocity, do not return. In a test at kT = 1/3000 the fluid lost 5 % of its mass in 1000 steps and 49 %
+  in 10000 (`docs/validation.md`). The mass balance removes this.
+- The wall lies on the solid nodes: the populations that arrive at x are those of a node at rest on the
+  solid node, while with bounce-back they are the populations of x itself, sent back, and the wall is
+  halfway. In the channel of the solid plane j = 0 of a periodic lattice the walls are on j = 0 and j = ny,
+  a full node further out than with bounce-back on each side. Starting from either of the two parabolas
+  (zero on the solid nodes or halfway), the fluid next to the wall moves to the profile of its scheme in
+  about a thousand steps.
+- Each boundary node reads only its own populations and moments and the solid slots that it wrote itself
+  in the streaming, and writes only its own unknown populations, so the scheme is local and thread-safe: on
+  the CUDA, OpenCL and HIP platforms one thread per boundary node rebuilds it (kernel `applyBoundaries`),
+  after the streaming, with the arithmetic of the Reference platform, and every platform finds the boundary
+  nodes with the same code (`openmmapi/include/internal/LBMBoundaries.h`). A solid layer one node thick is
+  allowed: the boundary nodes on both sides rebuild the populations that would come from it.
+- The boundary nodes are fluid nodes in everything else: they enter the removal of the fluid momentum, and
+  the reaction of a coupled particle whose nearest node is a boundary node acts on the fluid.
+- Up to version 0.2.1 there were no regularized walls; a first version of this release used the local
+  regularized boundary condition of Latt [20, 21] (section 5.2 of [20]; "BC3" of Malaspinas [22]), which
+  rebuilds all 19 populations of the boundary node with the velocity of the wall imposed on the node. It
+  put the wall on the boundary nodes, and next to it the fluctuations were 3 to 9 % below equilibrium
+  (momentum normal to the wall 0.910 on the first node): imposing u = 0 on the node removes its momentum
+  fluctuations in every step without returning them. It was replaced by the scheme above.
 
 **Exact Poiseuille flow with regularized walls.** In the channel above, driven by g, the steady profile of
 the scheme is exactly, in lattice units,
 
-  u(y) = g/(2 nu) (y - 1)(ny - 1 - y) + g (tau - 1)/(tau - 1/2)   for 1 < y < ny - 1,   u = 0 on the walls,
+  u(y) = g/(2 nu) y (ny - y) + 3 g (tau - 1)/(tau - 1/2)
 
-with the walls on the boundary nodes y = 1 and y = ny - 1 (for the single solid plane j = 0 of a periodic
-lattice) and the density uniform. The second term is a slip of the fluid next to the walls that vanishes
-at tau = 1. Both walls are accurate to second order: for a channel of width H the largest error relative
-to the centre-line velocity is |8 tau - 7|/(3 H^2) with bounce-back and 8 |tau - 1|/(3 H^2) with regularized
-walls. Bounce-back is the more accurate below tau = 15/16 (at the tau of water, about 0.6, by 30 %), the
-regularized wall above. The validation tests check the profile to 1e-9.
+at every fluid node, with the walls on the solid nodes y = 0 and y = ny, and the density uniform. The
+second term is a slip that vanishes at tau = 1: there the populations rebuilt from the moments of x are
+exactly those of the node on the wall. Otherwise it comes from the stress of x copied to the node on the wall,
+and shifts the wall by 0.06 nodes at tau = 0.6 and by -0.08 at tau = 1.5 in a channel of 13 nodes. The
+validation tests check the profile to 1e-9.
 
 **Which wall to choose.** Both are second order and conserve mass exactly. Differences:
+- Where the wall is: halfway between the fluid and the solid nodes with bounce-back (exact Poiseuille flow at
+  tau = 7/8), on the solid nodes with regularized walls (exact at tau = 1).
 - With fluid fluctuations bounce-back walls are in exact thermal equilibrium with the fluid: bounce-back
-  permutes the populations and keeps the Gaussian equilibrium state, so the fluctuations of all modes
-  keep their equilibrium variance next to the walls (`docs/validation.md`). The regularized wall rebuilds
-  the stress and drops the ghost modes of its nodes: in a test at tau = 0.8 the fluctuations of the first
-  fluid node next to the wall were 3 to 9 % below equilibrium (density 0.954, momentum normal to the wall
-  0.910, stress down to 0.917, ghosts down to 0.920), the momentum normal to the wall was still 1.4 % low on
-  the second node, and from the third node on all modes were within the statistical error (`docs/validation.md`).
+  permutes the populations and keeps the Gaussian equilibrium state, so the fluctuations of all modes keep
+  their equilibrium variance next to the walls. Next to regularized walls the fluctuations are at
+  equilibrium within the statistics from the second node on; on the boundary node the density and the
+  momentum normal to the wall are at equilibrium, the momentum along the wall is 3 to 4 % low and some
+  stress and ghost modes up to 9 % low (tau = 0.8, `docs/validation.md`).
 - With Density faces (below) bounce-back walls let a spurious staggered mode survive, which the Density
-  faces damp; regularized walls damp it themselves.
-- The regularized wall places the wall on the fluid nodes, which can be convenient to define a geometry;
-  the bounce-back wall is halfway between the fluid and the solid nodes.
+  faces damp.
 
-**Force on the walls with regularized walls.** The walls receive the momentum of the populations that
-stream into the solid nodes, minus the momentum that the rebuild adds to the boundary nodes, plus the
-reactions of the particles at the boundary nodes. With it the momentum balance of the fluid,
-P(t + dt) - P(t) = (M g - F_wall) dt, holds at every step, as with bounce-back. As with bounce-back, on the
+**Force on the walls with regularized walls.** On each link from a boundary node x to a solid node the wall
+receives the momentum of the population that x sent into it and gives that of the population rebuilt in its
+place: -c_q (f_sent + f_q) for the direction q with x - c_q solid, with the full populations f = (f - w) + w.
+The reactions of particles whose nearest node is solid are added as with bounce-back. With it the momentum
+balance of the fluid, P(t + dt) - P(t) = (M g - F_wall) dt, holds at every step, as with bounce-back. On the
 CUDA, OpenCL and HIP platforms each boundary node stores the part of the deviations f - w, the host sums it in
-the order of the boundary nodes, and the part of the weights w, which depends only on the geometry, is
-computed once in double precision.
+the order of the boundary nodes, and the part of the weights w, -2 c_q w_q per link, which depends only on the
+geometry, is computed once in double precision.
 
 ### Open faces
 
 By default the box is periodic. `setFaceBoundary(face, type)` makes a face of
-the box open: `Velocity` (the fluid on the face has the velocity set with `setFaceVelocity()`: an inlet, an
-outlet or a moving wall) or `Density` (the fluid on the face has the density, that is the pressure
+the box open: `Velocity` (the fluid beyond the face has the velocity set with `setFaceVelocity()`: an inlet,
+an outlet or a moving wall) or `Density` (the fluid beyond the face has the density, that is the pressure
 p = c_s^2 rho, set with `setFaceDensity()`). The two faces perpendicular to an axis must be both periodic or
 both open, in any combination of `Velocity` and `Density`, and an open axis needs at least 3 nodes. The six
 faces have independent velocities and densities.
-- The nodes on an open face (i = 0 for `XMin`, i = nx - 1 for `XMax`, and so on) are boundary nodes, on
-  the face: the populations that would come from beyond the face are unknown, and the populations that
-  leave through the face are lost. All 19 populations of a face node are rebuilt as for the regularized
-  walls, f^eq(rho, v) + f^neq(Pi), with v = u - g/2 and Pi from the known non-equilibrium parts and their
-  bounce-back (Latt [20], section 5.2).
-- On a `Velocity` face u is the velocity of the face, and rho follows from eq. 5.3 of [20] generalized to
-  any set of unknown directions: rho = [sum of the known f_q + sum over the unknown q of (f_opp(q) +
-  6 w_q rho c_q.v), or of f^eq_q(rho, v) if opp(q) is unknown too]. It is solved for rho in closed form.
-- On a `Density` face rho is that of the face, the velocity along the face is zero and the velocity across
-  it follows from the same balance (note 5.1 of [20]): rho = rho_0 + 2 rho_out + rho v_n, with rho_0 the sum of
-  the populations along the face, rho_out the sum of those that leave the domain through it and v_n the
-  velocity into the domain.
+- The nodes on an open face (i = 0 for `XMin`, i = nx - 1 for `XMax`, and so on) are boundary nodes: the
+  populations that would come from beyond the face are unknown, and the populations that leave through the
+  face are lost. As for the regularized walls, each unknown population is the one that a node beyond the
+  face, at x - c_q, would send, with the moments of x except the one that the face imposes:
+
+    f_q(x) = f_q^eq(rho_b, u_b) + (1 - omega) f_q^neq,reg(Pi_neq of x) + S_q(u_b, rho_b g)/2 + xi_q,
+
+  with, for a fluctuating fluid, a random part drawn for the node on its own. The known populations, and the
+  collision of the face node, are those of any fluid node.
+- The imposed velocity or density holds on the nodes beyond the face, one node outside the box (as the wall of
+  the regularized walls lies on the solid nodes): a Couette flow between a face at rest and a face moving with
+  U is u(z) = U (z + 1)/(nz + 1), exactly, and a Poiseuille flow between two `Velocity` faces at rest vanishes
+  at z = -1 and z = nz at tau = 1, with the slip of the regularized walls otherwise.
+- On a `Velocity` face u_b is the velocity of the face, and rho_b follows from the mass balance of the rebuilt
+  links: their populations carry the populations that arrived at x moving out of the face, plus the inflow
+  6 w_q rho_b c_q.u_b (Zou and He [23]; eq. 5.3 of Latt [20]); links whose opposite direction is unknown too
+  (edges and corners) do not count. With the density of x instead, a fluctuating fluid between two `Velocity`
+  faces lost its mass as next to the walls (the mean density fell to 0.40 in 10000 steps); with the balance it
+  stays within 2e-4.
+- On a `Density` face rho_b is the density of the face, the velocity along the face is that of x, and the
+  velocity across it is filtered in time (below).
 - **Staggered mode.** For any lattice whose velocities have components -1, 0 and 1, the staggered
   momentum sum_y (-1)^(y+t) j_y is conserved exactly by the bulk (the collision keeps the momentum of each
   node, the streaming moves a population by one node in one step). In a periodic box it stays zero; open
-  faces can excite it. Velocity faces and regularized walls remove it, bounce-back walls keep it, and a
-  `Density` face with the velocity above would send it back unchanged: in a duct between bounce-back walls
-  driven by two Density faces the velocity then kept an oscillation from one node to the next and from one
-  step to the next, with a mass flux that differed by up to 18 % between neighbouring cross sections. It is the lattice Boltzmann form of the pressure oscillations of collocated
-  grids that staggered finite-difference grids avoid ([20], chapter 7). The `Density` faces therefore
-  filter their velocity in time (below): the steady state is unchanged, and the staggered mode is damped to
-  rounding (`docs/validation.md`).
+  faces can excite it, and bounce-back walls keep it. It is the lattice Boltzmann form of the pressure
+  oscillations of collocated grids that staggered finite-difference grids avoid ([20], chapter 7). The
+  `Density` faces damp it (below).
+- **Density faces as inlets.** A `Density` face through which the fluid enters is less robust than a
+  `Velocity` inlet: in a channel between bounce-back walls driven by two `Density` faces (a difference of
+  density of 1 %, inflow velocity about 0.03 in lattice units) the flow is steady for tau >= 0.6 and unstable
+  for tau <= 0.55 (also with a difference of 0.3 %), while a `Velocity` inlet with a `Density` outlet is stable
+  down to tau = 0.52 with an inflow of 0.05. Without the time filter below the `Density` inlet was unstable
+  already at tau = 0.6. Prefer a `Velocity` inlet and a `Density` outlet at small tau.
+- **Entrance and exit regions.** Next to the faces the flow enters and leaves: in a duct driven by two
+  `Density` faces the density on the face nodes overshoots the densities of the faces (1.0104 for 1.01 and
+  0.9996 for 1.0 in a duct of 16 nodes), and the gradient in the middle is that of a length of 14.6 nodes
+  rather than of the 17 between the nodes beyond the faces. In the middle the flow is that of the
+  incompressible duct for that gradient (within 0.9 %).
 - Nodes on several open faces (edges and corners): the first `Velocity` face in the order XMin, XMax, YMin,
   YMax, ZMin, ZMax gives the velocity; if all are `Density` faces, the first gives the density and the
-  velocity is zero. A face node next to a solid node with regularized walls is a wall (velocity zero);
-  with bounce-back walls the bounce-back is applied first and the face then treats the populations it
-  returned as known. Links that cross an open face are never bounced back. Malaspinas [22] treats edges
-  and corners with finite differences instead; the rule here keeps the scheme local.
+  velocity is zero. A face node next to a solid node with regularized walls is a wall node: velocity zero,
+  and rho_b from the mass balance of its solid links. With bounce-back walls the bounce-back returns the
+  populations from the solid nodes, and the face rebuilds those from beyond the face. Links that cross an
+  open face are never bounced back. Malaspinas [22] treats edges and corners with finite differences
+  instead; the rule here keeps the scheme local.
 - With two `Density` faces at the same density and no walls (the other axes periodic) the mean flow across
   the faces has no restoring force: equal pressures, no friction. Any disturbance moves the whole fluid, and
   with fluid fluctuations the mean flow wanders like a free Brownian particle until the Mach number check stops
-  the run (after 87000 steps on 16^3 nodes at kT = 1/3000, `docs/validation.md`). Walls along the flow damp it
-  by viscous friction; a `Velocity` face fixes it.
+  the run (`docs/validation.md`). Walls along the flow damp it by viscous friction; a `Velocity` face fixes it.
 - With open faces the fluid exchanges momentum with the outside, so its momentum cannot be removed:
-  `setFluidMomentumRemovalFrequency(0)` is required. The reaction of a coupled particle whose nearest node
-  is on an open face leaves the fluid through the face. The particles themselves still live in OpenMM's
-  periodic box: a particle that crosses an open face reappears on the opposite one, so keep them away from
-  the open faces.
-- The body acceleration (`setBodyAcceleration()`) acts on the face nodes like on the others, and the
-  velocity imposed on a face is the velocity of the fluid (j + F/2)/rho.
+  `setFluidMomentumRemovalFrequency(0)` is required. The reaction of a coupled particle acts on the face nodes
+  as on any fluid node. The particles themselves still live in OpenMM's periodic box: a particle that crosses
+  an open face reappears on the opposite one, so keep them away from the open faces.
+- The body acceleration (`setBodyAcceleration()`) acts on the face nodes like on the others, and the velocity
+  of a face is the velocity of the fluid (j + F/2)/rho.
+- Up to the first version of this release the faces used the local regularized boundary condition of Latt
+  [20] (all 19 populations of the face node rebuilt, with the velocity or the density imposed on the face node
+  itself). The scheme above replaced it, with the regularized walls.
 - Validation (`docs/validation.md`): a Couette flow between a face at rest and a moving face is linear to
   1e-14; a uniform flow from a Velocity inlet to a Density outlet is steady to rounding; a duct driven by a
-  difference of density of 1 % agrees with the incompressible solution within 0.5 to 1.3 %.
+  difference of density of 1 % agrees in the middle with the incompressible solution within 0.9 %.
 
-**Time filter of the Density faces.** On a node of a `Density` face only the velocity across the face, v_n,
-is free (the density is imposed and the velocity along the face is zero). The balance of the populations
-above gives at step t a value v_ZH(t) (Zou-He, note 5.1 of [20]); the face uses instead
+**Time filter of the Density faces.** On a node of a `Density` face the velocity across the face, v_n, used for
+the rebuilt populations is
 
-    v_n(t) = beta v_ZH(t) + (1 - beta) v_n(t - 1),   beta = 1/2,
+    v_n = (v_ZH + v_x)/2,
 
-where v_n(t - 1) is the velocity across the face of the same node in the previous step. It is read from the
-moments of the node at the start of step t, j_n/rho, which are those of the populations rebuilt at the end of
-step t - 1 with velocity v_n(t - 1) (with a body force the velocity of the populations is shifted by -g/2, as
-everywhere). The filter is thus a first-order recursive low-pass filter (an exponential moving average) on
-v_n, applied node by node, with the transfer function H(z) = beta/(1 - (1 - beta) z^-1):
-- H = 1 at zero frequency: in a steady state v_n = v_ZH, so steady flows (the duct, Poiseuille driven by a
-  difference of density) are exactly those without the filter;
-- H = beta/(2 - beta) = 1/3 at the highest frequency of the lattice, a period of two steps, which is the
-  frequency of the staggered mode: at every return to the face the staggered momentum is reduced to a third
-  instead of being sent back unchanged, so it decays geometrically (to 1e-16 in the tests);
-- the face follows a change of the flow with a mean delay of (1 - beta)/beta = 1 step, negligible against the
-  hydrodynamic times of the fluid (the sound needs about 1.7 n steps to cross n nodes);
-- it is local, needs no extra memory, and a restart from `setFluidState()` or a checkpoint is exact, since
-  v_n(t - 1) is contained in the populations.
-beta = 1/2 and beta = 1/4 were tested and both damp the mode to rounding; the plugin uses 1/2, the faster of
-the two to follow the flow. Two alternatives were
-rejected: the velocity across the face taken from the next node inside (zero gradient, the outflow condition
-of Malaspinas [22]) also removes the mode, but is not local and raised the error of the duct between
-regularized walls to 8 % at tau = 0.6; without any filter the mode stays (`docs/validation.md`). The `Velocity`
-faces need no filter, since they impose v_n.
+the mean of v_ZH, the velocity that gives the node the density of the face from the populations that have
+arrived (the unknown ones replaced by the bounce-back of their opposite directions: rho_face = rho_0 +
+2 rho_out + rho_face v_n, with rho_0 the sum of the populations along the face and rho_out that of those that
+leave through it; Zou and He [23], note 5.1 of Latt [20]), and of v_x, the velocity of the node at the start of
+the step, from its moments. v_x is the outcome of the previous step, so the filter acts as a first-order
+recursive low-pass filter (an exponential moving average with weight 1/2) on the velocity of the face:
+- in a steady state v_ZH = v_x, so steady flows are those without the filter;
+- at the frequency of the staggered mode, a period of two steps, the mode is reduced at every return to the
+  face instead of being sent back unchanged, so it decays (to 1e-16 in the tests);
+- it is local, needs no extra memory, and a restart from `setFluidState()` or a checkpoint is exact, since v_x
+  is contained in the populations.
+Without the filter (v_n = v_x, the velocity of the node) the staggered mode decays slowly, and the `Density`
+inlets above become unstable already at tau = 0.6. The `Velocity` faces need no filter, since they impose v_n.
 
 ## 2. Particle-fluid coupling (implemented on all platforms)
 
@@ -729,7 +752,7 @@ so it is rejected.
   population is the value plus w_q. Saving and restoring them is exact, so a restarted run is identical
   to an uninterrupted one.
 - **Initial state.** A new Context starts from the equilibrium at lattice density 1 and the initial
-  velocity; the nodes of regularized walls start at rest (fluid velocity zero).
+  velocity, at every fluid node.
 
 ## 5. Precision (implemented)
 
@@ -858,6 +881,10 @@ generator. The buffer of the random numbers grows to 64 bytes per node, already 
 OpenMM's checkpoints write the buffer as it is but read it back with the size it has in the Context that loads
 them, so a Context created for a restart must have the full size before the first step (with OpenMM 8.3.1, a
 buffer grown only in the first step made the restart differ from the uninterrupted run; with 8.6.1 it did not).
+The boundary nodes of regularized walls and open faces (section 1) draw fifteen normal numbers more each for the
+random part of their rebuilt populations: on the Reference platform after those of the collision, in the order of
+the boundary nodes; on the other platforms four float4 per boundary node after those of all the nodes, in the same
+buffer (`prepareRandomNumbers(4*(numNodes + numBoundaryNodes))`).
 At zero temperature no numbers are drawn and nothing is added. Cost on an NVIDIA A100 (CUDA, mixed precision,
 fluid with one coupled particle): 60, 169 and 1116 us per step without fluctuations and 77, 240 and 1590 us with
 them on lattices of 32^3, 64^3 and 128^3 nodes, that is 28% to 43% more; most of it is the generation, writing
@@ -931,8 +958,10 @@ with the single temperature of the force. It would differ only in the correlatio
 step from the fluid node to the wall and back, since the ghost modes relax with rate 1 in every collision, and
 it would matter only for walls at a temperature different from that of the fluid, which the force does not
 have. The plugin therefore has no accommodation parameter: its bounce-back walls are those with alpha = 0. The
-regularized walls of section 1 rebuild their nodes without noise, and next to them the fluctuations are below
-equilibrium (section 1, Which wall to choose).
+regularized walls of section 1, and the open faces, rebuild the populations that come from the solid nodes (or
+from beyond the face) with a random part drawn on purpose, so they forget the fluctuations that arrive, as a
+wall with alpha = 1; next to them the fluctuations are at equilibrium from the second node on (section 1, Which
+wall to choose).
 
 **Tests** (`tests/TestLBMFluctuations.h`, all platforms and precisions).
 - A lattice of a single node, which streams every population back to itself: mass and momentum stay those of the

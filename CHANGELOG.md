@@ -32,23 +32,37 @@ versions the API may still change.
   ParaView, in OpenMM units (nm, Da/nm^3, nm/ps), with a `.pvd` file for the series; `--vtk N` in
   `examples/cocomo/diffusion.py`.
 - Regularized walls, `setWallScheme(LBMForce.Regularized)`, on all platforms (the default stays the
-  bounce-back of version 0.2): the local regularized boundary condition of Latt on the fluid nodes next to the
-  solid nodes, which lie on the wall, with a density that conserves the mass exactly. Both walls are second order;
-  bounce-back is exact for Poiseuille flow at tau = 7/8, the regularized wall at tau = 1. Serialization version 6
+  bounce-back of version 0.2). The fluid nodes next to the solid nodes rebuild the populations that come from the
+  solid nodes as those of fluid at rest on the solid node, feq(rho_b, 0) + (1 - omega) fneq(Pi of the node) + the
+  Guo term, plus a random part of their own with a fluctuating fluid, with rho_b from the mass balance of the
+  rebuilt links, so the mass is conserved exactly; the other populations, and the collision of these nodes, are
+  those of any fluid node. The wall lies on the solid nodes (halfway with bounce-back). Both walls are second
+  order; bounce-back is exact for Poiseuille flow at tau = 7/8, the regularized wall at tau = 1, and the
+  bounce-back is about four times more accurate at the tau of water. With fluid fluctuations the fluctuations are
+  at equilibrium from the second node on. A first version with the local regularized boundary condition of Latt
+  was replaced: imposing the velocity of the wall on the boundary node put the fluctuations next to it 3 to 9 %
+  below equilibrium. Without the mass balance a fluctuating fluid lost half of its mass in 10000 steps
+  (`docs/validation.md`). Serialization version 6
   and checkpoint version 4 record the scheme; older files are read with bounce-back. `docs/theory.md`, section 1.
   Checkpoint version 5 also records the types of the faces, and refuses a Context with other faces; older
   checkpoints are read with periodic faces. Checkpoints and `setFluidState()` restart a run exactly with every
   combination of fluid fluctuations, walls and open faces.
 - Open faces, `setFaceBoundary(face, LBMForce.Velocity | LBMForce.Density)` with `setFaceVelocity()` and
   `setFaceDensity()`, six independent faces, on all platforms: inlets, outlets, moving plates and
-  flows driven by a pressure difference, with the local regularized boundary condition of Latt on the nodes of
-  the faces; the Density faces damp the staggered mode that the lattice otherwise keeps. The velocities and
+  flows driven by a pressure difference. As for the regularized walls, the nodes of a face rebuild the populations
+  that come from beyond the face as those of fluid with the moments of the node and the velocity of a Velocity
+  face (rho_b from the mass balance with the inflow, as Zou and He) or the density of a Density face; the
+  velocity or the density of a face holds one node beyond it. The Density faces filter their velocity across the
+  face in time, which damps the staggered mode that the lattice otherwise keeps; a Density face used as an inlet
+  is unstable at tau <= 0.55 with a difference of density of 1 %, so the documentation recommends a Velocity inlet
+  at small tau. The velocities and
   densities can be changed with `updateParametersInContext()`. Serialization version 7. With open faces the
   removal of the fluid momentum must be off. Examples: Couette flow and a duct driven by a pressure difference
   (`docs/user_guide/examples.md`).
 - On the CUDA, OpenCL and HIP platforms the regularized walls and the open faces have the arithmetic of the
   Reference platform: the boundary nodes are found by the same code (`internal/LBMBoundaries.h`) and rebuilt by
-  the kernel `applyBoundaries`, one thread per node. All the tests of the walls and of the faces run on every
+  the kernel `applyBoundaries`, one thread per node, with four float4 of OpenMM's random numbers per boundary node
+  for a fluctuating fluid. All the tests of the walls and of the faces run on every
   platform, and `test_fluid_agrees_with_reference` compares the GPU platforms with the Reference platform also
   with regularized walls and with open faces.
 

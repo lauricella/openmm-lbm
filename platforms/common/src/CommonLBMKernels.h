@@ -104,8 +104,7 @@ private:
     OpenMM::ComputeArray densityDeviation, momentum, piNeq;
     /** Partial sums and maxima of the work groups, and the velocity of the centre of mass of the fluid. */
     OpenMM::ComputeArray partialSums, partialMax, centerVelocity;
-    /** 1 for fluid nodes, 0 for solid nodes, 2 for the nodes of regularized walls and 3 for the nodes of open faces;
-        the list of the solid nodes; the momentum given to each solid node by the deviations f - w in the last step
+    /** 1 for fluid nodes and 0 for solid nodes; the list of the solid nodes; the momentum given to each solid node by the deviations f - w in the last step
         (3 components of numSolidNodes each); with bounce-back walls, the fluid nodes next to the solid nodes and the
         bits 1 << q of their directions q towards solid nodes (LBMBoundaries::findWallLinks()). */
     OpenMM::ComputeArray isFluid, solidNodes, wallExchange, wallNodes, wallLinks;

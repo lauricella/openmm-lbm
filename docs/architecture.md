@@ -83,27 +83,27 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    |---|---|---|---|
    | `reflectParticles` (in `beginStep()`, with coupled particles and solid nodes) | one per atom | positions, velocities, solid mask | velocities of the reflected particles, their momentum given to the wall |
    | `computeFluidMoments` | one per node | populations | rho - 1, j, Pi^neq of the node |
-   | `sumFluidMomentum` (when the removal is due) | work groups of 64 | rho - 1, j (not of the boundary nodes) | one partial sum per group |
+   | `sumFluidMomentum` (when the removal is due) | work groups of 64 | rho - 1, j | one partial sum per group |
    | `computeFluidCenterVelocity` | one work group | partial sums | u_cm |
-   | `removeFluidMomentum` | one per node (the boundary nodes do nothing) | rho - 1, u_cm | j |
-   | `coupleParticles` (explicit drag, with coupled particles) | one per atom | positions, velocities, moments of the nearest node, OpenMM's random numbers | force of the particle, its key node*N_p + i, the random numbers of the step (`noise`) when it draws them, the reaction at a solid node or at a node of a regularized wall (wall momentum) |
+   | `removeFluidMomentum` | one per node | rho - 1, u_cm | j |
+   | `coupleParticles` (explicit drag, with coupled particles) | one per atom | positions, velocities, moments of the nearest node, OpenMM's random numbers | force of the particle, its key node*N_p + i, the random numbers of the step (`noise`) when it draws them, the reaction at a solid node (wall momentum) |
    | `prepareCenteredDrag` (centred drag, with coupled particles) | one per atom | positions, velocities, OpenMM's force buffers (the other forces), OpenMM's random numbers | v~ = v + dt Fc/(2m) and random force of the particle, its key node*N_p + i, `noise` when it draws the random numbers |
    | OpenMM's `ComputeSort` (explicit drag: in a lattice step; centred drag: in every evaluation) | | keys | sorted keys |
    | `sumCellReactions` (explicit drag, in a lattice step) | one per key | sorted keys, forces | the reaction of each node, written by its first key |
-   | `solveCenteredDrag` (centred drag) | one per key | sorted keys, v~, random forces, moments of the node, body acceleration | the forces of the particles of each node, written by its first key; in a lattice step also the reaction -S of the node, and at a solid node or at a node of a regularized wall -S as wall momentum |
-   | `collideAndStream` | one per node (solid nodes do nothing) | moments and reaction of the node (none at the boundary nodes); with a fluctuating fluid, four float4 of OpenMM's random numbers per node, drawn after those of the particles, and the coefficients of the basis | the 19 populations it sends to the neighbours |
+   | `solveCenteredDrag` (centred drag) | one per key | sorted keys, v~, random forces, moments of the node, body acceleration | the forces of the particles of each node, written by its first key; in a lattice step also the reaction -S of the node, and at a solid node -S as wall momentum |
+   | `collideAndStream` | one per node (solid nodes do nothing) | moments and reaction of the node; with a fluctuating fluid, four float4 of OpenMM's random numbers per node, drawn after those of the particles, and the coefficients of the basis | the 19 populations it sends to the neighbours |
    | `clearCellReactions` | one per key | sorted keys | zero reaction at the nodes of the step |
    | `bounceBack` (with solid nodes and the `BounceBack` wall scheme) | one per fluid node next to a solid node | the populations that the node sent into its solid neighbours, except across an open face (`wallNodes`, `wallLinks`) | the same populations, as its own populations in the opposite directions |
    | `computeWallExchange` (with solid nodes and the `BounceBack` wall scheme) | one per solid node | populations that the fluid neighbours sent into the solid node, except across an open face | its momentum exchange |
-   | `applyBoundaries` (with regularized walls or open faces) | one per boundary node | populations of the node and the solid slots it wrote in the streaming, its moments at the start of the step, velocities and densities of the faces, body acceleration | the 19 rebuilt populations of the node and, on regularized walls, its momentum exchange |
+   | `applyBoundaries` (with regularized walls or open faces) | one per boundary node | populations of the node and the solid slots it wrote in the streaming, its moments of the step, velocities and densities of the faces, body acceleration, relaxation rate; with a fluctuating fluid four float4 of OpenMM's random numbers per boundary node, after those of the nodes | its rebuilt unknown populations and, next to solid nodes, its momentum exchange |
    | `computeMaxFluidSpeed` (when the Mach check is due) | work groups of 64 | populations | one maximum per group, reduced on the host |
    | `applyCouplingForces` (with coupled particles, in every force evaluation that includes forces) | one per atom | coupling forces | OpenMM's fixed point force buffer |
 
    The moments are stored component by component, [k numNodes + node], so that consecutive threads read
    consecutive addresses; the Reference platform stores them node by node. With solid nodes, the kernels
    are compiled with `HAS_SOLID_NODES` and read a mask of the fluid nodes; without them they do not read it.
-   With boundary nodes they are also compiled with `HAS_BOUNDARY_NODES`, and the mask is 2 at the nodes of
-   regularized walls and 3 at the nodes of open faces; `OPEN_X`, `OPEN_Y` and `OPEN_Z` mark the axes with
+   With boundary nodes they are also compiled with `HAS_BOUNDARY_NODES` (the boundary nodes are fluid nodes in
+   the mask); `OPEN_X`, `OPEN_Y` and `OPEN_Z` mark the axes with
    open faces, across which the bounce-back returns nothing; with the `BounceBack` wall scheme they are compiled
    with `BOUNCE_BACK_WALLS`.
    `getWallForce()` sums the momentum exchange of the last step on the host, of the solid nodes with

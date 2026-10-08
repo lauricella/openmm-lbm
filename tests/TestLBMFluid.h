@@ -577,13 +577,13 @@ void testWallConservation(Platform& platform) {
 }
 
 /**
- * Poiseuille flow between regularized walls (setWallScheme(Regularized)): the solid plane j = 0 puts the walls on
- * the fluid nodes j = 1 and j = ny - 1, at rest, so the channel has the width H = ny - 2.  The steady profile of the
- * scheme is, in lattice units, exactly
- *   u(y) = g/(2 nu) (y - 1)(ny - 1 - y) + g (tau - 1)/(tau - 1/2)
- * at the nodes between the walls, and zero on the walls: the parabola that vanishes on the walls, displaced by a
- * slip that vanishes at tau = 1 (docs/theory.md, section 1).  The density stays that of the fluid at rest, and in the
- * steady state the walls carry the whole body force.
+ * Poiseuille flow between regularized walls (setWallScheme(Regularized)): the solid plane j = 0, with the periodic
+ * boundary, puts the walls on the solid nodes j = 0 and j = ny, so the channel has the width H = ny.  The steady
+ * profile of the scheme is, in lattice units, exactly
+ *   u(y) = g/(2 nu) y (ny - y) + 3 g (tau - 1)/(tau - 1/2)
+ * at every fluid node: the parabola that vanishes on the solid nodes, displaced by a slip that vanishes at tau = 1
+ * (docs/theory.md, section 1).  The density stays that of the fluid at rest, and in the steady state the walls carry
+ * the whole body force.
  */
 void testRegularizedPoiseuille(Platform& platform, double tau) {
     int nx = 2, ny = 12, nz = 2;
@@ -596,7 +596,7 @@ void testRegularizedPoiseuille(Platform& platform, double tau) {
     VerletIntegrator integrator(fluidDt);
     Context context(*system, integrator, platform);
     context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
-    double nu = (tau-0.5)/3.0, h = ny-2;
+    double nu = (tau-0.5)/3.0, h = ny;
     integrator.step((int) (4*h*h/nu));
     vector<double> density;
     vector<Vec3> velocity;
@@ -616,7 +616,7 @@ void testRegularizedPoiseuille(Platform& platform, double tau) {
                     continue;
                 }
                 ASSERT_EQUAL_TOL(1.0, density[node]/fluidDensity, tol);
-                double exact = (j == 1 || j == ny-1 ? 0.0 : g/(2*nu)*(j-1)*(ny-1-j) + g*(tau-1)/(tau-0.5));
+                double exact = g/(2*nu)*j*(ny-j) + 3*g*(tau-1)/(tau-0.5);
                 ASSERT_EQUAL_VEC(Vec3(exact/umax, 0, 0), u*(1.0/umax), tol);
             }
     Vec3 bodyForce(g*fluidDx/(fluidDt*fluidDt)*mass, 0, 0);
@@ -685,7 +685,8 @@ void testWallBalance(Platform& platform, LBMForce::WallScheme scheme) {
 /**
  * Couette flow between two Velocity faces (setFaceBoundary()): the faces perpendicular to x and y are periodic, the face
  * ZMin is at rest and the face ZMax moves with the velocity U along x.  The steady profile is exactly linear,
- * u_x(z) = U z/(nz - 1), with the walls on the nodes of the faces, and the density stays uniform.
+ * u_x(z) = U (z + 1)/(nz + 1), with the walls on the nodes beyond the faces, z = -1 and z = nz (docs/theory.md,
+ * section 1), and the density stays uniform.
  */
 void testCouette(Platform& platform, double tau) {
     int nx = 2, ny = 2, nz = 10;
@@ -698,7 +699,7 @@ void testCouette(Platform& platform, double tau) {
     VerletIntegrator integrator(fluidDt);
     Context context(*system, integrator, platform);
     context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
-    double nu = (tau-0.5)/3.0, h = nz-1;
+    double nu = (tau-0.5)/3.0, h = nz+1;
     integrator.step((int) (6*h*h/nu));
     vector<double> density;
     vector<Vec3> velocity;
@@ -706,7 +707,7 @@ void testCouette(Platform& platform, double tau) {
     double tol = getFluidTolerance(platform, 1e-9, 5e-5);
     for (int node = 0; node < nx*ny*nz; node++) {
         int k = node/(nx*ny);
-        ASSERT_EQUAL_VEC(Vec3(k/h, 0, 0), velocity[node]*(fluidDt/(fluidDx*U)), tol);
+        ASSERT_EQUAL_VEC(Vec3((k+1)/h, 0, 0), velocity[node]*(fluidDt/(fluidDx*U)), tol);
         ASSERT_EQUAL_TOL(1.0, density[node]/fluidDensity, tol);
     }
     delete system;
@@ -744,11 +745,14 @@ void testUniformFlowThroughFaces(Platform& platform) {
  * Flow in a square duct driven by a difference of density (pressure) between two Density faces: no-slip walls
  * perpendicular to x and z (the solid planes i = 0 and k = 0 of the periodic box, with bounce-back: a duct of width
  * H = n - 1 between the walls at 1/2 and n - 1/2), and the faces YMin and YMax at the densities 1.01 and 1 of the fluid
- * at rest.  The density falls linearly along the duct, and in the middle the velocity is that of the incompressible
- * flow in a rectangular duct, u = sum over odd m of 4 K H^2/(m pi)^3 (-1)^((m-1)/2) (1 - cosh(m pi z/H)/cosh(m pi/2))
- * cos(m pi x/H), with K = c_s^2 (rho_in - rho_out)/(L rho nu) and L = ny - 1 the distance between the faces, within
- * the error of the walls (second order) and the compressibility of the fluid (1 %).  The flow is steady: the
- * staggered mode (-1)^(y+t) j_y, which the bounce-back walls conserve, is damped by the Density faces.
+ * at rest.  In the middle of the duct the density is the mean of the two (the faces are symmetric), and the velocity is
+ * that of the incompressible flow in a rectangular duct, u = sum over odd m of 4 K H^2/(m pi)^3 (-1)^((m-1)/2)
+ * (1 - cosh(m pi z/H)/cosh(m pi/2)) cos(m pi x/H), with K = c_s^2 |drho/dy|/(rho nu) from the gradient of the density
+ * in the middle, within the error of the walls (second order) and the compressibility of the fluid (1 %).  The
+ * gradient is steeper than (rho_in - rho_out)/(ny + 1), the distance between the nodes beyond the faces: part of the
+ * difference of density goes into the regions next to the faces, where the flow enters and leaves (docs/theory.md,
+ * section 1).  The flow is steady: the staggered mode (-1)^(y+t) j_y, which the bounce-back walls conserve, is damped
+ * by the Density faces.
  */
 void testPressureDrivenDuct(Platform& platform) {
     int n = 8, ny = 16;
@@ -779,8 +783,10 @@ void testPressureDrivenDuct(Platform& platform) {
     }
     int middle = ny/2;
     double H = n-1, rho = density[0][n/2 + n*(middle + ny*(n/2))]/fluidDensity;
-    ASSERT_EQUAL_TOL(1.0 + 0.01*(ny-1-middle)/(ny-1), rho, 2e-4);
-    double K = (0.01/3.0)/((ny-1)*rho*nu), umax = 0, error = 0, change = 0;
+    ASSERT_EQUAL_TOL(1.0 + 0.01*(ny-middle)/(ny+1), rho, 2e-4);
+    double gradient = (density[0][n/2 + n*(middle-2 + ny*(n/2))] - density[0][n/2 + n*(middle+2 + ny*(n/2))])/(4*fluidDensity);
+    ASSERT(gradient > 0.01/(ny+1) && gradient < 0.01/(ny-3));
+    double K = (gradient/3.0)/(rho*nu), umax = 0, error = 0, change = 0;
     for (int k = 1; k < n; k++)
         for (int i = 1; i < n; i++) {
             int node = i + n*(middle + ny*k);

@@ -282,16 +282,13 @@ way.
   otherwise the removal cancels the momentum that the force gives to the fluid. With open faces 0 is
   required: the Context is not created otherwise.
 
-With `Regularized` walls the fluid nodes on the walls keep the velocity of the wall: they are left out of
-the removal.
-
 ## Initial state
 
 A new Context starts the fluid at equilibrium:
 
 - the density of every fluid node is the density set by `setFluidDensity()`;
 - the velocity of every fluid node is the velocity set by `setInitialFluidVelocity()` (zero by
-  default), except the fluid nodes on `Regularized` walls, which start at rest;
+  default);
 - solid nodes hold no fluid.
 
 The fluid is not part of the State or of the checkpoints of OpenMM. `Context.reinitialize()` also

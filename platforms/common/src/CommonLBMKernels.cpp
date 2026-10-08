@@ -141,32 +141,21 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     }
 
     // Boundary nodes (docs/theory.md, section 1, and internal/LBMBoundaries.h): with regularized walls the fluid
-    // nodes next to the solid nodes, and the fluid nodes on the open faces.  isFluid is 2 at the nodes of regularized
-    // walls and 3 at the nodes of open faces.  As on the Reference platform the wall nodes start at rest, with the
-    // velocity -g/2 of their populations.  The part w of the populations of a wall node gives the wall the same
-    // momentum in every step: sum of c_q w_q over the known directions minus the sum over the solid ones.
+    // nodes next to the solid nodes, and the fluid nodes on the open faces.  They are fluid nodes like the others,
+    // except that applyBoundaries rebuilds their unknown populations.  The part w of the populations that a wall node
+    // sends into the solid nodes and receives from them gives the walls the same momentum in every step, -2 c_q w_q
+    // for each solid direction q.
 
     LBMBoundaries boundaries;
     boundaries.find(lattice, isFluidHost);
     int numBoundaryNodes = boundaries.nodes.size();
     staticBoundaryMomentum = Vec3();
-    D3Q19::equilibriumDeviation(0.0, -0.5*lattice.bodyAcceleration[0], -0.5*lattice.bodyAcceleration[1],
-            -0.5*lattice.bodyAcceleration[2], dfeq);
     vector<int> kindAndFace(numBoundaryNodes);
     for (int b = 0; b < numBoundaryNodes; b++) {
-        int node = boundaries.nodes[b];
-        isFluidHost[node] = 1 + boundaries.type[node];
         kindAndFace[b] = boundaries.kind[b] + 4*(boundaries.face[b] + 1);
-        if (boundaries.kind[b] != LBMBoundaries::Wall)
-            continue;
-        for (int q = 0; q < D3Q19::numVelocities; q++) {
-            f[q*numNodes+node] = dfeq[q];
-            Vec3 c(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]);
-            if (!(boundaries.unknown[b] & (1<<q)))
-                staticBoundaryMomentum += c*D3Q19::w[q];
-            else if (boundaries.solid[b] & (1<<q))
-                staticBoundaryMomentum -= c*D3Q19::w[q];
-        }
+        for (int q = 1; q < D3Q19::numVelocities; q++)
+            if (boundaries.solid[b] & (1<<q))
+                staticBoundaryMomentum -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*D3Q19::w[q]);
     }
     if (numBoundaryNodes > 0) {
         boundaryNodes.initialize<int>(cc, numBoundaryNodes, "lbmBoundaryNodes");
@@ -248,8 +237,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
 
         // The buffer of the random numbers grows to the numbers of a step now, rather than in the first step.  The
         // checkpoints of OpenMM write the buffer as it is but read it back with the size it has in the Context that
-        // loads them (OpenMM 8.3), so a Context created to load a checkpoint must already have the same size.
-        cc.getIntegrationUtilities().prepareRandomNumbers(4*numNodes);
+        // loads them (OpenMM 8.3), so a Context created to load a checkpoint must already have the same size.  The
+        // boundary nodes draw four float4 more each, after those of all the nodes.
+        cc.getIntegrationUtilities().prepareRandomNumbers(4*(numNodes+numBoundaryNodes));
     }
 
     // Compile the kernels.
@@ -344,6 +334,14 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         applyBoundariesKernel->addArg(boundaryExchange);
         for (int i = 0; i < 3; i++)
             applyBoundariesKernel->addArg();    // the body acceleration, set by setFluidParameters()
+        applyBoundariesKernel->addArg(piNeq);
+        applyBoundariesKernel->addArg();        // omega, set by setFluidParameters()
+        if (lattice.fluidFluctuations) {
+            applyBoundariesKernel->addArg(cc.getIntegrationUtilities().getRandom());
+            applyBoundariesKernel->addArg(fluctuationBasis);
+            applyBoundariesKernel->addArg();    // mu = kT/cs^2, set by setFluidParameters()
+            applyBoundariesKernel->addArg(0);   // index of the random numbers, set in every step
+        }
     }
     maxSpeedKernel = program->createKernel("computeMaxFluidSpeed");
     maxSpeedKernel->addArg(populations);
@@ -465,11 +463,12 @@ void CommonCalcLBMForceKernel::setFluidParameters() {
             faces[4*face+3] = lattice.faceDensity[face]-1.0;
         }
         faceParameters.upload(faces, true);
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
+            int index = (i == 0 ? 13 : 8+i);  // omega, then the body acceleration
             if (useDouble)
-                applyBoundariesKernel->setArg(9+i, values[1+i]);
+                applyBoundariesKernel->setArg(index, values[i]);
             else
-                applyBoundariesKernel->setArg(9+i, (float) values[1+i]);
+                applyBoundariesKernel->setArg(index, (float) values[i]);
         }
     }
     if (lattice.fluidFluctuations) {
@@ -478,6 +477,12 @@ void CommonCalcLBMForceKernel::setFluidParameters() {
             collideKernel->setArg(12, mu);
         else
             collideKernel->setArg(12, (float) mu);
+        if (applyBoundariesKernel) {
+            if (useDouble)
+                applyBoundariesKernel->setArg(16, mu);
+            else
+                applyBoundariesKernel->setArg(16, (float) mu);
+        }
     }
     if (!lattice.particles.empty()) {
         coupleKernel->setArg(13, 0);       // index of the random numbers, set when they are drawn
@@ -566,8 +571,13 @@ void CommonCalcLBMForceKernel::advanceFluid() {
         computeCouplingForces(true);
     // The numbers of the fluid are drawn after those of the particles, which the force evaluations between steps
     // may already have drawn: the sequence is the same in both cases.
-    if (lattice.fluidFluctuations && lattice.fluidKT > 0)
-        collideKernel->setArg(13, cc.getIntegrationUtilities().prepareRandomNumbers(4*numNodes));
+    if (lattice.fluidFluctuations && lattice.fluidKT > 0) {
+        int numBoundaryNodes = (boundaryNodes.isInitialized() ? boundaryNodes.getSize() : 0);
+        int randomIndex = cc.getIntegrationUtilities().prepareRandomNumbers(4*(numNodes+numBoundaryNodes));
+        collideKernel->setArg(13, randomIndex);
+        if (applyBoundariesKernel)
+            applyBoundariesKernel->setArg(17, randomIndex);
+    }
     collideKernel->execute(numNodes);
     if (numCoupled > 0)
         clearReactionsKernel->execute(numCoupled);

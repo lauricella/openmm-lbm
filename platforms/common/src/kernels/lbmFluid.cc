@@ -23,9 +23,9 @@
  * momentum), its momentum and stress are 0, and it neither collides nor enters the Mach number.
  *
  * With boundary nodes (regularized walls or open faces, internal/LBMBoundaries.h), HAS_BOUNDARY_NODES and
- * NUM_BOUNDARY_NODES are defined, and isFluid[node] is 2 at the nodes of regularized walls and 3 at the nodes of
- * open faces.  Their velocity is imposed: they are left out of the removal of the momentum, and the reaction of the
- * particles does not act on them.  OPEN_X, OPEN_Y and OPEN_Z are defined for the axes with open faces.
+ * NUM_BOUNDARY_NODES are defined; the boundary nodes are fluid nodes like the others, except that applyBoundaries
+ * rebuilds their unknown populations after the streaming.  OPEN_X, OPEN_Y and OPEN_Z are defined for the axes with
+ * open faces.
  */
 
 #define DECLARE_D3Q19_VELOCITIES \
@@ -101,12 +101,6 @@ KERNEL void sumFluidMomentum(GLOBAL const mixed* RESTRICT densityDeviation, GLOB
     LOCAL mixed sums[4*LBM_BLOCK_SIZE];
     mixed dr = 0, px = 0, py = 0, pz = 0;
     for (int node = GLOBAL_ID; node < NUM_NODES; node += GLOBAL_SIZE) {
-#ifdef HAS_BOUNDARY_NODES
-        if (isFluid[node] > 1) {
-            dr -= 1;        // a boundary node counts as a node without fluid
-            continue;
-        }
-#endif
         dr += densityDeviation[node];
         px += momentum[node];
         py += momentum[NUM_NODES+node];
@@ -162,10 +156,6 @@ KERNEL void removeFluidMomentum(GLOBAL const mixed* RESTRICT densityDeviation, G
         GLOBAL const mixed* RESTRICT centerVelocity, GLOBAL const int* RESTRICT isFluid) {
     mixed ux = centerVelocity[0], uy = centerVelocity[1], uz = centerVelocity[2];
     for (int node = GLOBAL_ID; node < NUM_NODES; node += GLOBAL_SIZE) {
-#ifdef HAS_BOUNDARY_NODES
-        if (isFluid[node] > 1)
-            continue;
-#endif
         mixed rho = 1 + densityDeviation[node];
         momentum[node] -= rho*ux;
         momentum[NUM_NODES+node] -= rho*uy;
@@ -176,8 +166,8 @@ KERNEL void removeFluidMomentum(GLOBAL const mixed* RESTRICT densityDeviation, G
 /**
  * Regularized collision with Guo forcing and push streaming,
  *   f_q(x + c_q) = feq_q(rho, u) + (1 - omega) fneq_q(Pi_neq) + S_q(u, F)/2,  u = (j + F/2)/rho,
- * with F = rho*g plus, with coupled particles (HAS_COUPLED_PARTICLES), the reaction of the particles of the node
- * (except on the boundary nodes, whose velocity is imposed), stored as the deviation f_q - w_q.  A fluctuating fluid (FLUID_FLUCTUATIONS) adds a random part that conserves
+ * with F = rho*g plus, with coupled particles (HAS_COUPLED_PARTICLES), the reaction of the particles of the node,
+ * stored as the deviation f_q - w_q.  A fluctuating fluid (FLUID_FLUCTUATIONS) adds a random part that conserves
  * the mass and momentum of the node.  Each population is computed from the moments of its own node only, so the
  * populations can be overwritten in place: every (q, target node) is written by exactly one thread.
  */
@@ -199,14 +189,9 @@ KERNEL void collideAndStream(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRIC
         mixed rho = 1 + dr;
         mixed fx = rho*gx, fy = rho*gy, fz = rho*gz;
 #ifdef HAS_COUPLED_PARTICLES
-#ifdef HAS_BOUNDARY_NODES
-        if (isFluid[node] == 1)
-#endif
-        {
-            fx += cellReaction[node];
-            fy += cellReaction[NUM_NODES+node];
-            fz += cellReaction[2*NUM_NODES+node];
-        }
+        fx += cellReaction[node];
+        fy += cellReaction[NUM_NODES+node];
+        fz += cellReaction[2*NUM_NODES+node];
 #endif
         mixed ux = (momentum[node] + 0.5f*fx)/rho;
         mixed uy = (momentum[NUM_NODES+node] + 0.5f*fy)/rho;
@@ -364,143 +349,145 @@ KERNEL void computeWallExchange(GLOBAL const mixed* RESTRICT f, GLOBAL const int
 
 #ifdef HAS_BOUNDARY_NODES
 /**
- * Local regularized boundary condition (Latt 2007, section 5.2; docs/theory.md, section 1), after the streaming and
- * the bounce-back, one thread per boundary node, with the arithmetic of applyBoundaries() of the Reference platform.
- * At a boundary node x the populations of the directions q whose source x - c_q is solid (bits solid) or lies
- * beyond an open face are unknown (bits unknown).  The 19 populations are rebuilt as feq(rho, v) + fneq(Pi), with
- * v = u - g/2 so that the velocity of the fluid (j + F/2)/rho is the velocity u imposed on the node:
- *  - on a wall (kind 0) u = 0, on a Velocity face (kind 1) u is the velocity of the face, and rho follows from the
- *    populations that arrive: the known ones, those that x sent into the solid nodes in this streaming (in the
- *    solid node x - c_q, direction opposite to q), and for an unknown direction q beyond a face f_qbar + 6 w_q rho
- *    c_q.v, or feq_q(rho, v) if qbar is unknown as well: the generalization of eq. 5.3 of Latt;
- *  - on a Density face (kind 2) rho is that of the face, the velocity along the face is zero and the velocity
- *    across it follows from the same balance, averaged with that of the node at the start of the step, which damps
- *    the staggered mode;
- *  - on the nodes shared by several Density faces (kind 3) rho is that of the first face and u = 0;
- *  - Pi = sum_q H2(c_q) fneq_q, with fneq_q = f_q - feq_q(rho, v) for the known populations and the bounce-back of
- *    the non-equilibrium part, fneq_q = fneq_qbar, for the unknown ones (zero if qbar is unknown as well).
- * kindAndFace = kind + 4*(face + 1); faceParameters holds the velocity and rho - 1 of each face (4 per face).  A
- * thread reads its own populations and the solid slots that its node wrote in the streaming, and writes its own
- * populations, so no two threads touch the same value.  On walls it writes the momentum given to the wall by the
- * deviations f - w (the populations that streamed into the solid nodes, minus the momentum that the rebuild adds)
- * to boundaryExchange[k*NUM_BOUNDARY_NODES + b]; the host adds the part of the weights w, computed once.
+ * Regularized boundaries (docs/theory.md, section 1), after the streaming and the bounce-back, one thread per
+ * boundary node, with the arithmetic of applyBoundaries() of the Reference platform.  At a boundary node x the
+ * populations of the directions q whose source x - c_q is solid (bits solid) or lies beyond an open face are unknown
+ * (bits unknown).  Each of them is rebuilt as the population that a node at x - c_q would send, a node with the
+ * moments of x except the imposed one:
+ *   feq_q(rho_b, u_b) + (1 - omega) fneq_q(Pi_neq of x) + S_q(u_b, rho_b g)/2,
+ * plus, with a fluctuating fluid, a random part of its own, from the four float4 of OpenMM's random numbers of the
+ * node after those of all the nodes.  The known populations of x are not changed.  kindAndFace = kind + 4*(face + 1);
+ * faceParameters holds the velocity and rho - 1 of each face (4 per face).
+ *  - Walls (kind 0, next to solid nodes) and Velocity faces (kind 1): u_b = 0 or the velocity of the face; rho_b
+ *    from the mass balance of the rebuilt links: the mass that x sent into the solid nodes in this streaming (in the
+ *    solid node x - c_q, direction opposite to q) and, across a face, the population that arrived at x moving out of
+ *    the face plus the inflow 6 w_q rho_b c_q.u_b; links whose opposite is unknown too do not count.
+ *  - Density faces (kind 2): rho_b of the face; the velocity along the face is that of x, and the velocity across it
+ *    the mean of the velocity that gives x the density of the face, from the populations that have arrived (the
+ *    unknown ones replaced by the bounce-back of their opposites), and the velocity of x at the start of the step.
+ *  - Nodes shared by several Density faces (kind 3): rho_b of the first face and u_b = 0.
+ * On walls the node writes the momentum given to the solid nodes by the deviations f - w (the populations that it
+ * sent into them minus those that come back) to boundaryExchange[k*NUM_BOUNDARY_NODES + b]; the host adds the part of
+ * the weights w, computed once.  A thread reads its own populations and moments and the solid slots that its node
+ * wrote in the streaming, and writes its own populations, so no two threads touch the same value.
  */
 KERNEL void applyBoundaries(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT boundaryNodes,
         GLOBAL const int* RESTRICT boundaryUnknown, GLOBAL const int* RESTRICT boundarySolid,
         GLOBAL const int* RESTRICT kindAndFace, GLOBAL const mixed* RESTRICT densityDeviation,
         GLOBAL const mixed* RESTRICT momentum, GLOBAL const mixed* RESTRICT faceParameters,
-        GLOBAL mixed* RESTRICT boundaryExchange, mixed gx, mixed gy, mixed gz) {
+        GLOBAL mixed* RESTRICT boundaryExchange, mixed gx, mixed gy, mixed gz, GLOBAL const mixed* RESTRICT piNeq,
+        mixed omega
+#ifdef FLUID_FLUCTUATIONS
+        , GLOBAL const float4* RESTRICT random, GLOBAL const mixed* RESTRICT fluctuationBasis, mixed mu, int randomIndex
+#endif
+        ) {
     DECLARE_D3Q19_VELOCITIES
     for (int b = GLOBAL_ID; b < NUM_BOUNDARY_NODES; b += GLOBAL_SIZE) {
         int node = boundaryNodes[b], unknown = boundaryUnknown[b], solid = boundarySolid[b];
         int kind = kindAndFace[b]%4, face = kindAndFace[b]/4 - 1;
         int x = node%NX, y = (node/NX)%NY, z = node/(NX*NY);
-
-        // The populations that are available: the known ones and, for the solid directions, the reflected ones.
-
-        mixed a[19];
-        int available = 0;
-        mixed sum = 0, kx = 0, ky = 0, kz = 0, ix = 0, iy = 0, iz = 0;
-        for (int q = 0; q < 19; q++) {
-            a[q] = 0;
-            if (!(unknown & (1<<q))) {
-                a[q] = f[q*NUM_NODES+node];
-                kx += cx[q]*a[q];
-                ky += cy[q]*a[q];
-                kz += cz[q]*a[q];
-                available |= 1<<q;
-                sum += a[q];
-            }
-            else if (solid & (1<<q)) {
-                int source = (x-cx[q]+NX)%NX + NX*((y-cy[q]+NY)%NY + NY*((z-cz[q]+NZ)%NZ));
-                int opposite = (q%2 == 1 ? q+1 : q-1);
-                a[q] = f[opposite*NUM_NODES+source];
-                ix -= cx[q]*a[q];
-                iy -= cy[q]*a[q];
-                iz -= cz[q]*a[q];
-                available |= 1<<q;
-                sum += a[q];
-            }
+        mixed dr = densityDeviation[node];
+        mixed rho = 1 + dr;
+        mixed u[3] = {(momentum[node] + 0.5f*(rho*gx))/rho, (momentum[NUM_NODES+node] + 0.5f*(rho*gy))/rho,
+                      (momentum[2*NUM_NODES+node] + 0.5f*(rho*gz))/rho};
+        if (kind == 0 || kind == 3)
+            u[0] = u[1] = u[2] = 0;
+        if (kind == 1)
+            for (int a = 0; a < 3; a++)
+                u[a] = faceParameters[4*face+a];
+        if (kind == 2 || kind == 3) {
+            dr = faceParameters[4*face+3];
+            rho = 1 + dr;
         }
-
-        // Density and velocity of the populations.  The populations are deviations f - w, and w_q = w_qbar.
-
-        mixed v[3] = {-0.5f*gx, -0.5f*gy, -0.5f*gz};
-        mixed dr;
         if (kind == 2) {
             int axis = face/2;
-            mixed inward = (face%2 == 0 ? 1 : -1);
-            for (int q = 1; q < 19; q++)
-                if (!(available & (1<<q)))
-                    sum += a[q%2 == 1 ? q+1 : q-1];
-            dr = faceParameters[4*face+3];
-            v[axis] = 0.5f*(inward*(dr-sum)/(1+dr) + momentum[axis*NUM_NODES+node]/(1+densityDeviation[node]));
+            mixed inward = (face%2 == 0 ? 1 : -1), sum = 0;
+            for (int q = 0; q < 19; q++)
+                sum += f[(unknown & (1<<q) ? (q == 0 ? 0 : (q%2 == 1 ? q+1 : q-1)) : q)*NUM_NODES+node];
+            u[axis] = 0.5f*(inward*(dr-sum)/rho + u[axis]);
         }
-        else {
-            if (kind == 1)
-                for (int k = 0; k < 3; k++)
-                    v[k] += faceParameters[4*face+k];
-            if (kind == 3)
-                dr = faceParameters[4*face+3];
-            else {
-                mixed numerator = sum, denominator = 1, vv = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
-                for (int q = 1; q < 19; q++) {
-                    if (available & (1<<q))
-                        continue;
-                    int opposite = (q%2 == 1 ? q+1 : q-1);
-                    mixed w = latticeWeight(q);
-                    mixed cv = cx[q]*v[0] + cy[q]*v[1] + cz[q]*v[2];
-                    if (available & (1<<opposite)) {
-                        numerator += a[opposite] + 6*w*cv;
-                        denominator -= 6*w*cv;
-                    }
-                    else {
-                        mixed e = w*(3*cv + 4.5f*cv*cv - 1.5f*vv);
-                        numerator += e;
-                        denominator -= w + e;
-                    }
-                }
-                dr = numerator/denominator;
-            }
-        }
-
-        // Stress from the known non-equilibrium parts and their bounce-back, then the regularized populations.
-
-        mixed rho = 1 + dr;
-        mixed vv = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
-        mixed dfeq[19], fneq[19];
-        for (int q = 0; q < 19; q++) {
-            mixed cv = cx[q]*v[0] + cy[q]*v[1] + cz[q]*v[2];
-            dfeq[q] = latticeWeight(q)*(dr + rho*(3.0f*cv + 4.5f*cv*cv - 1.5f*vv));
-            fneq[q] = (unknown & (1<<q) ? 0 : a[q] - dfeq[q]);
-        }
-        for (int q = 1; q < 19; q++) {
-            int opposite = (q%2 == 1 ? q+1 : q-1);
-            if ((unknown & (1<<q)) && !(unknown & (1<<opposite)))
-                fneq[q] = fneq[opposite];
-        }
-        mixed pxx = 0, pyy = 0, pzz = 0, pxy = 0, pxz = 0, pyz = 0;
-        for (int q = 0; q < 19; q++) {
-            pxx += ((mixed) (cx[q]*cx[q]) - CS2)*fneq[q];
-            pyy += ((mixed) (cy[q]*cy[q]) - CS2)*fneq[q];
-            pzz += ((mixed) (cz[q]*cz[q]) - CS2)*fneq[q];
-            pxy += (cx[q]*cy[q])*fneq[q];
-            pxz += (cx[q]*cz[q])*fneq[q];
-            pyz += (cy[q]*cz[q])*fneq[q];
-        }
-        mixed rx = 0, ry = 0, rz = 0;
+        mixed pxx = piNeq[node], pyy = piNeq[NUM_NODES+node], pzz = piNeq[2*NUM_NODES+node];
+        mixed pxy = piNeq[3*NUM_NODES+node], pxz = piNeq[4*NUM_NODES+node], pyz = piNeq[5*NUM_NODES+node];
+        mixed rest[19];
         for (int q = 0; q < 19; q++) {
             mixed w = latticeWeight(q);
             mixed hxx = (mixed) (cx[q]*cx[q]) - CS2, hyy = (mixed) (cy[q]*cy[q]) - CS2, hzz = (mixed) (cz[q]*cz[q]) - CS2;
-            mixed value = dfeq[q] + 4.5f*w*(hxx*pxx + hyy*pyy + hzz*pzz + 2.0f*((cx[q]*cy[q])*pxy + (cx[q]*cz[q])*pxz + (cy[q]*cz[q])*pyz));
-            f[q*NUM_NODES+node] = value;
-            rx += cx[q]*value;
-            ry += cy[q]*value;
-            rz += cz[q]*value;
+            rest[q] = (1-omega)*(4.5f*w*(hxx*pxx + hyy*pyy + hzz*pzz + 2.0f*((cx[q]*cy[q])*pxy + (cx[q]*cz[q])*pxz + (cy[q]*cz[q])*pyz)));
         }
-        boundaryExchange[b] = (kind == 0 ? ix - (rx - kx) : 0);
-        boundaryExchange[NUM_BOUNDARY_NODES+b] = (kind == 0 ? iy - (ry - ky) : 0);
-        boundaryExchange[2*NUM_BOUNDARY_NODES+b] = (kind == 0 ? iz - (rz - kz) : 0);
+#ifdef FLUID_FLUCTUATIONS
+        if (mu > 0) {
+            mixed stressAmplitude = sqrt(mu*rho*omega*(2-omega)), ghostAmplitude = sqrt(mu*rho);
+            for (int b4 = 0; b4 < 4; b4++) {
+                float4 r4 = random[randomIndex + 4*NUM_NODES + 4*b + b4];
+                float r[4] = {r4.x, r4.y, r4.z, r4.w};
+                for (int c = 0; c < 4; c++) {
+                    int m = 4*b4 + c;
+                    if (m < 15) {
+                        mixed a = (m < 6 ? stressAmplitude : ghostAmplitude)*r[c];
+                        for (int q = 0; q < 19; q++)
+                            rest[q] += fluctuationBasis[q*15+m]*a;
+                    }
+                }
+            }
+        }
+#endif
+        mixed uu = u[0]*u[0] + u[1]*u[1] + u[2]*u[2];
+        mixed ug = u[0]*gx + u[1]*gy + u[2]*gz;
+        if (kind == 0 || kind == 1) {
+            // Mass balance of the rebuilt links, linear in rho_b = 1 + dr and written for dr.
+            mixed numerator = 0, denominator = 0;
+            for (int q = 1; q < 19; q++) {
+                if (!(unknown & (1<<q)))
+                    continue;
+                int opposite = (q%2 == 1 ? q+1 : q-1);
+                mixed arriving, flux = 0;
+                if (solid & (1<<q)) {
+                    int source = (x-cx[q]+NX)%NX + NX*((y-cy[q]+NY)%NY + NY*((z-cz[q]+NZ)%NZ));
+                    arriving = f[opposite*NUM_NODES+source];
+                }
+                else if (!(unknown & (1<<opposite))) {
+                    arriving = f[opposite*NUM_NODES+node];
+                    flux = 6*latticeWeight(q)*(cx[q]*u[0] + cy[q]*u[1] + cz[q]*u[2]);
+                }
+                else
+                    continue;
+                mixed w = latticeWeight(q);
+                mixed cu = cx[q]*u[0] + cy[q]*u[1] + cz[q]*u[2];
+                mixed e0 = w*(3.0f*cu + 4.5f*cu*cu - 1.5f*uu);
+                mixed cg = cx[q]*gx + cy[q]*gy + cz[q]*gz;
+                mixed sg = w*(3.0f*(cg - ug) + 9.0f*cu*cg);
+                numerator += arriving - rest[q] - e0 - 0.5f*sg + flux;
+                denominator += w + e0 + 0.5f*sg - flux;
+            }
+            if (denominator != 0) {
+                dr = numerator/denominator;
+                rho = 1 + dr;
+            }
+        }
+        mixed fx = rho*gx, fy = rho*gy, fz = rho*gz;
+        mixed uf = u[0]*fx + u[1]*fy + u[2]*fz;
+        mixed ex = 0, ey = 0, ez = 0;
+        for (int q = 1; q < 19; q++) {
+            if (!(unknown & (1<<q)))
+                continue;
+            mixed w = latticeWeight(q);
+            mixed cu = cx[q]*u[0] + cy[q]*u[1] + cz[q]*u[2];
+            mixed dfeq = w*(dr + rho*(3.0f*cu + 4.5f*cu*cu - 1.5f*uu));
+            mixed cf = cx[q]*fx + cy[q]*fy + cz[q]*fz;
+            mixed s = w*(3.0f*(cf - uf) + 9.0f*cu*cf);
+            mixed value = dfeq + rest[q] + 0.5f*s;
+            if (solid & (1<<q)) {
+                int source = (x-cx[q]+NX)%NX + NX*((y-cy[q]+NY)%NY + NY*((z-cz[q]+NZ)%NZ));
+                mixed sent = f[(q%2 == 1 ? q+1 : q-1)*NUM_NODES+source];
+                ex -= cx[q]*(sent + value);
+                ey -= cy[q]*(sent + value);
+                ez -= cz[q]*(sent + value);
+            }
+            f[q*NUM_NODES+node] = value;
+        }
+        boundaryExchange[b] = ex;
+        boundaryExchange[NUM_BOUNDARY_NODES+b] = ey;
+        boundaryExchange[2*NUM_BOUNDARY_NODES+b] = ez;
     }
 }
 #endif

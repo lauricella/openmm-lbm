@@ -157,10 +157,11 @@ give no-slip walls, accurate to second order in the lattice spacing, and conserv
 
 | | `BounceBack` | `Regularized` |
 |---|---|---|
-| where the wall is | halfway between the solid node and the first fluid node | on the first fluid node next to the solid nodes |
-| channel between the solid planes j = 0 and j = ny - 1 | walls at y = dx/2 and (ny - 3/2) dx | walls at y = dx and (ny - 2) dx |
-| most accurate for | tau < 15/16 (water: tau about 0.6) | tau > 15/16 |
-| with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | fluctuations 3 to 9 % low on the first node next to the wall |
+| how | a population sent towards a solid node comes back to its node, reversed | the fluid node next to the wall rebuilds the populations that come from the solid nodes, as those of fluid at rest on the solid node |
+| where the wall is | halfway between the solid node and the first fluid node | on the solid nodes |
+| channel between the solid planes j = 0 and j = ny - 1 | walls at y = dx/2 and (ny - 3/2) dx | walls at y = 0 and (ny - 1) dx |
+| exact Poiseuille flow at | tau = 7/8 | tau = 1 |
+| with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | equilibrium from the second node on; on the first node the momentum along the wall is 3 to 4 % low |
 | platforms | all | all |
 
 If you do not know which one to use, keep the default. The theory and the exact solutions are in
@@ -218,15 +219,15 @@ The theory is in
    face at the end of the box along x), `YMin`, `YMax`, `ZMin` and `ZMax`. The two faces of the same axis
    must be both periodic or both open: you cannot open `YMin` alone.
 2. **Choose the type of each open face** with `setFaceBoundary(face, type)`:
-   - `LBMForce.Velocity`: the fluid on the face moves with the velocity of `setFaceVelocity(face, velocity)`
+   - `LBMForce.Velocity`: the fluid beyond the face moves with the velocity of `setFaceVelocity(face, velocity)`
      (default zero). A velocity across the face is an inlet or an outlet with a given flow; a velocity
      along the face is a moving plate; zero is a wall at rest.
-   - `LBMForce.Density`: the fluid on the face has the density of `setFaceDensity(face, density)`, and moves
-     only across the face. The density is the pressure: p = c_s^2 rho with c_s^2 = dx^2/(3 dt^2). The
-     default, 0, means the density of the fluid at rest (`setFluidDensity()`). The velocity across the face
-     is filtered in time, half the value that the arriving fluid gives and half that of the previous step:
-     this removes a spurious oscillation from one node to the next and from one step to the next, and does
-     not change steady flows ([theory, Time filter of the Density faces](../theory.md#open-faces)).
+   - `LBMForce.Density`: the fluid beyond the face has the density of `setFaceDensity(face, density)`. The
+     density is the pressure: p = c_s^2 rho with c_s^2 = dx^2/(3 dt^2). The default, 0, means the density of
+     the fluid at rest (`setFluidDensity()`). The velocity across the face is filtered in time, half the value
+     that the arriving fluid gives and half that of the face node at the start of the step: this damps a
+     spurious oscillation from one node to the next and from one step to the next, and does not change steady
+     flows ([theory, Time filter of the Density faces](../theory.md#open-faces)).
 3. **Switch off the removal of the fluid momentum**: `setFluidMomentumRemovalFrequency(0)`. With open faces
    the fluid exchanges momentum with the outside, and the plugin refuses to create the Context otherwise.
 4. **Create the Context and run.** The velocities and densities of the faces can be changed during the run
@@ -252,9 +253,11 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
 
 **What to know.**
 
-- **The face is on the nodes of the face**, not on the edge of the box: for `ZMin` the nodes k = 0, for
-  `ZMax` the nodes k = nz - 1. The fluid on these nodes has exactly the velocity of a `Velocity` face, or the
-  density of a `Density` face. The grid needs at least 3 nodes along an open axis.
+- **Where the face is.** The nodes of the face, for `ZMin` the nodes k = 0 and for `ZMax` the nodes
+  k = nz - 1, are ordinary fluid nodes. The populations that come from beyond the face are those of fluid with
+  the velocity of a `Velocity` face, or the density of a `Density` face, placed one node outside the box: the
+  velocity or the density of the face holds there, at k = -1 and k = nz. A Couette flow between two `Velocity`
+  faces is u(z) = U (z + 1)/(nz + 1). The grid needs at least 3 nodes along an open axis.
 - **Edges and corners.** A node on several open faces takes the velocity of its first `Velocity` face in
   the order XMin, XMax, YMin, YMax, ZMin, ZMax; if all its faces are `Density` faces, it takes the density of
   the first one and the velocity zero. A face node next to a solid node with `Regularized` walls is a wall.
@@ -267,6 +270,11 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
   solid walls, not the open faces.
 - **Keep the flow slow and the density differences small**: a few percent at most, so that the fluid stays
   nearly incompressible and the Mach number low.
+- **Inlets.** Prefer a `Velocity` inlet with a `Density` outlet. A `Density` face through which the fluid
+  enters can become unstable at small tau: with a difference of density of 1 % it was stable at tau >= 0.6 and
+  unstable at tau <= 0.55 ([theory](../theory.md#open-faces)).
+- **Next to the faces** the flow enters and leaves, so in a duct driven by two `Density` faces the pressure
+  gradient in the middle is somewhat larger than the difference of the faces divided by the length.
 
 ### `setFaceBoundary(face, type)`, `getFaceBoundary(face)`
 
@@ -275,12 +283,12 @@ Context is created.
 
 ### `setFaceVelocity(face, velocity)`, `getFaceVelocity(face)`
 
-The velocity of the fluid on a `Velocity` face, a `Vec3` in nm/ps; default zero. It can be changed in a
+The velocity of the fluid beyond a `Velocity` face, a `Vec3` in nm/ps; default zero. It can be changed in a
 Context with `updateParametersInContext()`. Ignored on the other faces.
 
 ### `setFaceDensity(face, density)`, `getFaceDensity(face)`
 
-The density of the fluid on a `Density` face, in Da/nm^3; the default, 0, means the density of the fluid at
+The density of the fluid beyond a `Density` face, in Da/nm^3; the default, 0, means the density of the fluid at
 rest. It can be changed in a Context with `updateParametersInContext()`. Ignored on the other faces.
 
 ## Coupled particles

@@ -92,9 +92,6 @@ private:
         them whose source node x - c_q is solid (solidDirections), its LBMBoundaries::Kind and the face that gives
         its velocity or density. */
     std::vector<int> boundaryNodes, unknownDirections, solidDirections, boundaryKind, boundaryFace;
-    /** 1 for the nodes of regularized walls, 2 for the other boundary nodes (on open faces), 0 elsewhere; empty if
-        there are no boundary nodes. */
-    std::vector<char> isBoundary;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;
     /** True from the lattice step until the coupling forces are recomputed or the state is replaced: the forces
