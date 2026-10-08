@@ -94,7 +94,7 @@ KERNEL void computeFluidMoments(GLOBAL const mixed* RESTRICT f, GLOBAL const int
 
 /**
  * First stage of the removal of the fluid momentum: each work group sums rho - 1 and j over its nodes and writes
- * the four sums to partialSums[4*group + k].  The boundary nodes are left out.
+ * the four sums to partialSums[4*group + k].
  */
 KERNEL void sumFluidMomentum(GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum,
         GLOBAL mixed* RESTRICT partialSums, GLOBAL const int* RESTRICT isFluid) {
@@ -150,7 +150,7 @@ KERNEL void computeFluidCenterVelocity(GLOBAL const mixed* RESTRICT partialSums,
 
 /**
  * Third stage: subtract the velocity of the centre of mass from every node, j <- j - rho*u_cm.  The
- * non-equilibrium moments are left as they are.  The boundary nodes keep their velocity.
+ * non-equilibrium moments are left as they are.
  */
 KERNEL void removeFluidMomentum(GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL mixed* RESTRICT momentum,
         GLOBAL const mixed* RESTRICT centerVelocity, GLOBAL const int* RESTRICT isFluid) {

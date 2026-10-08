@@ -87,10 +87,10 @@ private:
         directions q whose node x + c_q is solid (LBMBoundaries::findWallLinks()); empty otherwise. */
     std::vector<int> wallNodes, wallLinks;
     /** The boundary nodes (internal/LBMBoundaries.h): with regularized walls the fluid nodes next to the solid
-        nodes, which lie on the walls, and the fluid nodes on the open faces.  For each of them: the bits 1 << q of
-        the directions q whose populations are unknown after the streaming (unknownDirections) and of those among
-        them whose source node x - c_q is solid (solidDirections), its LBMBoundaries::Kind and the face that gives
-        its velocity or density. */
+        nodes (the walls lie on the solid nodes), and the fluid nodes on the open faces.  For each of them: the bits
+        1 << q of the directions q whose populations are unknown after the streaming (unknownDirections) and of
+        those among them whose source node x - c_q is solid (solidDirections), its LBMBoundaries::Kind and the face
+        that gives its velocity or density. */
     std::vector<int> boundaryNodes, unknownDirections, solidDirections, boundaryKind, boundaryFace;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;

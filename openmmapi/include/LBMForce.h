@@ -87,7 +87,8 @@ public:
         /**
          * Regularized wall: after the streaming, the fluid nodes next to the solid nodes rebuild the populations that
          * come from the solid nodes as those of fluid at rest on the solid node, with the stress of the fluid node and
-         * a density that conserves the mass exactly (docs/theory.md, section 1).  The wall lies on the solid nodes,
+         * a density that conserves the mass exactly: the thread-safe boundary condition of M. Lauricella et al.,
+         * Phys. Fluids 37, 072111 (2025), appendix (docs/theory.md, section 1).  The wall lies on the solid nodes,
          * half a node further out than with the bounce-back.
          */
         Regularized = 1
@@ -232,8 +233,9 @@ public:
      * Set the boundary condition of the fluid on a face of the box: Periodic (the default), Velocity or Density.  The
      * two faces perpendicular to an axis must be both periodic or both open (Velocity or Density, in any
      * combination).  The nodes on an open face (i = 0 for XMin, i = nx - 1 for XMax, and so on) rebuild at every step
-     * the populations that come from beyond the face as those of fluid with their own moments and the velocity or
-     * the density of the face, which therefore holds one node beyond the face (docs/theory.md, section 1).  On the
+     * the populations that come from beyond the face as those of fluid with the stress of the node and the velocity of
+     * a Velocity face (with the density from the mass balance) or the density of a Density face (with the velocity
+     * of the node, filtered in time across the face), which therefore holds one node beyond the face (docs/theory.md, section 1).  On the
      * nodes shared by several open faces the first Velocity face in the order
      * XMin, XMax, YMin, YMax, ZMin, ZMax gives the velocity; if they are all Density faces, the first one gives the
      * density and the velocity is zero.  A node next to a solid node with the Regularized wall scheme is a wall.
@@ -338,7 +340,7 @@ public:
      * Set the nodes of the lattice that are solid walls.  The fluid does not occupy them.  With the default wall
      * scheme (setWallScheme()) a population that streams into a solid node is sent back to the fluid node it came
      * from (bounce-back), which places the wall halfway between the two nodes; with the Regularized scheme the wall
-     * lies on the fluid nodes next to the solid nodes.  Node (i, j, k) has index i + nx*(j + ny*k).  An empty list
+     * lies on the solid nodes.  Node (i, j, k) has index i + nx*(j + ny*k).  An empty list
      * (the default) means that the whole lattice is fluid.
      *
      * @param nodes    the indices of the solid nodes
@@ -432,8 +434,7 @@ public:
      * the walls by the fluid and by the coupled particles, divided by the time step.  The fluid gives it through
      * bounce-back (momentum exchange method of Ladd) or, with the Regularized wall scheme, as the populations that
      * stream into the solid nodes minus the momentum that the walls put into their fluid nodes when they rebuild
-     * them.  The particles give it through their coupling forces at solid nodes (and, with the Regularized scheme,
-     * at the fluid nodes on the walls) and their reflections.  It is zero before the first step and without solid
+     * them.  The particles give it through their coupling forces at solid nodes and their reflections.  It is zero before the first step and without solid
      * nodes.  With it, the total momentum of particles, fluid and walls is conserved.
      *
      * @param context    the Context in which to get the force

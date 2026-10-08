@@ -51,7 +51,9 @@ second-order scheme. It vanishes at tau = 1, where the collision relaxes the pop
 in one step.
 
 **Walls.** With halfway bounce-back the steady Poiseuille profile matches the exact solution of the
-scheme to 1e-12 for every tau tested (0.7 to 1.5, channel widths 11 and 19). In the steady state the
+scheme to 1e-12 for every tau tested (0.7 to 1.5, channel widths 11 and 19; at most 1.2e-13 relative to the
+centre-line velocity, measured again for version 0.3.0). `testPoiseuille` checks tau = 0.7, 7/8 and 1.2 at width 11
+to 1e-9. In the steady state the
 force on the walls from the momentum exchange (`getWallForce()`) equals the body force on the fluid, g
 times its mass, to 1e-8 (`testPoiseuille`). Its wall position differs
 from the halfway position by (3 - 16 Lambda)/(12 H), Lambda = (tau - 1/2)/2; measured in a channel of
@@ -399,7 +401,7 @@ coupling tests). In `single` precision the tolerances of 1e-12 and below become 
 | `testWallMomentumBalance` (`tests/TestLBMCoupling.h`; both drags, regularized walls) | particles, fluid and walls: total momentum conserved | 1e-11 relative (1e-12 with bounce-back): rebuilding the boundary nodes adds rounding (up to 4e-6 in `single` precision) |
 | `testCouette` (tau = 0.6, 1, 1.5) | ZMin `Velocity` at rest, ZMax `Velocity` U along x: u_x = U (z + 1)/(nz + 1), the faces holding on the nodes beyond them, uniform density | 1e-9 |
 | `testUniformFlowThroughFaces` | a uniform flow from a `Velocity` inlet to a `Density` outlet stays unchanged | 1e-13 |
-| `testPressureDrivenDuct` | square duct between bounce-back walls, `Density` faces at 1.01 and 1: density in the middle the mean of the two, gradient in the middle between those of the lengths ny + 1 and ny - 3, velocity in the middle within 2 % of the incompressible duct solution for that gradient, steady to 1e-9 between two steps | see text |
+| `testPressureDrivenDuct` | square duct between bounce-back walls, `Density` faces at 1.01 and 1: density at the node ny/2 on the straight line between those of the faces, held at y = -1 and y = ny, gradient in the middle between those of the lengths ny + 1 and ny - 3, velocity in the middle within 2 % of the incompressible duct solution for that gradient, steady to 1e-9 between two steps | see text |
 | `testCheckpointBoundaries` | a checkpoint with regularized walls and `Density` faces loads in the same configuration and is refused with another wall scheme or other face types | exceptions |
 | `testFluidStateRestartWithBoundaries` (bounce-back and regularized walls) | a wall, a `Velocity` inlet, a `Density` outlet and a body force: a run restarted with `getFluidState()`/`setFluidState()` at step 11 equals the uninterrupted run at step 30 | bitwise |
 | `testFaceChecks` | one open face on an axis, open faces with momentum removal, fewer than 3 nodes on an open axis: errors | |
@@ -424,9 +426,10 @@ node goes to the profile of its scheme in about a thousand steps. A Couette flow
 linear to 1e-14 between the nodes beyond the faces.
 
 **Accuracy of the two walls** (body-force driven channel, largest error over the profile relative to the
-centre-line velocity of the parabola that vanishes on the walls; H the distance between the walls: the width of
+centre-line velocity; H the distance between the walls: the width of
 the fluid for bounce-back, the distance between the solid nodes for regularized walls). From the exact profiles,
-|8 tau - 7|/(3 H^2) with bounce-back and 8 |tau - 1|/H^2 with regularized walls; measured with H = 13:
+|8 tau - 7|/(3 H^2) with bounce-back and 8 |tau - 1|/H^2 with regularized walls, relative to the parabola that
+vanishes on the walls; measured with H = 13, relative to the computed centre-line velocity:
 bounce-back 3e-14 at tau = 7/8, regularized walls 1.9e-2, 9.6e-3, 1e-14, 2.3e-2 and 6.7e-2 at tau = 0.6, 0.8, 1,
 1.5 and 2.5. Both are second order; at the tau of water (about 0.6) the bounce-back wall is about four times more
 accurate. The first version of the regularized walls of this release (the local regularized condition of Latt,
@@ -520,8 +523,8 @@ walls kept an oscillation of the velocity from one node to the next and from one
 by 9 to 18 %): the staggered momentum
 sum_y (-1)^(y+t) j_y, an exact invariant of the bulk (eigenvalue -1 of the linearized step at k = pi, for every
 tau), was excited by the start and then kept constant (-0.047 in lattice units from step 2000 to 16000). With
-regularized walls, or with `Velocity` faces, it was at the level of rounding. With the time filter (beta = 1/2) it
-is damped to rounding (1e-16) in every combination of walls and faces, and the steady state is the same. The
+regularized walls, or with `Velocity` faces, it was at the level of rounding. In that version the time filter
+(beta = 1/2) damped it to rounding (1e-16) in every combination of walls and faces, with the same steady state; the
 alternative of taking the velocity of the `Density` face from the next node (zero gradient, as in the outflow of
 Malaspinas) also damped it, but raised the error with regularized walls to 8 % at tau = 0.6.
 

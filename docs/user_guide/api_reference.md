@@ -165,8 +165,9 @@ give no-slip walls, accurate to second order in the lattice spacing, and conserv
 | with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | equilibrium from the second node on; on the first node the momentum along the wall is 3 to 4 % low |
 | platforms | all | all |
 
-If you do not know which one to use, keep the default. The theory and the exact solutions are in
-[theory.md](../theory.md#solid-nodes-and-walls). It is fixed when the Context is created.
+If you do not know which one to use, keep the default. The `Regularized` scheme is the thread-safe boundary
+condition of M. Lauricella et al., Phys. Fluids 37, 072111 (2025), appendix. The theory and the exact solutions are
+in [theory.md](../theory.md#solid-nodes-and-walls). It is fixed when the Context is created.
 
 ```python
 force.setWallScheme(LBMForce.Regularized)
@@ -187,8 +188,8 @@ It is the momentum given to the walls, divided by the time step, by:
   [theory.md](../theory.md#solid-nodes-and-walls)) or, with `Regularized` walls, as the momentum of the
   populations that stream into the solid nodes minus the momentum that the walls put into their fluid nodes
   when they rebuild them;
-- the coupled particles: the reaction of particles at solid nodes (and, with `Regularized` walls, at the fluid
-  nodes on the walls) and their reflections.
+- the coupled particles: the reaction of particles at solid nodes and their reflections. The fluid nodes next
+  to the walls are fluid nodes like the others: the reaction there stays in the fluid.
 
 It is zero before the first step and without solid nodes. With it, the total momentum of particles, fluid
 and walls is conserved. In a steady flow driven by a body acceleration g it equals g times the mass of
@@ -419,17 +420,17 @@ reporter = LBMVTKReporter('run', 1000, force)
 ### `setFluidFluctuations(fluctuations)`, `getFluidFluctuations()`
 
 Whether the fluid has thermal fluctuations of its own, at the temperature of
-[`setTemperature()`](#settemperaturetemperature-gettemperature). The default is `False`: the fluid receives
-thermal energy only from the reaction to the random forces on the coupled particles
-([limitations](README.md#limitations-of-the-model)). With `True`, every collision adds to the populations of
-each node a random part that conserves its mass and momentum and gives the stress and the higher moments their
+[`setTemperature()`](#settemperaturetemperature-gettemperature). The default is `False`: the fluid receives thermal
+energy only from the reaction to the random forces on the coupled particles
+([limitations](README.md#limitations-of-the-model)). With `True`, every collision adds to the populations of each
+node a random part that conserves its mass and momentum and gives the stress and the higher moments their
 equilibrium fluctuations (ghost-mode filtered fluctuating lattice Boltzmann,
-[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms),
-section 7). It works with both coupling schemes: with `NVE` the particles have no random force and are
-thermalized by the fluid only. The random numbers of the fluid come from the seed of
-[`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed). It is fixed when the Context is
-created. On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's generator, which needs
-64 bytes per lattice node; a step costs about 30% to 40% more on an NVIDIA A100.
+[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), section 7). It works with both coupling
+schemes: with `NVE` the particles have no random force and are thermalized by the fluid only. The random numbers of
+the fluid come from the seed of [`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed). It is
+fixed when the Context is created. On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's
+generator, which needs 64 bytes per lattice node and per boundary node (regularized walls and open faces); a step
+costs about 30% to 40% more on an NVIDIA A100.
 
 With the fluctuating fluid **use the centred drag**
 ([`setDragScheme(LBMForce.Centered)`](#setdragschemescheme-getdragscheme)) and measure the temperature with

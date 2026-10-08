@@ -131,8 +131,17 @@ rest placed on the solid node.
     f_q(x) = f_q^eq(rho_b, 0) + (1 - omega) f_q^neq,reg(Pi_neq of x) + S_q(0, rho_b g)/2 + xi_q,
 
   with Pi_neq the non-equilibrium stress of x in this step, S_q the Guo term of the body force and, with a
-  fluctuating fluid, xi_q the random part of a node of density rho_b, drawn for x on its own (section 7).
+  fluctuating fluid, xi_q the random part of a node with the density of x, drawn for x on its own before the
+  mass balance below (section 7).
   The known populations of x, and its collision, are those of any fluid node.
+- This is the thread-safe boundary condition of Lauricella et al. [24] (appendix, eqs. A4 and A5; introduced in
+  [25]): the non-equilibrium extrapolation of Guo, Zheng and Shi [26] written for the post-collision
+  populations, with the equilibrium at the imposed values on the node beyond the boundary and (1 - omega) times
+  the non-equilibrium part of the neighbouring fluid node, rebuilt from its stress by Hermite projection. Here
+  it also carries the Guo term of the body force and, with a fluctuating fluid, a random part, and only the
+  unknown populations are rebuilt, with rho_b from the mass balance below. As every scheme of this family
+  (wet-node schemes, section 5.3.4 of [11]) it puts the boundary on the node where the imposed values are taken:
+  it solves a Couette flow exactly for every tau, and a Poiseuille flow exactly only at tau = 1 (below).
 - The density rho_b follows from the mass balance of the rebuilt links: their populations carry, in total,
   the mass that x sent into the solid nodes in this streaming (stored in the solid node x - c_q, direction
   opposite to q). The mass of the fluid is therefore conserved exactly, as with bounce-back. The balance is
@@ -206,8 +215,9 @@ both open, in any combination of `Velocity` and `Density`, and an open axis need
 faces have independent velocities and densities.
 - The nodes on an open face (i = 0 for `XMin`, i = nx - 1 for `XMax`, and so on) are boundary nodes: the
   populations that would come from beyond the face are unknown, and the populations that leave through the
-  face are lost. As for the regularized walls, each unknown population is the one that a node beyond the
-  face, at x - c_q, would send, with the moments of x except the one that the face imposes:
+  face are lost. As for the regularized walls (the thread-safe boundary condition of [24, 25]), each unknown
+  population is the one that a node beyond the face, at x - c_q, would send, with the moments of x except the
+  one that the face imposes:
 
     f_q(x) = f_q^eq(rho_b, u_b) + (1 - omega) f_q^neq,reg(Pi_neq of x) + S_q(u_b, rho_b g)/2 + xi_q,
 
@@ -245,7 +255,8 @@ faces have independent velocities and densities.
 - Nodes on several open faces (edges and corners): the first `Velocity` face in the order XMin, XMax, YMin,
   YMax, ZMin, ZMax gives the velocity; if all are `Density` faces, the first gives the density and the
   velocity is zero. A face node next to a solid node with regularized walls is a wall node: velocity zero,
-  and rho_b from the mass balance of its solid links. With bounce-back walls the bounce-back returns the
+  and rho_b from the mass balance of all its rebuilt links, the solid links as on a wall and the links across
+  the face as on a `Velocity` face at rest. With bounce-back walls the bounce-back returns the
   populations from the solid nodes, and the face rebuilds those from beyond the face. Links that cross an
   open face are never bounced back. Malaspinas [22] treats edges and corners with finite differences
   instead; the rule here keeps the scheme local.
@@ -271,12 +282,13 @@ the rebuilt populations is
 
     v_n = (v_ZH + v_x)/2,
 
-the mean of v_ZH, the velocity that gives the node the density of the face from the populations that have
-arrived (the unknown ones replaced by the bounce-back of their opposite directions: rho_face = rho_0 +
-2 rho_out + rho_face v_n, with rho_0 the sum of the populations along the face and rho_out that of those that
-leave through it; Zou and He [23], note 5.1 of Latt [20]), and of v_x, the velocity of the node at the start of
-the step, from its moments. v_x is the outcome of the previous step, so the filter acts as a first-order
-recursive low-pass filter (an exponential moving average with weight 1/2) on the velocity of the face:
+the mean of v_ZH, the velocity that gives the node the density of the face from the populations that have arrived
+(the unknown ones replaced by the bounce-back of their opposite directions: rho_face = rho_0 + 2 rho_out + rho_face
+v_n, with v_n the component of the velocity that points into the box, rho_0 the sum of the populations along the
+face and rho_out that of those that leave through it; Zou and He [23], note 5.1 of Latt [20]), and of v_x, the
+velocity of the node at the start of the step, from its moments. v_x is the outcome of the previous step, so the
+filter acts as a first-order recursive low-pass filter (an exponential moving average with weight 1/2) on the
+velocity of the face:
 - in a steady state v_ZH = v_x, so steady flows are those without the filter;
 - at the frequency of the staggered mode, a period of two steps, the mode is reduced at every return to the
   face instead of being sent back unchanged, so it decays (to 1e-16 in the tests);
@@ -867,30 +879,29 @@ cell (section 3). For water at 300 K, dx = 0.5 nm and dt = 0.01 ps: m_c = 75.3 D
 and a thermal Mach number sqrt(kT)/c_s = 0.006. The populations are stored as deviations f - w (section 4), so
 fluctuations of order 1e-3 keep their precision.
 
-**Random numbers.** On the Reference platform the fifteen normal numbers of a node come from the generator of
-the force (OpenMM's SFMT, seeded with `setRandomNumberSeed()`, which also draws the random forces on the
-particles), node after node in index order, after the coupling of the step. The force evaluations between
-steps draw only the random forces of the next step, which come after the fluid numbers of the current step in
-any case, so they do not change the sequence. The checkpoint of the force (`createCheckpoint()`) contains the
-state of the generator, so a restarted run is identical to an uninterrupted one. The CUDA, OpenCL and HIP
-platforms draw them from OpenMM's random numbers of the Context, as they do for the particles: in every step,
-after those of the particles, four float4 per node (`IntegrationUtilities::prepareRandomNumbers(4*numNodes)`,
-16 normal numbers of which 15 are used, in single precision whatever the precision of the platform), with the
-coefficients w_q e_k(c_q)/sqrt(b_k) in an array of the kernel; OpenMM's checkpoints contain the state of that
-generator. The buffer of the random numbers grows to 64 bytes per node, already when the Context is created:
-OpenMM's checkpoints write the buffer as it is but read it back with the size it has in the Context that loads
-them, so a Context created for a restart must have the full size before the first step (with OpenMM 8.3.1, a
-buffer grown only in the first step made the restart differ from the uninterrupted run; with 8.6.1 it did not).
-The boundary nodes of regularized walls and open faces (section 1) draw fifteen normal numbers more each for the
-random part of their rebuilt populations: on the Reference platform after those of the collision, in the order of
-the boundary nodes; on the other platforms four float4 per boundary node after those of all the nodes, in the same
-buffer (`prepareRandomNumbers(4*(numNodes + numBoundaryNodes))`).
-At zero temperature no numbers are drawn and nothing is added. Cost on an NVIDIA A100 (CUDA, mixed precision,
-fluid with one coupled particle): 60, 169 and 1116 us per step without fluctuations and 77, 240 and 1590 us with
-them on lattices of 32^3, 64^3 and 128^3 nodes, that is 28% to 43% more; most of it is the generation, writing
-and reading of the random numbers in OpenMM's buffer. The platforms therefore draw different numbers, as for the particles: they agree
-with each other through the statistics of the tests below, and without fluctuations or at zero temperature to
-rounding.
+**Random numbers.** On the Reference platform the fifteen normal numbers of a node come from the generator of the
+force (OpenMM's SFMT, seeded with `setRandomNumberSeed()`, which also draws the random forces on the particles),
+node after node in index order, after the coupling of the step. The force evaluations between steps draw only the
+random forces of the next step, which come after the fluid numbers of the current step in any case, so they do not
+change the sequence. The checkpoint of the force (`createCheckpoint()`) contains the state of the generator, so a
+restarted run is identical to an uninterrupted one. The CUDA, OpenCL and HIP platforms draw them from OpenMM's
+random numbers of the Context, as they do for the particles: in every step, after those of the particles, four
+float4 per node (`IntegrationUtilities::prepareRandomNumbers(4*numNodes)` without boundary nodes, 16 normal numbers
+of which 15 are used, in single precision whatever the precision of the platform), with the coefficients w_q
+e_k(c_q)/sqrt(b_k) in an array of the kernel; OpenMM's checkpoints contain the state of that generator. The buffer
+of the random numbers grows to 64 bytes per node (and per boundary node, below), already when the Context is
+created: OpenMM's checkpoints write the buffer as it is but read it back with the size it has in the Context that
+loads them, so a Context created for a restart must have the full size before the first step (with OpenMM 8.3.1, a
+buffer grown only in the first step made the restart differ from the uninterrupted run; with 8.6.1 it did not). The
+boundary nodes of regularized walls and open faces (section 1) draw fifteen normal numbers more each for the random
+part of their rebuilt populations: on the Reference platform after those of the collision, in the order of the
+boundary nodes; on the other platforms four float4 per boundary node after those of all the nodes, in the same
+buffer (`prepareRandomNumbers(4*(numNodes + numBoundaryNodes))`). At zero temperature no numbers are drawn and
+nothing is added. Cost on an NVIDIA A100 (CUDA, mixed precision, fluid with one coupled particle): 60, 169 and 1116
+us per step without fluctuations and 77, 240 and 1590 us with them on lattices of 32^3, 64^3 and 128^3 nodes, that
+is 28% to 43% more; most of it is the generation, writing and reading of the random numbers in OpenMM's buffer. The
+platforms therefore draw different numbers, as for the particles: they agree with each other through the statistics
+of the tests below, and without fluctuations or at zero temperature to rounding.
 
 **Stability near tau = 1/2.** Without fluid velocity the linearized model is a contraction: collision multiplies
 every non-conserved mode by |1 - omega_k| <= 1 and streaming permutes the populations, so the norm
@@ -945,23 +956,23 @@ gamma dt m/(2 m_c) is small. When a Context is created with fluid fluctuations, 
 particles, the EM scheme, T > 0 and a friction that is not zero, a warning on stderr gives that bound for the
 heaviest coupled particle.
 
-**Walls.** The halfway bounce-back of the solid nodes (section 1) is a permutation of populations: it neither
-dissipates nor needs noise, and it is unchanged. A population comes back from the wall with the random part that
-the fluid node drew for it in its collision, so the wall returns the fluctuations it receives and adds none of
-its own: in the language of kinetic theory its thermal accommodation coefficient is zero (alpha = 0), while the
-velocity stays no-slip. Such a wall has no temperature of its own and exchanges no thermal energy with the
-fluid, and since the permutation keeps the equilibrium distribution of the populations, the fluctuations next to
-it are those of the bulk at every distance (`docs/validation.md`, Walls and open faces, Fluctuations next to the
-walls). A wall that forgot what arrives and emitted new fluctuations at a temperature of its own (alpha = 1, as
-the diffuse re-emission of Maxwell, or a partial accommodation 0 < alpha < 1) would give the same equilibrium
-with the single temperature of the force. It would differ only in the correlations of the populations over the
-step from the fluid node to the wall and back, since the ghost modes relax with rate 1 in every collision, and
-it would matter only for walls at a temperature different from that of the fluid, which the force does not
-have. The plugin therefore has no accommodation parameter: its bounce-back walls are those with alpha = 0. The
-regularized walls of section 1, and the open faces, rebuild the populations that come from the solid nodes (or
-from beyond the face) with a random part drawn on purpose, so they forget the fluctuations that arrive, as a
-wall with alpha = 1; next to them the fluctuations are at equilibrium from the second node on (section 1, Which
-wall to choose).
+**Walls.** The halfway bounce-back (section 1), done by the fluid nodes next to the walls, is a permutation of
+populations: it neither dissipates nor needs noise, and it is unchanged. A population comes back from the wall with
+the random part that the fluid node drew for it in its collision, so the wall returns the fluctuations it receives
+and adds none of its own: in the language of kinetic theory its thermal accommodation coefficient is zero (alpha =
+0), while the velocity stays no-slip. Such a wall has no temperature of its own and exchanges no thermal energy
+with the fluid, and since the permutation keeps the equilibrium distribution of the populations, the fluctuations
+next to it are those of the bulk at every distance (`docs/validation.md`, Walls and open faces, Fluctuations next
+to the walls). A wall that forgot what arrives and emitted new fluctuations at a temperature of its own (alpha = 1,
+as the diffuse re-emission of Maxwell, or a partial accommodation 0 < alpha < 1) would give the same equilibrium
+with the single temperature of the force. It would differ only in the correlations of the populations over the step
+from the fluid node to the wall and back, since the ghost modes relax with rate 1 in every collision, and it would
+matter only for walls at a temperature different from that of the fluid, which the force does not have. The plugin
+therefore has no accommodation parameter: its bounce-back walls are those with alpha = 0. The regularized walls of
+section 1, and the open faces, rebuild the populations that come from the solid nodes (or from beyond the face)
+with a random part drawn on purpose and with the stress of x, returning only the mass that arrives: for the
+fluctuations of the stress and ghost modes they behave as a wall with alpha = 1; next to them the fluctuations are
+at equilibrium from the second node on (section 1, Which wall to choose).
 
 **Tests** (`tests/TestLBMFluctuations.h`, all platforms and precisions).
 - A lattice of a single node, which streams every population back to itself: mass and momentum stay those of the
@@ -1026,3 +1037,11 @@ wall to choose).
     EPFL (2009): chapter 4, velocity boundary conditions.
 23. Q. Zou and X. He, Phys. Fluids 9, 1591 (1997): on pressure and velocity boundary conditions for the lattice
     Boltzmann BGK model.
+24. M. Lauricella, A. Tiribocchi, S. Succi, L. Brandt, A. Mukherjee, M. La Rocca and A. Montessori, Phys. Fluids
+    37, 072111 (2025), doi:10.1063/5.0271706: thread-safe multiphase lattice Boltzmann model for droplet and
+    bubble dynamics at high density and viscosity contrasts; appendix, thread-safe boundary conditions.
+25. A. Montessori, M. La Rocca, G. Amati, M. Lauricella, A. Tiribocchi and S. Succi, Phys. Fluids 36, 035171
+    (2024): high-order thread-safe lattice Boltzmann model for high performance computing turbulent flow
+    simulations.
+26. Z. Guo, C. Zheng and B. Shi, Chin. Phys. 11, 366 (2002): non-equilibrium extrapolation method for velocity
+    and pressure boundary conditions in the lattice Boltzmann method.

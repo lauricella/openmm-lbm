@@ -66,7 +66,8 @@ choose, to build inlets, outlets and moving plates. Set with `setFaceBoundary()`
 **Precision.** The number format used on a GPU platform: `single`, `mixed` (recommended) or `double`.
 
 **Regularized wall.** The other rule at solid nodes (`setWallScheme(LBMForce.Regularized)`): the wall lies on the
-solid nodes, and the fluid nodes next to them rebuild at every step the populations that come from the solid nodes
+solid nodes, and the fluid nodes next to them rebuild at every step the populations that come from the solid nodes,
+with the thread-safe boundary condition of M. Lauricella et al., Phys. Fluids 37, 072111 (2025)
 ([API](api_reference.md#setwallschemescheme-getwallscheme)).
 
 **Relaxation time (tau).** The parameter of the lattice Boltzmann method that corresponds to the viscosity:

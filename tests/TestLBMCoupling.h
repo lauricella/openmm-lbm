@@ -456,7 +456,7 @@ void testWallMomentumBalance(Platform& platform, LBMForce::DragScheme drag=LBMFo
     Vec3 p1 = momentum(scale);
     ASSERT(wall.dot(wall) > 1.0);
     Vec3 balance = p1 + wall - p0;
-    // The regularized walls rebuild all populations of the boundary nodes at every step, which adds rounding:
+    // The regularized walls rebuild the unknown populations of the boundary nodes at every step, which adds rounding:
     // 1e-13..1e-12 against 2e-14 with bounce-back in double precision, depending on the drag and on the OpenMM
     // version, and up to 4e-6 in single precision.
     double tolerance = getCouplingTolerance(platform, wallScheme == LBMForce::Regularized ? 1e-11 : 1e-12);

@@ -745,7 +745,8 @@ void testUniformFlowThroughFaces(Platform& platform) {
  * Flow in a square duct driven by a difference of density (pressure) between two Density faces: no-slip walls
  * perpendicular to x and z (the solid planes i = 0 and k = 0 of the periodic box, with bounce-back: a duct of width
  * H = n - 1 between the walls at 1/2 and n - 1/2), and the faces YMin and YMax at the densities 1.01 and 1 of the fluid
- * at rest.  In the middle of the duct the density is the mean of the two (the faces are symmetric), and the velocity is
+ * at rest.  At the node ny/2 the density lies on the straight line between those of the faces, held one node beyond
+ * them (y = -1 and y = ny), and the velocity is
  * that of the incompressible flow in a rectangular duct, u = sum over odd m of 4 K H^2/(m pi)^3 (-1)^((m-1)/2)
  * (1 - cosh(m pi z/H)/cosh(m pi/2)) cos(m pi x/H), with K = c_s^2 |drho/dy|/(rho nu) from the gradient of the density
  * in the middle, within the error of the walls (second order) and the compressibility of the fluid (1 %).  The

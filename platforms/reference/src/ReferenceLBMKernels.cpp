@@ -321,9 +321,8 @@ void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, 
     // node, the sum S of their forces and the velocity of the node are
     //   S = [-gamma (P~ - M u~) + R]/(1 + a + a M/m_c),   u_c(t) = u~ - h S/m_c,
     // and then F_k = [-gamma m_k (v~_k - u_c(t)) + R_k]/(1 + a).  The node receives -S, so that G_c = Fbody_c - S.
-    // A solid node is a wall at rest of infinite mass: u_c(t) = 0.  A boundary node (of a regularized wall or of an
-    // open face) is a wall of infinite mass that moves with the velocity imposed on the node, (j + F/2)/rho, and it
-    // receives -S.  Fc_k is read from the forces of OpenMM, to which
+    // A solid node is a wall at rest of infinite mass: u_c(t) = 0; the boundary nodes of regularized walls and open
+    // faces are fluid nodes like the others.  Fc_k is read from the forces of OpenMM, to which
     // the other forces of the System have been added since LBMForce is the last one.  The particles of a node are
     // summed in particle order, as on the GPU platforms (keys node*N + k, sorted).
     int numParticles = lattice.particles.size();
@@ -580,8 +579,8 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
     // imposed one: feq_q(rho_b, u_b) + (1 - omega) fneq_q(Pi_neq of x) + S_q(u_b, rho_b g)/2, plus, with a
     // fluctuating fluid, a random part of its own, drawn for x after those of the collision.  The known populations
     // of x are not changed, and the boundary lies on the nodes x - c_q.
-    //  - Next to solid nodes (walls, which prevail over the faces): u_b = 0 and rho_b the density of x.
-    //  - Velocity face: u_b the velocity of the face, rho_b the density of x.
+    //  - Next to solid nodes (walls, which prevail over the faces): u_b = 0 and rho_b from the mass balance (below).
+    //  - Velocity face: u_b the velocity of the face, rho_b from the mass balance with the inflow (below).
     //  - Density face: rho_b the density of the face; the velocity along the face is that of x, and the velocity
     //    across it the mean of the velocity that gives x the density of the face, from the populations that have
     //    arrived (the unknown ones replaced by the bounce-back of their opposites), and the velocity of x at the start

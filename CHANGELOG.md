@@ -3,6 +3,22 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Documentation
+- The regularized walls and the open faces are the thread-safe boundary condition of M. Lauricella et al.,
+  Phys. Fluids 37, 072111 (2025), appendix (introduced by A. Montessori et al., Phys. Fluids 36, 035171, 2024), a
+  non-equilibrium extrapolation of Guo, Zheng and Shi written for the post-collision populations: cited in
+  `docs/theory.md`, section 1, in the API reference, the glossary and `LBMForce.h`.
+- Corrections after a review against the code: with regularized walls the wall lies on the solid nodes (comment of
+  `setSolidNodes()`); the particles give momentum to the walls only through their reaction at solid nodes and
+  their reflections, since the boundary nodes are fluid nodes (`getWallForce()`); the random numbers on the GPU
+  platforms take 64 bytes per node and per boundary node; the random part of a rebuilt population has the
+  amplitude of the density of the node; the mass balance of a face node next to a solid node; the direction of the
+  velocity in the time filter of the `Density` faces; the definition of the errors of the two walls and the
+  density in the middle of the duct in `docs/validation.md`; comments of the code that still described the
+  boundary nodes of the first version.
+
 ## 0.3.0 (2026-10-08)
 
 Thermal fluctuations of the fluid, regularized walls and open faces, on all platforms; VTK output from Python. With
@@ -16,7 +32,7 @@ identical, bit for bit, to those of version 0.2.1 (walls, coupled particles, bot
   momentum, with the equilibrium variance on the six stress modes, which relax with omega, and on the nine ghost
   modes, which relax with rate 1. The fluid fluctuates at the temperature of `setTemperature()`, also with the
   `NVE` scheme. The random numbers come from the generator of the force on the Reference platform and from
-  OpenMM's generator on the CUDA, OpenCL and HIP platforms (64 bytes per node). Without fluctuations, or at zero
+  OpenMM's generator on the CUDA, OpenCL and HIP platforms (64 bytes per node and per boundary node). Without fluctuations, or at zero
   temperature, the run is identical, bit for bit, to that of version 0.2.1. Serialization version 5 and checkpoint version 3 record the switch; older files are read
   without fluctuations. `docs/theory.md`, section 7. Validated on an NVIDIA A100 (`docs/validation.md`): with the
   centred drag the coupled particles have the set temperature, their velocity autocorrelation equals the
