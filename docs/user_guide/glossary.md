@@ -28,8 +28,8 @@ default) or `Centered`, which is stable for any friction and is the one to use w
 
 **Euler-Maruyama.** The simple explicit rule used to add friction and random force over one time step.
 
-**Friction (gamma).** How strongly a coupled particle is dragged towards the velocity of the fluid, in 1/ps.
-With the explicit drag (the default) the product friction x dt must be below 1, and is best at 0.1 or below;
+**Friction ($`\gamma`$).** How strongly a coupled particle is dragged towards the velocity of the fluid, in 1/ps.
+With the explicit drag (the default) the product $`\gamma\Delta t`$ must be below 1, and is best at 0.1 or below;
 the centred drag is stable for any friction ([recipe](lattice.md#quick-recipe),
 [choosing the drag](lattice.md#choosing-the-drag)).
 
@@ -38,21 +38,21 @@ behind the positions. The velocity at the same time as the positions, the full s
 consecutive stored velocities. Temperatures computed from the two differ
 ([examples](examples.md#temperature-of-coupled-particles)).
 
-**Kinematic viscosity (nu).** The viscosity divided by the density, in nm^2/ps; for water about 1 nm^2/ps.
+**Kinematic viscosity ($`\nu`$).** The viscosity divided by the density, in nm²/ps; for water about 1 nm²/ps.
 It sets how fast velocity differences in the fluid are smoothed out.
 
-**Lattice, node, spacing (dx).** The fluid is described on a regular cubic grid that fills the periodic box:
-the points of the grid are the nodes, and dx is the distance between neighbouring nodes
+**Lattice, node, spacing ($`\Delta x`$).** The fluid is described on a regular cubic grid that fills the periodic box:
+the points of the grid are the nodes, and $`\Delta x`$ is the distance between neighbouring nodes
 ([lattice](lattice.md#geometry)).
 
 **Lattice Boltzmann.** The method used for the fluid: at every node, 19 numbers (the populations) describe
 how much fluid moves in each of 19 directions; at every step they collide and move to the neighbouring nodes
 ([theory.md](../theory.md)).
 
-**Lattice units.** The internal units of the fluid, in which dx, dt and the mass of a cell are 1. You never
-need them: the API uses OpenMM units ([lattice](lattice.md#units-on-the-lattice)).
+**Lattice units.** The internal units of the fluid, in which $`\Delta x`$, $`\Delta t`$ and the mass of a cell
+are 1. You never need them: the API uses OpenMM units ([lattice](lattice.md#units-on-the-lattice)).
 
-**Mach number (Ma).** The speed of the fluid divided by the speed of sound of the lattice. The model is
+**Mach number ($`\mathrm{Ma}`$).** The speed of the fluid divided by the speed of sound of the lattice. The model is
 accurate only when it is small: below 0.1; above 0.3 (the default limit) the plugin stops
 ([lattice](lattice.md#mach-number-and-stability)).
 
@@ -70,9 +70,9 @@ solid nodes, and the fluid nodes next to them rebuild at every step the populati
 with the thread-safe boundary condition of M. Lauricella et al., Phys. Fluids 37, 072111 (2025)
 ([API](api_reference.md#setwallschemescheme-getwallscheme)).
 
-**Relaxation time (tau).** The parameter of the lattice Boltzmann method that corresponds to the viscosity:
-tau = 3 nu dt/dx^2 + 1/2. It must stay between about 0.505 and 2, and below about 1.7 with coupled particles
-and the explicit drag ([lattice](lattice.md#relaxation-time)).
+**Relaxation time ($`\tau`$).** The parameter of the lattice Boltzmann method that corresponds to the viscosity:
+$`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$. It must stay between about 0.505 and 2, and below about 1.7 with
+coupled particles and the explicit drag ([lattice](lattice.md#relaxation-time)).
 
 **Removal of the fluid momentum.** At regular steps the plugin subtracts the mean velocity of the fluid,
 so that the fluid as a whole stays at rest ([lattice](lattice.md#removal-of-the-fluid-momentum)).
@@ -95,5 +95,5 @@ the coupled particles receive a random force ([limitations](README.md#limitation
 `setFluidFluctuations(True)` the fluid fluctuates at the temperature of
 the force.
 
-**Time step (dt).** The step of the integrator, which is also the step of the lattice: the fluid advances
+**Time step ($`\Delta t`$).** The step of the integrator, which is also the step of the lattice: the fluid advances
 once per integration step.

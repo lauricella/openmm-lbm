@@ -11,18 +11,18 @@ examples. The rest of this page explains each of them.
 
 | Parameter | Typical choice | Why, and the limits |
 |---|---|---|
-| Lattice spacing dx | 0.5 nm | about the size of a residue bead. Each bead is coupled to its nearest node |
-| Time step dt | 0.01 ps (10 fs) | the time step of the coarse-grained model; it is also the lattice time step |
-| Box | a whole number of dx along each side; at least 3 times the size of the protein and 2 times the cutoff of the nonbonded forces | the box is periodic: a protein feels its images through the fluid |
-| Kinematic viscosity | 1.0035 nm^2/ps (water, tau = 0.62 with the values above), or larger | tau = 3 nu dt/dx^2 + 1/2 must stay between about 0.505 and 2, and below about 1.7 with coupled particles and the explicit drag ([relaxation time](#relaxation-time)) |
-| Friction | 5 to 10 /ps, so that friction x dt = 0.05 to 0.1 | with the explicit drag (the default) friction x dt must be below 1 (warning) and below 2 (stability), at 0.1 or below it is accurate; for larger values use the centred drag ([choosing the drag](#choosing-the-drag)) |
+| Lattice spacing $`\Delta x`$ | 0.5 nm | about the size of a residue bead. Each bead is coupled to its nearest node |
+| Time step $`\Delta t`$ | 0.01 ps (10 fs) | the time step of the coarse-grained model; it is also the lattice time step |
+| Box | a whole number of $`\Delta x`$ along each side; at least 3 times the size of the protein and 2 times the cutoff of the nonbonded forces | the box is periodic: a protein feels its images through the fluid |
+| Kinematic viscosity | 1.0035 nm²/ps (water, $`\tau = 0.62`$ with the values above), or larger | $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$ must stay between about 0.505 and 2, and below about 1.7 with coupled particles and the explicit drag ([relaxation time](#relaxation-time)) |
+| Friction | 5 to 10 /ps, so that $`\text{friction}\times\Delta t = 0.05`$ to 0.1 | with the explicit drag (the default) $`\text{friction}\times\Delta t`$ must be below 1 (warning) and below 2 (stability), at 0.1 or below it is accurate; for larger values use the centred drag ([choosing the drag](#choosing-the-drag)) |
 | Temperature | that of the simulation, e.g. 298 K | the fluid is the thermostat of the coupled particles: no other thermostat |
 | Integrator | `VerletIntegrator(dt)` | friction and random force are part of `LBMForce` |
 | Removal of the fluid momentum | every step (the default) | keeps the system at rest; set 0 for flows driven by a body force, and with open faces |
 
 **Checking a new setup.** Create the Context, then:
 
-1. print `force.getLatticeParametersInContext(context)`: tau must be in the range above (the plugin also
+1. print `force.getLatticeParametersInContext(context)`: $`\tau`$ must be in the range above (the plugin also
    prints a warning when it is not);
 2. run a few hundred steps and print `force.getFluidMachNumber(context)`: it should stay below 0.1
    ([Mach number](#mach-number-and-stability));
@@ -35,13 +35,15 @@ examples. The rest of this page explains each of them.
 The fluid fills the periodic box of the System, which must be rectangular. `setGridSize(nx, ny, nz)`
 divides it into cubic cells:
 
-- the lattice spacing is dx = Lx/nx, and Ly/ny and Lz/nz must be equal to it (to a relative 1e-6);
-- node (i, j, k) sits at (i dx, j dx, k dx), with 0 <= i < nx, 0 <= j < ny and 0 <= k < nz;
+- the lattice spacing is $`\Delta x = L_x/n_x`$, and $`L_y/n_y`$ and $`L_z/n_z`$ must be equal to it (to a relative
+  1e-6);
+- node $`(i, j, k)`$ sits at $`(i\Delta x, j\Delta x, k\Delta x)`$, with $`0 \le i < n_x`$, $`0 \le j < n_y`$ and
+  $`0 \le k < n_z`$;
 - the lattice is periodic in all three directions, like the box, unless you open the faces of the box
   ([open faces](api_reference.md#open-faces)).
 
 The box is read from the default periodic box vectors of the System when the Context is created.
-For a box of 15 x 15 x 7.5 nm and dx = 0.5 nm:
+For a box of 15 × 15 × 7.5 nm and $`\Delta x = 0.5`$ nm:
 
 ```python
 import openmm as mm
@@ -55,13 +57,13 @@ force.setGridSize(30, 30, 15)
 
 ## Node indexing and NumPy arrays
 
-Node (i, j, k) has index i + nx*(j + ny*k): i varies fastest. All per-node lists use this order:
+Node $`(i, j, k)`$ has index $`i + n_x(j + n_y k)`$: $`i`$ varies fastest. All per-node lists use this order:
 
 - the fields returned by `getFluidFields()`;
 - the solid nodes passed to `setSolidNodes()`;
 - the state returned by `getFluidState()`, which holds 19 values per node.
 
-Reshaped to (nz, ny, nx), a list becomes an array indexed as [k, j, i]:
+Reshaped to `(nz, ny, nx)`, a list becomes an array indexed as `[k, j, i]`:
 
 ```python
 import numpy as np
@@ -101,48 +103,50 @@ x, y, z = i*dx, j*dx, k*dx
 print(index[2, 3, 4], (x[2, 3, 4], y[2, 3, 4], z[2, 3, 4]))
 ```
 
-Boolean masks on these arrays select sets of nodes. For example, `index[y < 1.0]` lists the nodes
-with y < 1 nm, which can be passed to `setSolidNodes()` (see the [channel example](examples.md#channel-flow-between-two-walls)).
+Boolean masks on these arrays select sets of nodes. For example, `index[y < 1.0]` lists the nodes with $`y < 1`$ nm,
+which can be passed to `setSolidNodes()` (see the [channel example](examples.md#channel-flow-between-two-walls)).
 
 ## Time step
 
-The lattice time step dt is the step size of the `VerletIntegrator`, read when the Context is created.
+The lattice time step $`\Delta t`$ is the step size of the `VerletIntegrator`, read when the Context is created.
 The fluid advances by one lattice step at each integration step. The step size must not change
 afterwards: if it does, the next step raises an exception. To use a different step size, create a new
 Context.
 
 ## Units on the lattice
 
-Internally the plugin works in lattice units. The conversions follow from dx, dt and the fluid density
-rho0 (`setFluidDensity()`). The most useful ones are listed below; [theory.md](../theory.md#3-units-and-conversions-implemented)
-has the complete table.
+Internally the plugin works in lattice units. The conversions follow from $`\Delta x`$, $`\Delta t`$ and the fluid
+density $`\rho_0`$ (`setFluidDensity()`). The most useful ones are listed below;
+[theory.md](../theory.md#3-units-and-conversions-implemented) has the complete table.
 
-| Quantity | Lattice unit | With dx = 0.5 nm, dt = 0.01 ps, water |
+| Quantity | Lattice unit | With $`\Delta x = 0.5`$ nm, $`\Delta t = 0.01`$ ps, water |
 |---|---|---|
-| velocity | dx/dt | 50 nm/ps |
-| lattice sound speed | c_s = dx/(dt sqrt(3)) | 28.9 nm/ps |
-| acceleration | dx/dt^2 | 5000 nm/ps^2 |
-| mass of a cell | m_c = rho0 dx^3 | 75.3 Da |
-| kinematic viscosity | dx^2/dt | 25 nm^2/ps |
+| velocity | $`\Delta x/\Delta t`$ | 50 nm/ps |
+| lattice sound speed | $`c_s = \Delta x/(\Delta t\sqrt{3})`$ | 28.9 nm/ps |
+| acceleration | $`\Delta x/\Delta t^2`$ | 5000 nm/ps² |
+| mass of a cell | $`m_c = \rho_0\Delta x^3`$ | 75.3 Da |
+| kinematic viscosity | $`\Delta x^2/\Delta t`$ | 25 nm²/ps |
 
 ## Relaxation time
 
-The kinematic viscosity nu enters the model through the relaxation time
+The kinematic viscosity $`\nu`$ enters the model through the relaxation time
 
-  tau = 3 nu dt/dx^2 + 1/2,
+```math
+\tau = \frac{3\nu\Delta t}{\Delta x^2} + \frac12,
+```
 
-which must be larger than 1/2. The model is accurate for tau between about 0.505 and 2; outside this
+which must be larger than 1/2. The model is accurate for $`\tau`$ between about 0.505 and 2; outside this
 range the plugin prints a warning on stderr when the Context is created. Near 1/2 the fluid is close
-to the stability limit, and at large tau the error on the position of walls grows (see
+to the stability limit, and at large $`\tau`$ the error on the position of walls grows (see
 [theory.md](../theory.md#solid-nodes-and-walls)).
 
-Since dt is the time step of the molecular dynamics, the viscosity and the resolution are coupled:
-tau - 1/2 = 3 nu dt/dx^2. With dt = 0.01 ps:
+Since $`\Delta t`$ is the time step of the molecular dynamics, the viscosity and the resolution are coupled:
+$`\tau - \tfrac12 = 3\nu\Delta t/\Delta x^2`$. With $`\Delta t = 0.01`$ ps:
 
-| dx | water, nu = 1.0035 nm^2/ps | 5 x water |
+| $`\Delta x`$ | water, $`\nu = 1.0035`$ nm²/ps | 5 × water |
 |---|---|---|
-| 0.5 nm | tau = 0.62 | tau = 1.10 |
-| 0.25 nm | tau = 0.98 | tau = 2.91 |
+| 0.5 nm | $`\tau = 0.62`$ | $`\tau = 1.10`$ |
+| 0.25 nm | $`\tau = 0.98`$ | $`\tau = 2.91`$ |
 
 To check a choice before creating a Context:
 
@@ -157,16 +161,17 @@ for dx in (1.0, 0.5, 0.25):
         print('dx = %.2f nm  dt = %.3f ps  tau = %.3f' % (dx, dt, relaxation_time(1.0035, dx, dt)))
 ```
 
-If tau is too close to 1/2, increase dt or the viscosity, or decrease dx. If tau is too large, do the
-opposite. Coarse-grained models often use a viscosity larger than that of water, which also moves tau
-up. Inside a Context, `getLatticeParametersInContext(context)` returns dx, dt and tau.
+If $`\tau`$ is too close to 1/2, increase $`\Delta t`$ or the viscosity, or decrease $`\Delta x`$. If $`\tau`$ is
+too large, do the opposite. Coarse-grained models often use a viscosity larger than that of water, which also moves
+$`\tau`$ up. Inside a Context, `getLatticeParametersInContext(context)` returns $`\Delta x`$, $`\Delta t`$ and
+$`\tau`$.
 
-**With the explicit drag, coupled particles need tau below about 1.7.** With the explicit drag at the
-nearest node, the hydrodynamic part of the mobility of a particle decreases as tau grows. At tau = 1.7 it
-is about 15% of its value at tau = 1.1, and above tau = 1.79 it is negative: particles then move less than
-a Langevin particle with the same friction. A warning is printed when a Context with coupled particles and
-the explicit drag has tau > 1.7. With the centred drag this part stays positive at every tau, but it grows
-with tau ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), self-mobility).
+**With the explicit drag, coupled particles need $`\tau`$ below about 1.7.** With the explicit drag at the nearest
+node, the hydrodynamic part of the mobility of a particle decreases as $`\tau`$ grows. At $`\tau = 1.7`$ it is about
+15% of its value at $`\tau = 1.1`$, and above $`\tau = 1.79`$ it is negative: particles then move less than a
+Langevin particle with the same friction. A warning is printed when a Context with coupled particles and the
+explicit drag has $`\tau > 1.7`$. With the centred drag this part stays positive at every $`\tau`$, but it grows
+with $`\tau`$ ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), self-mobility).
 
 ## Choosing the drag
 
@@ -177,7 +182,7 @@ Context is created.
 | | `LBMForce.Explicit` (default) | `LBMForce.Centered` |
 |---|---|---|
 | Velocities compared | particle half a step before the force, fluid before the force | particle and fluid at the time of the force |
-| Stability | friction x dt < 2 for one particle; with M the mass of the particles at a node and m_c that of the fluid in a cell, friction x dt (1 + M/m_c)/2 < 1 | any friction |
+| Stability | $`\text{friction}\times\Delta t < 2`$ for one particle; with $`M`$ the mass of the particles at a node and $`m_c`$ that of the fluid in a cell, $`\text{friction}\times\Delta t\,(1 + M/m_c)/2 < 1`$ | any friction |
 | Velocity with the right temperature | full step: the temperature of `StateDataReporter` | half step: the velocities of the State; `StateDataReporter` reports less |
 | Requirements | none | `LBMForce` is the last force of the System; no virtual sites |
 | Cost on a GPU | | 0 to 6% more |
@@ -187,12 +192,12 @@ Context is created.
 **use the centred drag**: its particles have the set temperature (at half steps), while the explicit drag makes
 them too hot (last paragraph).
 
-**Without fluid fluctuations use the explicit drag** (the default) in most cases: it is accurate for friction x dt
-up to about 0.1, it reproduces the previous results, the temperature that OpenMM reports is right, and its
-particles are the closest to T (next paragraph).
+**Without fluid fluctuations use the explicit drag** (the default) in most cases: it is accurate for
+$`\text{friction}\times\Delta t`$ up to about 0.1, it reproduces the previous results, the temperature that OpenMM
+reports is right, and its particles are the closest to $`T`$ (next paragraph).
 
-**Use the centred drag** when the explicit drag is unstable: large friction, or several heavy beads at a
-node. With beads of 130 Da, dx = 0.5 nm and dt = 0.01 ps, three or four beads at a node make the explicit
+**Use the centred drag** when the explicit drag is unstable: large friction, or several heavy beads at a node. With
+beads of 130 Da, $`\Delta x = 0.5`$ nm and $`\Delta t = 0.01`$ ps, three or four beads at a node make the explicit
 drag unstable already for friction above 26 to 32/ps. The centred drag is stable for any friction.
 
 With the centred drag measure the temperature with `openmmlbm.LBMTemperatureReporter`, which uses the
@@ -204,64 +209,67 @@ import openmmlbm
 # simulation.reporters.append(openmmlbm.LBMTemperatureReporter('temperature.txt', 1000, force))
 ```
 
-**Without fluid fluctuations both drags give particles colder than T** at the density of water, because the
-fluid has no thermal fluctuations of its own ([limitations](README.md#limitations-of-the-model)). The centred drag couples a
-particle to its own cell within the step, and is colder, the more so the larger friction x dt and the
-mass of the bead in units of the mass of fluid in a cell, m/m_c (m_c = 75 Da with dx = 0.5 nm), while the
-diffusion coefficient is the same with both drags. Measured at 298 to 300 K, each drag with its right
-velocity ([validation](../validation.md)):
+**Without fluid fluctuations both drags give particles colder than $`T`$** at the density of water, because the
+fluid has no thermal fluctuations of its own ([limitations](README.md#limitations-of-the-model)). The centred drag
+couples a particle to its own cell within the step, and is colder, the more so the larger
+$`\text{friction}\times\Delta t`$ and the mass of the bead in units of the mass of fluid in a cell, $`m/m_c`$
+($`m_c = 75`$ Da with $`\Delta x = 0.5`$ nm), while the diffusion coefficient is the same with both drags. Measured
+at 298 to 300 K, each drag with its right velocity ([validation](../validation.md)):
 
-| System | friction x dt | m/m_c | explicit | centred |
+| System | $`\text{friction}\times\Delta t`$ | $`m/m_c`$ | explicit | centred |
 |---|---|---|---|---|
-| free beads of 100 Da | 0.1 | 1.3 | 2 to 5% below T | 8 to 10% below T |
-| SOD1, COCOMO2 | 0.1 | 1.3 (mean) | 1.3% below T | 7% below T |
-| SOD1, COCOMO2 | 0.3 | 1.3 (mean) | 1% below T | 16% below T |
-| free beads of 1000 Da | 0.1 | 13 | 15% below T | 46% below T |
+| free beads of 100 Da | 0.1 | 1.3 | 2 to 5% below $`T`$ | 8 to 10% below $`T`$ |
+| SOD1, COCOMO2 | 0.1 | 1.3 (mean) | 1.3% below $`T`$ | 7% below $`T`$ |
+| SOD1, COCOMO2 | 0.3 | 1.3 (mean) | 1% below $`T`$ | 16% below $`T`$ |
+| free beads of 1000 Da | 0.1 | 13 | 15% below $`T`$ | 46% below $`T`$ |
 
-With a fluid much heavier than the particles both give T
+With a fluid much heavier than the particles both give $`T`$
 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), temperature with a fluid
 without fluctuations).
 
-**With the fluctuating fluid only the centred drag gives T.** The thermal motion of the fluid at the node of a
+**With the fluctuating fluid only the centred drag gives $`T`$.** The thermal motion of the fluid at the node of a
 particle pushes it; the reaction of the particle on its cell compensates this exactly only if the drag sees the
 response of the cell within the step, as the centred drag does. The explicit drag sees it one half step late, and
-its particles are too hot by about friction x dt x m/(2 m_c), the mirror image of the deficit above
-([theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), particles in the fluctuating fluid).
-Measured at 300 K with the fluctuating fluid, each drag with its right velocity
+its particles are too hot by about $`\text{friction}\times\Delta t\times m/(2m_c)`$, the mirror image of the deficit
+above ([theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), particles in the fluctuating
+fluid). Measured at 300 K with the fluctuating fluid, each drag with its right velocity
 ([validation](../validation.md)):
 
-| System | friction x dt | m/m_c | explicit | centred |
+| System | $`\text{friction}\times\Delta t`$ | $`m/m_c`$ | explicit | centred |
 |---|---|---|---|---|
-| free beads of 100 Da | 0.05 | 1.3 | 3% above T | T within 0.2% |
-| free beads of 100 Da | 0.1 | 1.3 | 6% above T | T within 0.3% |
-| free beads of 100 Da | 0.2 | 1.3 | 14% above T | T within 0.3% |
-| free beads of 1000 Da | 0.01 | 13 | 6% above T | T within 0.4% |
-| free beads of 1000 Da | 0.1 | 13 | 56% above T | T within 0.1% |
+| free beads of 100 Da | 0.05 | 1.3 | 3% above $`T`$ | $`T`$ within 0.2% |
+| free beads of 100 Da | 0.1 | 1.3 | 6% above $`T`$ | $`T`$ within 0.3% |
+| free beads of 100 Da | 0.2 | 1.3 | 14% above $`T`$ | $`T`$ within 0.3% |
+| free beads of 1000 Da | 0.01 | 13 | 6% above $`T`$ | $`T`$ within 0.4% |
+| free beads of 1000 Da | 0.1 | 13 | 56% above $`T`$ | $`T`$ within 0.1% |
 
 With both drags the diffusion coefficient now contains the hydrodynamic contribution of the thermal flows, and
-with the centred drag it follows the Einstein relation D = kT x mobility.
+with the centred drag it follows the Einstein relation $`D = k_BT\times\text{mobility}`$.
 
 ## Velocity of the fluid
 
-The fluid responds to the body force F = rho g with the forced velocity
+The fluid responds to the body force $`\mathbf F = \rho\mathbf g`$ with the forced velocity
 
-  u = j/rho + g dt/2,
+```math
+\mathbf u = \frac{\mathbf j}{\rho} + \frac{\mathbf g\,\Delta t}{2},
+```
 
-where j is the momentum density on the lattice. `getFluidFields()` returns this velocity, which is the
+where $`\mathbf j`$ is the momentum density on the lattice. `getFluidFields()` returns this velocity, which is the
 physical velocity of the fluid: it is the one that matches the analytical flow profiles. Without a
-body force it equals j/rho. The Mach number uses j/rho.
+body force it equals $`\mathbf j/\rho`$. The Mach number uses $`\mathbf j/\rho`$.
 
 ## Mach number and stability
 
-The Mach number Ma = |u|/c_s compares the speed of the fluid with the lattice sound speed. The model
-is a weakly compressible fluid: density fluctuations grow as Ma^2 and the viscous stress has an error
-of order Ma^3. For accurate results Ma should stay below about 0.1. In the target applications it is
-between 1e-3 and 1e-2: a 100 Da bead at 298 K with dx = 0.5 nm and dt = 0.01 ps gives Ma = 5e-3.
+The Mach number $`\mathrm{Ma} = \lvert\mathbf u\rvert/c_s`$ compares the speed of the fluid with the lattice sound
+speed. The model is a weakly compressible fluid: density fluctuations grow as $`\mathrm{Ma}^2`$ and the viscous
+stress has an error of order $`\mathrm{Ma}^3`$. For accurate results $`\mathrm{Ma}`$ should stay below about 0.1. In
+the target applications it is between 1e-3 and 1e-2: a 100 Da bead at 298 K with $`\Delta x = 0.5`$ nm and
+$`\Delta t = 0.01`$ ps gives $`\mathrm{Ma} = 5\times10^{-3}`$.
 
 The plugin checks the largest Mach number of the fluid every 100 lattice steps. If it exceeds 0.3,
 the step raises an exception that reports the step and the value. Both numbers can be changed:
 
-- `setMachCheckFrequency(n)` checks every n steps, and `setMachCheckFrequency(0)` disables the check;
+- `setMachCheckFrequency(n)` checks every $`n`$ steps, and `setMachCheckFrequency(0)` disables the check;
 - `setMachNumberLimit(limit)` changes the limit.
 
 `getFluidMachNumber(context)` returns the current value at any time, for monitoring. A
@@ -269,15 +277,14 @@ the step raises an exception that reports the step and the value. Both numbers c
 
 ## Removal of the fluid momentum
 
-By default the plugin removes the momentum of the fluid at every step. It subtracts the
-centre-of-mass velocity of the fluid, u_cm = sum(j)/sum(rho), from every fluid node, before the
-collision of every lattice step whose number is a multiple of the frequency. Steps are numbered by
-the step count of the Context (`context.getStepCount()`): a new Context starts at 0, so the first
-removal happens before the first step, and a checkpoint restores the count, so a restarted run removes
-the momentum at the same steps as an uninterrupted one. The Mach number check counts steps in the same
-way.
+By default the plugin removes the momentum of the fluid at every step. It subtracts the centre-of-mass velocity of
+the fluid, $`\mathbf u_{\mathrm{cm}} = \sum\mathbf j/\sum\rho`$, from every fluid node, before the collision of
+every lattice step whose number is a multiple of the frequency. Steps are numbered by the step count of the Context
+(`context.getStepCount()`): a new Context starts at 0, so the first removal happens before the first step, and a
+checkpoint restores the count, so a restarted run removes the momentum at the same steps as an uninterrupted one.
+The Mach number check counts steps in the same way.
 
-- `setFluidMomentumRemovalFrequency(n)` removes it every n steps.
+- `setFluidMomentumRemovalFrequency(n)` removes it every $`n`$ steps.
 - `setFluidMomentumRemovalFrequency(0)` never removes it. Use 0 for flows driven by a body force,
   otherwise the removal cancels the momentum that the force gives to the fluid. With open faces 0 is
   required: the Context is not created otherwise.

@@ -6,7 +6,7 @@ added to the System with `System.addForce()`, and used with a `VerletIntegrator`
 
 Values are in OpenMM units (nm, ps, Da, K). Setters accept plain numbers in these units or `Quantity`
 objects in units that convert to them (see [units](getting_started.md#units)); a `Quantity` in a unit that
-does not convert, such as a density in g/cm^3 without the Avogadro constant, raises `TypeError`. Getters
+does not convert, such as a density in g/cm³ without the Avogadro constant, raises `TypeError`. Getters
 return `Quantity` objects where the quantity has units.
 
 - [Summary](#summary)
@@ -30,9 +30,9 @@ return `Quantity` objects where the quantity has units.
 | Method | Unit | Default | Change in a Context |
 |---|---|---|---|
 | `setGridSize(nx, ny, nz)` | nodes | none, required | no |
-| `setFluidDensity(density)` | Da/nm^3 | 602.214 (water) | no |
-| `setKinematicViscosity(viscosity)` | nm^2/ps | 1.0035 (water) | no |
-| `setBodyAcceleration(acceleration)` | nm/ps^2 | (0, 0, 0) | yes |
+| `setFluidDensity(density)` | Da/nm³ | 602.214 (water) | no |
+| `setKinematicViscosity(viscosity)` | nm²/ps | 1.0035 (water) | no |
+| `setBodyAcceleration(acceleration)` | nm/ps² | (0, 0, 0) | yes |
 | `setInitialFluidVelocity(velocity)` | nm/ps | (0, 0, 0) | used only at creation |
 | `setFluidMomentumRemovalFrequency(frequency)` | steps | 1 | yes |
 | `setMachCheckFrequency(frequency)` | steps | 100 | yes |
@@ -41,7 +41,7 @@ return `Quantity` objects where the quantity has units.
 | `setWallScheme(scheme)` | | `BounceBack` | no |
 | `setFaceBoundary(face, type)` | | `Periodic` | no |
 | `setFaceVelocity(face, velocity)` | nm/ps | (0, 0, 0) | yes |
-| `setFaceDensity(face, density)` | Da/nm^3 | 0, meaning the fluid density | yes |
+| `setFaceDensity(face, density)` | Da/nm³ | 0, meaning the fluid density | yes |
 | `addParticle(particle)`, `setParticle(index, particle)` | particle indices | none | no |
 | `setCouplingScheme(scheme)` | | `EulerMaruyama` | yes |
 | `setDragScheme(scheme)` | | `Explicit` | no |
@@ -58,9 +58,9 @@ others need a new Context.
 
 ### `setGridSize(nx, ny, nz)`, `getGridSize()`
 
-Number of lattice nodes along x, y and z. It must be set: the default 0 raises an error when the
-Context is created. The lattice spans the periodic box of the System, which must be rectangular, with
-cubic cells: dx = Lx/nx = Ly/ny = Lz/nz. `getGridSize()` returns the list `[nx, ny, nz]`.
+Number of lattice nodes along x, y and z. It must be set: the default 0 raises an error when the Context is created.
+The lattice spans the periodic box of the System, which must be rectangular, with cubic cells:
+$`\Delta x = L_x/n_x = L_y/n_y = L_z/n_z`$. `getGridSize()` returns the list `[nx, ny, nz]`.
 
 ```python
 force.setGridSize(30, 30, 30)
@@ -73,24 +73,24 @@ See [the lattice](lattice.md#geometry) for the geometry and the numbering of the
 
 ### `setFluidDensity(density)`, `getFluidDensity()`
 
-Mass density of the fluid at rest, in Da/nm^3. The default 602.214 Da/nm^3 is water (1 g/cm^3). The
-density must be positive. It sets the mass of a lattice cell, m_c = density dx^3, and scales the
-densities returned by `getFluidFields()`. A density in g/cm^3 must be multiplied by
-`unit.AVOGADRO_CONSTANT_NA` (see [units](getting_started.md#units)); without it the method raises `TypeError`.
+Mass density of the fluid at rest, in Da/nm³. The default 602.214 Da/nm³ is water (1 g/cm³). The density must be
+positive. It sets the mass of a lattice cell, $`m_c = \text{density}\times\Delta x^3`$, and scales the densities
+returned by `getFluidFields()`. A density in g/cm³ must be multiplied by `unit.AVOGADRO_CONSTANT_NA` (see
+[units](getting_started.md#units)); without it the method raises `TypeError`.
 
 ### `setKinematicViscosity(viscosity)`, `getKinematicViscosity()`
 
-Kinematic viscosity nu of the fluid, in nm^2/ps. The default 1.0035 nm^2/ps is water at 20 C. It must
-be positive. With the lattice spacing dx and the time step dt it fixes the relaxation time
-tau = 3 nu dt/dx^2 + 1/2; a warning is printed if tau is outside [0.505, 2] (see
+Kinematic viscosity $`\nu`$ of the fluid, in nm²/ps. The default 1.0035 nm²/ps is water at 20 C. It must be
+positive. With the lattice spacing $`\Delta x`$ and the time step $`\Delta t`$ it fixes the relaxation time
+$`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$; a warning is printed if $`\tau`$ is outside [0.505, 2] (see
 [relaxation time](lattice.md#relaxation-time)).
 
 ## Driving and initial state
 
 ### `setBodyAcceleration(acceleration)`, `getBodyAcceleration()`
 
-Uniform acceleration g applied to the fluid, as a `Vec3` in nm/ps^2. Every fluid node receives the
-force density rho g, where rho is the local density; this is the usual way to drive a pressure-driven
+Uniform acceleration $`\mathbf g`$ applied to the fluid, as a `Vec3` in nm/ps². Every fluid node receives the
+force density $`\rho\mathbf g`$, where $`\rho`$ is the local density; this is the usual way to drive a pressure-driven
 flow in a periodic channel. The default is zero. To keep the momentum that it gives to the fluid,
 disable the [removal of the fluid momentum](#removal-of-the-fluid-momentum).
 
@@ -120,8 +120,8 @@ Use 0 for flows driven by `setBodyAcceleration()`.
 ### `setMachCheckFrequency(frequency)`, `getMachCheckFrequency()`
 
 Every `frequency` lattice steps the plugin computes the largest Mach number of the fluid,
-Ma = max |u|/c_s over the fluid nodes. If it exceeds the limit, the step raises an exception that
-reports the value and the step. The default is 100; 0 disables the check. The value must not be
+$`\mathrm{Ma} = \max\lvert\mathbf u\rvert/c_s`$ over the fluid nodes. If it exceeds the limit, the step raises an
+exception that reports the value and the step. The default is 100; 0 disables the check. The value must not be
 negative. Steps are numbered by the step count of the Context, as for the momentum removal.
 
 ### `setMachNumberLimit(limit)`, `getMachNumberLimit()`
@@ -135,7 +135,7 @@ See [Mach number and stability](lattice.md#mach-number-and-stability).
 
 ### `setSolidNodes(nodes)`, `getSolidNodes()`
 
-Lattice nodes that are solid walls, as a sequence of node indices i + nx*(j + ny*k): a Python list, a
+Lattice nodes that are solid walls, as a sequence of node indices $`i + n_x(j + n_y k)`$: a Python list, a
 range or a NumPy array of integers. The fluid does not occupy them, and does not slip on them (no-slip
 walls). With the default wall scheme a population of the fluid that streams into a solid node is sent back
 to the node it came from (halfway bounce-back): the wall lies halfway between a solid node and its fluid
@@ -160,8 +160,8 @@ give no-slip walls, accurate to second order in the lattice spacing, and conserv
 |---|---|---|
 | how | a population sent towards a solid node comes back to its node, reversed | the fluid node next to the wall rebuilds the populations that come from the solid nodes, as those of fluid at rest on the solid node |
 | where the wall is | halfway between the solid node and the first fluid node | on the solid nodes |
-| channel between the solid planes j = 0 and j = ny - 1 | walls at y = dx/2 and (ny - 3/2) dx | walls at y = 0 and (ny - 1) dx |
-| exact Poiseuille flow at | tau = 7/8 | tau = 1 |
+| channel between the solid planes $`j = 0`$ and $`j = n_y - 1`$ | walls at $`y = \Delta x/2`$ and $`(n_y - 3/2)\Delta x`$ | walls at $`y = 0`$ and $`(n_y - 1)\Delta x`$ |
+| exact Poiseuille flow at | $`\tau = 7/8`$ | $`\tau = 1`$ |
 | with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | equilibrium from the second node on; on the first node the momentum along the wall is 3 to 4 % low |
 | platforms | all | all |
 
@@ -191,10 +191,10 @@ It is the momentum given to the walls, divided by the time step, by:
 - the coupled particles: the reaction of particles at solid nodes and their reflections. The fluid nodes next
   to the walls are fluid nodes like the others: the reaction there stays in the fluid.
 
-It is zero before the first step and without solid nodes. With it, the total momentum of particles, fluid
-and walls is conserved. In a steady flow driven by a body acceleration g it equals g times the mass of
-the fluid. It is the total over all solid nodes: the force on each wall separately is not available yet.
-It does not advance the fluid.
+It is zero before the first step and without solid nodes. With it, the total momentum of particles, fluid and walls
+is conserved. In a steady flow driven by a body acceleration $`\mathbf g`$ it equals $`\mathbf g`$ times the mass of
+the fluid. It is the total over all solid nodes: the force on each wall separately is not available yet. It does not
+advance the fluid.
 
 ```python
 import numpy as np
@@ -217,20 +217,19 @@ The theory is in
 
 **Step by step.**
 
-1. **Choose the faces.** The six faces of the box are `LBMForce.XMin` (the face x = 0), `LBMForce.XMax` (the
+1. **Choose the faces.** The six faces of the box are `LBMForce.XMin` (the face $`x = 0`$), `LBMForce.XMax` (the
    face at the end of the box along x), `YMin`, `YMax`, `ZMin` and `ZMax`. The two faces of the same axis
    must be both periodic or both open: you cannot open `YMin` alone.
 2. **Choose the type of each open face** with `setFaceBoundary(face, type)`:
    - `LBMForce.Velocity`: the fluid beyond the face moves with the velocity of `setFaceVelocity(face, velocity)`
      (default zero). A velocity across the face is an inlet or an outlet with a given flow; a velocity
      along the face is a moving plate; zero is a wall at rest.
-   - `LBMForce.Density`: the fluid beyond the face has the density of `setFaceDensity(face, density)`. The
-     density is the pressure: p = c_s^2 rho with c_s^2 = dx^2/(3 dt^2). The default, 0, means the density of
-     the fluid at rest (`setFluidDensity()`). The velocity across the face is filtered in time, half the value
-     that the arriving fluid gives and half that of the face node at the start of the step (the velocity of
-     `getFluidFields()`): this damps a
-     spurious oscillation from one node to the next and from one step to the next, and does not change steady
-     flows ([theory, Time filter of the Density faces](../theory.md#open-faces)).
+- `LBMForce.Density`: the fluid beyond the face has the density of `setFaceDensity(face, density)`. The density is
+     the pressure: $`p = c_s^2\rho`$ with $`c_s^2 = \Delta x^2/(3\Delta t^2)`$. The default, 0, means the density of
+     the fluid at rest (`setFluidDensity()`). The velocity across the face is filtered in time, half the value that
+     the arriving fluid gives and half that of the face node at the start of the step (the velocity of
+     `getFluidFields()`): this damps a spurious oscillation from one node to the next and from one step to the next,
+     and does not change steady flows ([theory, Time filter of the Density faces](../theory.md#open-faces)).
 3. **Switch off the removal of the fluid momentum**: `setFluidMomentumRemovalFrequency(0)`. With open faces
    the fluid exchanges momentum with the outside, and the plugin refuses to create the Context otherwise.
 4. **Create the Context and run.** The velocities and densities of the faces can be changed during the run
@@ -256,11 +255,11 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
 
 **What to know.**
 
-- **Where the face is.** The nodes of the face, for `ZMin` the nodes k = 0 and for `ZMax` the nodes
-  k = nz - 1, are ordinary fluid nodes. The populations that come from beyond the face are those of fluid with
+- **Where the face is.** The nodes of the face, for `ZMin` the nodes $`k = 0`$ and for `ZMax` the nodes
+  $`k = n_z - 1`$, are ordinary fluid nodes. The populations that come from beyond the face are those of fluid with
   the velocity of a `Velocity` face, or the density of a `Density` face, placed one node outside the box: the
-  velocity or the density of the face holds there, at k = -1 and k = nz. A Couette flow between two `Velocity`
-  faces is u(z) = U (z + 1)/(nz + 1). The grid needs at least 3 nodes along an open axis.
+  velocity or the density of the face holds there, at $`k = -1`$ and $`k = n_z`$. A Couette flow between two
+  `Velocity` faces is $`u(z) = U(z + 1)/(n_z + 1)`$. The grid needs at least 3 nodes along an open axis.
 - **Edges and corners.** A node on several open faces takes the velocity of its first `Velocity` face in
   the order XMin, XMax, YMin, YMax, ZMin, ZMax; if all its faces are `Density` faces, it takes the density of
   the first one and the velocity zero. A face node next to a solid node with `Regularized` walls is a wall.
@@ -273,9 +272,9 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
   solid walls, not the open faces.
 - **Keep the flow slow and the density differences small**: a few percent at most, so that the fluid stays
   nearly incompressible and the Mach number low.
-- **Inlets.** Prefer a `Velocity` inlet with a `Density` outlet. A `Density` face through which the fluid
-  enters can become unstable at small tau: with a difference of density of 1 % it was stable at tau >= 0.6 and
-  unstable at tau <= 0.55 ([theory](../theory.md#open-faces)).
+- **Inlets.** Prefer a `Velocity` inlet with a `Density` outlet. A `Density` face through which the fluid enters can
+  become unstable at small $`\tau`$: with a difference of density of 1 % it was stable at $`\tau \ge 0.6`$ and
+  unstable at $`\tau \le 0.55`$ ([theory](../theory.md#open-faces)).
 - **Next to the faces** the flow enters and leaves, so in a duct driven by two `Density` faces the pressure
   gradient in the middle is somewhat larger than the difference of the faces divided by the length.
 
@@ -291,14 +290,14 @@ Context with `updateParametersInContext()`. Ignored on the other faces.
 
 ### `setFaceDensity(face, density)`, `getFaceDensity(face)`
 
-The density of the fluid beyond a `Density` face, in Da/nm^3; the default, 0, means the density of the fluid at
+The density of the fluid beyond a `Density` face, in Da/nm³; the default, 0, means the density of the fluid at
 rest. It can be changed in a Context with `updateParametersInContext()`. Ignored on the other faces.
 
 ## Coupled particles
 
-Each coupled particle feels a friction force -gamma m (v - u) relative to the fluid velocity u at the
-nearest lattice node, plus a random force at the given temperature, and the fluid at that node receives
-the opposite force (Euler-Maruyama random force, with the explicit or the centred drag of
+Each coupled particle feels a friction force $`-\gamma m(\mathbf v - \mathbf u)`$ relative to the fluid velocity
+$`\mathbf u`$ at the nearest lattice node, plus a random force at the given temperature, and the fluid at that node
+receives the opposite force (Euler-Maruyama random force, with the explicit or the centred drag of
 [`setDragScheme()`](#setdragschemescheme-getdragscheme);
 [theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)), on every platform.
 
@@ -310,10 +309,9 @@ the opposite force (Euler-Maruyama random force, with the explicit or the centre
 - **Walls.** A coupled particle whose nearest node is solid and that moves into the wall has every
   component of its velocity reversed at the start of the step, as for a no-slip wall. A particle that
   already moves out of the wall keeps its velocity. Uncoupled particles do not see the walls.
-- **Stability.** With the explicit drag (the default), in one step the drag multiplies the velocity of a
-  particle relative to the fluid by 1 - friction*dt. A warning is printed when friction*dt > 1, and the
-  motion is unstable for friction*dt >= 2. The centred drag is stable for any friction and prints no
-  warning.
+- **Stability.** With the explicit drag (the default), in one step the drag multiplies the velocity of a particle
+  relative to the fluid by $`1 - \gamma\Delta t`$. A warning is printed when $`\gamma\Delta t > 1`$, and the motion
+  is unstable for $`\gamma\Delta t \ge 2`$. The centred drag is stable for any friction and prints no warning.
 - **Temperature.** The temperature that OpenMM reports for the System (`StateDataReporter`, the kinetic
   energy of a State) is that of the full step. With the explicit drag it is the temperature of the coupled
   particles ([temperature example](examples.md#temperature-of-coupled-particles)); with the centred drag
@@ -357,10 +355,10 @@ force.setCouplingScheme(LBMForce.NVE)
 
 Time discretization of the drag
 ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms), Drag schemes):
-- `LBMForce.Explicit`, the default: the drag compares the velocity of the particle half a step before the
-  force with that of the fluid before the force. The temperature that `StateDataReporter` reports is right.
-  The velocity of a particle relative to the fluid changes sign at every step for friction*dt > 1 and grows
-  without bound for friction*dt >= 2.
+- `LBMForce.Explicit`, the default: the drag compares the velocity of the particle half a step before the force with
+  that of the fluid before the force. The temperature that `StateDataReporter` reports is right. The velocity of a
+  particle relative to the fluid changes sign at every step for $`\gamma\Delta t > 1`$ and grows without bound for
+  $`\gamma\Delta t \ge 2`$.
 - `LBMForce.Centered`: the drag compares the velocities of particle and fluid at the time of the force, and
   is solved exactly for all the particles of a node. It is stable for any friction. The velocities of the
   State have the right temperature, while `StateDataReporter` reports a lower one; use
@@ -377,11 +375,11 @@ force.setDragScheme(LBMForce.Centered)      # then system.addForce(force), after
 
 ### `openmmlbm.LBMTemperatureReporter(file, reportInterval, force)`
 
-A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps, the step, the time (ps) and
-the temperature (K) of the particles coupled to `force`, with three degrees of freedom per particle. It uses
-the velocity that has the right temperature for the drag scheme of the force: the full-step velocity
-v + dt F/(2m) with the explicit drag (the same temperature as `StateDataReporter`), the velocity of the State
-with the centred drag. `file` is a path or an open file such as `sys.stdout`.
+A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps, the step, the time (ps) and the
+temperature (K) of the particles coupled to `force`, with three degrees of freedom per particle. It uses the
+velocity that has the right temperature for the drag scheme of the force: the full-step velocity
+$`\mathbf v + \Delta t\,\mathbf F/(2m)`$ with the explicit drag (the same temperature as `StateDataReporter`), the
+velocity of the State with the centred drag. `file` is a path or an open file such as `sys.stdout`.
 
 ```python
 from openmmlbm import LBMTemperatureReporter
@@ -397,7 +395,7 @@ of one report have the step in their name, written with 10 digits (for example `
 
 | File | Content |
 |---|---|
-| `<prefix>_fluid_<step>.vti` | the lattice (VTK XML ImageData): point (i, j, k) is the node at (i dx, j dx, k dx), in nm; `density` in Da/nm^3 and `velocity` in nm/ps, as [`getFluidFields()`](#getfluidfieldscontext) returns them; with solid nodes also `solid`, 1 for a solid node and 0 for a fluid one |
+| `<prefix>_fluid_<step>.vti` | the lattice (VTK XML ImageData): point $`(i, j, k)`$ is the node at $`(i\Delta x, j\Delta x, k\Delta x)`$, in nm; `density` in Da/nm³ and `velocity` in nm/ps, as [`getFluidFields()`](#getfluidfieldscontext) returns them; with solid nodes also `solid`, 1 for a solid node and 0 for a fluid one |
 | `<prefix>_particles_<step>.vtp` | the particles (VTK XML PolyData): positions in nm, `velocity` in nm/ps (the velocities of the State, at the half step), `mass` in Da, `index` in the System, and `coupled`, 1 for the particles coupled to the fluid and 0 for the others |
 | `<prefix>.pvd` | the list of the files written, with their times in ps: open it in ParaView to load the whole series |
 
@@ -410,7 +408,7 @@ they are, instead of wrapping each molecule into the periodic box (as `getState(
 that the particles overlay the lattice; `append=True`, for a run continued from a checkpoint, to keep the files
 already listed in `<prefix>.pvd`. The numbers are binary (raw appended data, little endian). Writing the files
 neither advances the fluid nor draws random numbers, so it does not change the run. A file of the fluid holds
-16 bytes per node in single precision (4 MB for 64^3 nodes).
+16 bytes per node in single precision (4 MB for $`64^3`$ nodes).
 
 ```python
 from openmmlbm import LBMVTKReporter
@@ -436,13 +434,14 @@ costs about 30% to 40% more on an NVIDIA A100.
 With the fluctuating fluid **use the centred drag**
 ([`setDragScheme(LBMForce.Centered)`](#setdragschemescheme-getdragscheme)) and measure the temperature with
 [`LBMTemperatureReporter`](#openmmlbmlbmtemperaturereporterfile-reportinterval-force): the coupled particles then
-have the set temperature, their diffusion coefficient contains the hydrodynamic contribution of the thermal
-flows, and the Einstein relation holds. With the explicit drag the particles are too hot, by about
-friction x dt x m/(2 m_c), and a warning on stderr says so when the Context is created (measured: 14% for beads of 100 Da with friction 10/ps and dt = 0.02 ps, 56% for beads of
-1000 Da with friction 10/ps and dt = 0.01 ps; [choosing the drag](lattice.md#choosing-the-drag)). Keep tau at
-0.505 or above: closer to 1/2 the fluctuating fluid becomes unstable (at tau <= 0.501 with kT = 1/3000 in
-lattice units, at tau = 0.5001 for water with dx = 0.5 nm and dt = 0.01 ps;
-[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), stability near tau = 1/2).
+have the set temperature, their diffusion coefficient contains the hydrodynamic contribution of the thermal flows,
+and the Einstein relation holds. With the explicit drag the particles are too hot, by about
+$`\gamma\Delta t\,m/(2m_c)`$, and a warning on stderr says so when the Context is created (measured: 14% for beads
+of 100 Da with friction 10/ps and $`\Delta t = 0.02`$ ps, 56% for beads of 1000 Da with friction 10/ps and
+$`\Delta t = 0.01`$ ps; [choosing the drag](lattice.md#choosing-the-drag)). Keep $`\tau`$ at 0.505 or above: closer
+to 1/2 the fluctuating fluid becomes unstable (at $`\tau \le 0.501`$ with $`k_BT = 1/3000`$ in lattice units, at
+$`\tau = 0.5001`$ for water with $`\Delta x = 0.5`$ nm and $`\Delta t = 0.01`$ ps;
+[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), stability near $`\tau = 1/2`$).
 
 ```python
 force.setFluidFluctuations(True)
@@ -450,8 +449,8 @@ force.setFluidFluctuations(True)
 
 ### `setFriction(friction)`, `getFriction()`
 
-Friction coefficient gamma of the coupling, in 1/ps. The default is 1/ps. It must not be negative.
-Typical values for coarse-grained beads are 1 to 10/ps; keep friction*dt well below 1.
+Friction coefficient $`\gamma`$ of the coupling, in 1/ps. The default is 1/ps. It must not be negative.
+Typical values for coarse-grained beads are 1 to 10/ps; keep $`\gamma\Delta t`$ well below 1.
 
 ### `setTemperature(temperature)`, `getTemperature()`
 
@@ -478,9 +477,10 @@ None of these methods advances the fluid.
 
 Returns the tuple `(density, velocity)` with the fluid at every lattice node, in node order:
 
-- `density`: a list of densities in Da/nm^3, as a `Quantity`;
-- `velocity`: a list of `Vec3` velocities in nm/ps, as a `Quantity`. It is the velocity of the forced
-  fluid, u = j/rho + g dt/2 (see [velocity of the fluid](lattice.md#velocity-of-the-fluid)).
+- `density`: a list of densities in Da/nm³, as a `Quantity`;
+- `velocity`: a list of `Vec3` velocities in nm/ps, as a `Quantity`. It is the velocity of the forced fluid,
+  $`\mathbf u = \mathbf j/\rho + \mathbf g\Delta t/2`$ (see [velocity of the
+  fluid](lattice.md#velocity-of-the-fluid)).
 
 Solid nodes have zero density and velocity.
 
@@ -492,24 +492,24 @@ u = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))   # shape (
 
 ### `getFluidState(context)`, `setFluidState(context, state)`
 
-`getFluidState()` returns the complete state of the fluid as a list of 19 x numNodes numbers.
+`getFluidState()` returns the complete state of the fluid as a list of 19 × numNodes numbers.
 `setFluidState()` sets it in a Context with the same grid size; it accepts a list or a NumPy array.
 Together they save and restore the fluid, which is not part of OpenMM checkpoints. To save and continue a
 whole run use the [checkpoints](#checkpoints) instead: they also keep the random numbers. Unlike checkpoints,
 the fluid state does not depend on the platform: it can move a fluid from one platform to another
 ([restart](restart.md#moving-a-run-to-another-platform)).
 
-The state holds, for the 19 lattice populations of each node, their deviations from the rest
-equilibrium, f_q - w_q, in lattice units, stored as [q*numNodes + node]. A population is the value plus
-the weight w_q: 1/3 for q = 0, 1/18 for q = 1 to 6, 1/36 for q = 7 to 18 (see
-[theory.md](../theory.md#4-storage-and-ordering-implemented)). At rest the state is zero. Treat it as
-opaque unless you know the model. Saving and restoring it is exact. For large lattices the list is long: convert it at once to a NumPy array, for example
-`np.array(force.getFluidState(context))`; with 64^3 nodes it takes 40 MB.
+The state holds, for the 19 lattice populations of each node, their deviations from the rest equilibrium,
+$`f_q - w_q`$, in lattice units, stored as `[q*numNodes + node]`. A population is the value plus the weight $`w_q`$:
+1/3 for $`q = 0`$, 1/18 for $`q = 1`$ to 6, 1/36 for $`q = 7`$ to 18 (see
+[theory.md](../theory.md#4-storage-and-ordering-implemented)). At rest the state is zero. Treat it as opaque unless
+you know the model. Saving and restoring it is exact. For large lattices the list is long: convert it at once to a
+NumPy array, for example `np.array(force.getFluidState(context))`; with $`64^3`$ nodes it takes 40 MB.
 
 ### `getFluidMachNumber(context)`
 
-Returns the largest Mach number of the fluid, max |j/rho|/c_s over the fluid nodes, at the current
-step.
+Returns the largest Mach number of the fluid, $`\max\lvert\mathbf j/\rho\rvert/c_s`$ over the fluid nodes, at the
+current step.
 
 ### `getLatticeParametersInContext(context)`
 
@@ -636,8 +636,7 @@ deserializing. A force deserialized on its own is returned as a generic `openmm.
 ## Errors
 
 Invalid settings raise a Python `Exception` with the messages listed in
-[troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created (for
-example open faces with the removal of the fluid momentum, or a single open face on an axis). Some
-conditions only print a warning on stderr: a relaxation time outside [0.505, 2], and, with coupled
-particles and the explicit drag, tau > 1.7, friction*dt > 1, and fluid fluctuations (the particles are then too
-hot).
+[troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created (for example open
+faces with the removal of the fluid momentum, or a single open face on an axis). Some conditions only print a
+warning on stderr: a relaxation time outside [0.505, 2], and, with coupled particles and the explicit drag,
+$`\tau > 1.7`$, $`\gamma\Delta t > 1`$, and fluid fluctuations (the particles are then too hot).

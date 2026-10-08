@@ -21,11 +21,11 @@ fields into NumPy arrays indexed by node.
 
 ## Channel flow between two walls
 
-A fluid between two parallel walls, driven by a uniform acceleration g along x, reaches the parabolic
-Poiseuille profile u(y) = g/(2 nu) (y - y0)(y1 - y), where y0 and y1 are the positions of the walls.
-The script below builds the channel with two planes of solid nodes and runs until the flow is steady.
-It then compares the profile with the parabola, switches the acceleration off with
-`updateParametersInContext()`, and measures how fast the flow decays.
+A fluid between two parallel walls, driven by a uniform acceleration $`g`$ along $`x`$, reaches the parabolic
+Poiseuille profile $`u(y) = g/(2\nu)\,(y - y_0)(y_1 - y)`$, where $`y_0`$ and $`y_1`$ are the positions of the
+walls. The script below builds the channel with two planes of solid nodes and runs until the flow is steady. It then
+compares the profile with the parabola, switches the acceleration off with `updateParametersInContext()`, and
+measures how fast the flow decays.
 
 ```python
 import numpy as np
@@ -109,13 +109,13 @@ decay rate 0.0992 /ps, slowest viscous mode pi^2 nu/H^2 = 0.0990 /ps
 
 Notes:
 
-- **Where the walls are.** With halfway bounce-back the walls lie halfway between the solid planes
-  and the first fluid planes, at y0 = dx/2 and y1 = (ny - 3/2) dx. The channel is H = (ny - 2) dx =
-  10 nm wide.
-- **Agreement with the parabola.** The profile has exactly the curvature of the parabola. The residual
-  difference of 0.17% is a uniform slip of the bounce-back scheme, which depends on tau and vanishes at
-  tau = 7/8. With this slip included, the profile matches the exact solution of the scheme to 1e-9
-  (see [theory.md](../theory.md#solid-nodes-and-walls)).
+- **Where the walls are.** With halfway bounce-back the walls lie halfway between the solid planes and the first
+  fluid planes, at $`y_0 = \Delta x/2`$ and $`y_1 = (n_y - 3/2)\Delta x`$. The channel is
+  $`H = (n_y - 2)\Delta x = 10`$ nm wide.
+- **Agreement with the parabola.** The profile has exactly the curvature of the parabola. The residual difference of
+  0.17% is a uniform slip of the bounce-back scheme, which depends on $`\tau`$ and vanishes at $`\tau = 7/8`$. With
+  this slip included, the profile matches the exact solution of the scheme to 1e-9 (see
+  [theory.md](../theory.md#solid-nodes-and-walls)).
 - **Periodic directions.** The walls are planes of solid nodes. In x and z the lattice stays periodic,
   so the channel is infinite along the flow.
 - **Momentum removal.** It must be off (`setFluidMomentumRemovalFrequency(0)`): otherwise the plugin
@@ -130,7 +130,7 @@ Notes:
 
 ## A particle kicked in the fluid
 
-A particle of 100 Da starts with velocity v0 = 1 nm/ps in a fluid at rest. The temperature is zero, so
+A particle of 100 Da starts with velocity $`v_0 = 1`$ nm/ps in a fluid at rest. The temperature is zero, so
 there is no random force. The drag slows the particle down and passes its momentum to the fluid, and the
 total momentum of particle and fluid is conserved.
 
@@ -190,17 +190,18 @@ Output:
 
 Notes:
 
-- **Explicit drag.** With the fluid at rest, one step multiplies the velocity by 1 - gamma dt = 0.9.
-  The particle slows down more slowly than (1 - gamma dt)^n, because the fluid at its node starts to move
-  with it. This hydrodynamic response is what the lattice Boltzmann fluid adds to a Langevin thermostat.
-- **Momentum.** The momentum lost by the particle is in the fluid: p_total/p0 = 1 to the rounding of the
-  sum over the populations. The removal of the fluid momentum must be off, otherwise the plugin would
-  subtract it.
-- **Long times.** Particle and fluid end up moving together at P/(m + M_fluid), 3e-4 v0 here.
+- **Explicit drag.** With the fluid at rest, one step multiplies the velocity by $`1 - \gamma\Delta t = 0.9`$. The
+  particle slows down more slowly than $`(1 - \gamma\Delta t)^n`$, because the fluid at its node starts to move with
+  it. This hydrodynamic response is what the lattice Boltzmann fluid adds to a Langevin thermostat.
+- **Momentum.** The momentum lost by the particle is in the fluid: $`p_{\mathrm{total}}/p_0 = 1`$ to the rounding of
+  the sum over the populations. The removal of the fluid momentum must be off, otherwise the plugin would subtract
+  it.
+- **Long times.** Particle and fluid end up moving together at $`P/(m + M_{\mathrm{fluid}})`$,
+  $`3\times10^{-4}\,v_0`$ here.
 
 ## Temperature of coupled particles
 
-The random force at temperature T and the friction keep the coupled particles at about T: `LBMForce`
+The random force at temperature $`T`$ and the friction keep the coupled particles at about $`T`$: `LBMForce`
 is their thermostat. OpenMM's leapfrog stores the velocities at half steps. The temperature that OpenMM
 reports (`StateDataReporter`) is that of the full step, because OpenMM shifts the velocities by half a
 step with the coupling force of the next step
@@ -293,18 +294,18 @@ full step 293 K, half step 308 K
 
 Notes:
 
-- **Full step.** Slightly below T: the fluid has no thermal fluctuations of its own (`setFluidFluctuations()`
+- **Full step.** Slightly below $`T`$: the fluid has no thermal fluctuations of its own (`setFluidFluctuations()`
   is off by default) and takes part of the momentum of the particles. Over 20000 steps the same system gives
-  295.8 +- 0.4 K, 1.4% below T
+  295.8 ± 0.4 K, 1.4% below $`T`$
   ([validation.md](../validation.md)).
-- **Half step.** For a free particle it is T/(1 - gamma dt/2) = 315.8 K, lowered by the same factor:
-  311.7 +- 0.4 K over 20000 steps.
-- **OpenMM's own temperature.** `StateDataReporter(..., temperature=True)` gives the full-step
-  temperature at the report step; the reporter above computes it one step earlier, from steps n - 1 and n.
-- **Centred drag.** With `setDragScheme(LBMForce.Centered)` the half-step temperature is the right one; for
-  a particle in a fluid at rest the full-step one is lower by 1/(1 + gamma dt/2), and the particles are
-  colder than with the explicit drag ([choosing the drag](lattice.md#choosing-the-drag)).
-  On this system the means over the same reports are 292 K and 293 K, equal within the statistical error.
+- **Half step.** For a free particle it is $`T/(1 - \gamma\Delta t/2) = 315.8`$ K, lowered by the same factor:
+  311.7 ± 0.4 K over 20000 steps.
+- **OpenMM's own temperature.** `StateDataReporter(..., temperature=True)` gives the full-step temperature at the
+  report step; the reporter above computes it one step earlier, from steps $`n - 1`$ and $`n`$.
+- **Centred drag.** With `setDragScheme(LBMForce.Centered)` the half-step temperature is the right one; for a
+  particle in a fluid at rest the full-step one is lower by $`1/(1 + \gamma\Delta t/2)`$, and the particles are
+  colder than with the explicit drag ([choosing the drag](lattice.md#choosing-the-drag)). On this system the means
+  over the same reports are 292 K and 293 K, equal within the statistical error.
 - **Using the reporter.** It works with any Simulation: pass the indices of the coupled particles. It
   stops one step before each report to record the velocities.
 
@@ -596,15 +597,15 @@ Notes:
 - **GPU platforms.** To run on CUDA, replace the platform with `mm.Platform.getPlatformByName('CUDA')`
   and pass `{'Precision': 'mixed'}`. Every example above runs unchanged, and so do the two examples with open
   faces below; the random forces, and therefore
-  the outputs with T > 0, differ from those of the Reference platform (see the
+  the outputs with $`T > 0`$, differ from those of the Reference platform (see the
   [status table](README.md#what-works-in-this-version)).
 
 ## Couette flow between two open faces
 
-The faces of the box can be open instead of periodic ([open faces](api_reference.md#open-faces)). Here the
-bottom face z = 0 holds the fluid at rest and the top face moves along x with the velocity U: the fluid
-between them is sheared, and in the steady state its velocity grows linearly from 0 to U. x and y stay
-periodic, so the two plates are infinite.
+The faces of the box can be open instead of periodic ([open faces](api_reference.md#open-faces)). Here the bottom
+face $`z = 0`$ holds the fluid at rest and the top face moves along $`x`$ with the velocity $`U`$: the fluid between
+them is sheared, and in the steady state its velocity grows linearly from 0 to $`U`$. $`x`$ and $`y`$ stay periodic,
+so the two plates are infinite.
 
 ```python
 import numpy as np
@@ -653,9 +654,10 @@ largest deviation from the linear profile: 1.7e-14 nm/ps
 
 Notes:
 
-- **Where the plates are.** The velocity of an open face holds one node beyond the face: the populations that
-  come from beyond the face are those of fluid moving with the face there. The plates are at z = -dx = -0.5 nm
-  and z = nz dx = 5 nm, and the nodes of the faces, z = 0 and z = 4.5 nm, are ordinary fluid nodes.
+- **Where the plates are.** The velocity of an open face holds one node beyond the face: the populations that come
+  from beyond the face are those of fluid moving with the face there. The plates are at $`z = -\Delta x = -0.5`$ nm
+  and $`z = n_z\Delta x = 5`$ nm, and the nodes of the faces, $`z = 0`$ and $`z = 4.5`$ nm, are ordinary fluid
+  nodes.
 - **Both faces of an axis.** The two faces perpendicular to an axis are both periodic or both open. Here
   both z faces are `Velocity` faces; the bottom one keeps the default velocity, zero.
 - **Momentum removal.** It must be off with open faces: the plugin refuses to create the Context otherwise.
@@ -663,12 +665,12 @@ Notes:
 
 ## Flow in a duct driven by a pressure difference
 
-A fluid flows from high to low pressure. In the lattice Boltzmann model the pressure is p = c_s^2 rho, with
-c_s^2 = dx^2/(3 dt^2), so two open faces at different densities drive a flow. Here the duct runs along y and
-has square cross-section: no-slip walls perpendicular to x and to z (solid nodes), and the faces y = 0 and
-y = (ny - 1) dx at the densities 1.01 rho0 and rho0. The script compares the velocity in the middle of the duct
-with the analytical solution for an incompressible fluid in a rectangular duct, with the pressure gradient
-measured in the middle.
+A fluid flows from high to low pressure. In the lattice Boltzmann model the pressure is $`p = c_s^2\rho`$, with
+$`c_s^2 = \Delta x^2/(3\Delta t^2)`$, so two open faces at different densities drive a flow. Here the duct runs
+along $`y`$ and has square cross-section: no-slip walls perpendicular to $`x`$ and to $`z`$ (solid nodes), and the
+faces $`y = 0`$ and $`y = (n_y - 1)\Delta x`$ at the densities $`1.01\rho_0`$ and $`\rho_0`$. The script compares
+the velocity in the middle of the duct with the analytical solution for an incompressible fluid in a rectangular
+duct, with the pressure gradient measured in the middle.
 
 ```python
 import numpy as np
@@ -747,14 +749,14 @@ largest deviation in the middle cross-section: 1.3 % of the centre velocity
 
 Notes:
 
-- **The pressure falls linearly** in the middle of the duct, as for a viscous flow in a straight duct. The
-  densities of the faces hold one node beyond the faces (y = -dx and y = ny dx), and next to the faces the flow
-  enters and leaves the duct: part of the difference of pressure goes there, and the gradient in the middle is
+- **The pressure falls linearly** in the middle of the duct, as for a viscous flow in a straight duct. The densities
+  of the faces hold one node beyond the faces ($`y = -\Delta x`$ and $`y = n_y\Delta x`$), and next to the faces the
+  flow enters and leaves the duct: part of the difference of pressure goes there, and the gradient in the middle is
   that of a duct somewhat shorter than the 8.5 nm between those points.
 - **Accuracy.** The deviation is the error of the bounce-back walls on a duct only 7 nodes wide (it falls as
-  1/H^2 with the width H in nodes, and it vanishes at tau = 7/8; here tau = 1.1), plus the compressibility of
-  the fluid: the density changes by 1 % along the duct, and so does the velocity, since rho u is the same in
-  every cross-section. Keep the density difference small (a few percent at most).
+  $`1/H^2`$ with the width $`H`$ in nodes, and it vanishes at $`\tau = 7/8`$; here $`\tau = 1.1`$), plus the
+  compressibility of the fluid: the density changes by 1 % along the duct, and so does the velocity, since
+  $`\rho u`$ is the same in every cross-section. Keep the density difference small (a few percent at most).
 - **Walls with Density faces.** With bounce-back walls the lattice keeps a spurious "staggered" motion, an
   oscillation from one node to the next and from one step to the next, which the `Density` faces damp
   ([theory.md](../theory.md#open-faces)). The flow above is steady to rounding.

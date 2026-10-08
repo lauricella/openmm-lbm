@@ -77,18 +77,18 @@ Mach number   0.00173
 
 ### What each part does
 
-**The box defines the lattice.** The fluid fills the periodic box of the System. `setGridSize(nx, ny,
-nz)` sets the number of lattice nodes along each box vector. The box must be rectangular and the
-lattice cells must be cubic: the lattice spacing dx = Lx/nx must equal Ly/ny and Lz/nz. Here
-dx = 4 nm/8 = 0.5 nm.
+**The box defines the lattice.** The fluid fills the periodic box of the System. `setGridSize(nx, ny, nz)` sets the
+number of lattice nodes along each box vector. The box must be rectangular and the lattice cells must be cubic: the
+lattice spacing $`\Delta x = L_x/n_x`$ must equal $`L_y/n_y`$ and $`L_z/n_z`$. Here
+$`\Delta x = 4\ \mathrm{nm}/8 = 0.5\ \mathrm{nm}`$.
 
 **The fluid has a density and a kinematic viscosity.** The defaults are those of water:
-602.214 Da/nm^3 (1 g/cm^3) and 1.0035 nm^2/ps (1.0035e-6 m^2/s, water at 20 C).
+602.214 Da/nm³ (1 g/cm³) and 1.0035 nm²/ps (1.0035e-6 m²/s, water at 20 C).
 
-**The integrator sets the lattice time step.** `LBMForce` requires a `VerletIntegrator`; any other
-integrator is rejected when the Context is created. The step size of the integrator is the lattice
-time step dt, and it cannot change after the Context has been created. Together, dx, dt and the
-viscosity fix the relaxation time tau = 3 nu dt/dx^2 + 1/2 of the model, returned by
+**The integrator sets the lattice time step.** `LBMForce` requires a `VerletIntegrator`; any other integrator is
+rejected when the Context is created. The step size of the integrator is the lattice time step $`\Delta t`$, and it
+cannot change after the Context has been created. Together, $`\Delta x`$, $`\Delta t`$ and the viscosity fix the
+relaxation time $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$ of the model, returned by
 `getLatticeParametersInContext()`. The [lattice](lattice.md) page explains how to choose them.
 
 **The fluid starts at rest, at equilibrium.** A new Context starts the fluid at uniform density and at
@@ -98,15 +98,15 @@ the velocity set by `setInitialFluidVelocity()`, zero by default.
 lattice steps. Reading the fluid, computing forces or energies with `context.getState()`, or
 minimizing the energy does not advance it.
 
-**The body acceleration pushes the fluid.** A uniform acceleration g acts on every fluid node as the
-force density rho g. The default removal of the fluid momentum (every step) would cancel its effect,
-so this example disables it with `setFluidMomentumRemovalFrequency(0)`.
+**The body acceleration pushes the fluid.** A uniform acceleration $`\mathbf g`$ acts on every fluid node as the
+force density $`\rho\mathbf g`$. The default removal of the fluid momentum (every step) would cancel its effect, so
+this example disables it with `setFluidMomentumRemovalFrequency(0)`.
 
-**Reading the fluid.** `getFluidFields(context)` returns the density and the velocity at every
-lattice node, as two lists with units. The velocity is that of the forced fluid, u = j/rho + g dt/2,
-where j is the momentum density on the lattice. After 1 ps it is g (t + dt/2) = 0.05 x 1.005 =
-0.05025 nm/ps. The [lattice](lattice.md#node-indexing-and-numpy-arrays) page shows how to arrange the
-lists as three-dimensional NumPy arrays.
+**Reading the fluid.** `getFluidFields(context)` returns the density and the velocity at every lattice node, as two
+lists with units. The velocity is that of the forced fluid, $`\mathbf u = \mathbf j/\rho + \mathbf g\Delta t/2`$,
+where $`\mathbf j`$ is the momentum density on the lattice. After 1 ps it is
+$`g(t + \Delta t/2) = 0.05\times1.005 = 0.05025`$ nm/ps. The [lattice](lattice.md#node-indexing-and-numpy-arrays)
+page shows how to arrange the lists as three-dimensional NumPy arrays.
 
 **The Mach number measures the fluid speed against the lattice sound speed.** The model is accurate
 only for small Mach numbers. The plugin checks the Mach number every 100 steps and stops the
@@ -134,8 +134,8 @@ A `Quantity` in a unit that cannot be converted, for example a friction in nm, r
 method and the two units, instead of being turned into a wrong number.
 
 **Densities are per mole.** In OpenMM a mass is a molar mass: the dalton is 1 g/mol. A density in
-g/cm^3 must therefore be multiplied by the Avogadro constant; without it `setFluidDensity()` and
-`setFaceDensity()` raise `TypeError` (OpenMM itself would read 1 g/cm^3 as 1e-21 Da/nm^3):
+g/cm³ must therefore be multiplied by the Avogadro constant; without it `setFluidDensity()` and
+`setFaceDensity()` raise `TypeError` (OpenMM itself would read 1 g/cm³ as 1e-21 Da/nm³):
 
 ```python
 import openmm.unit as unit

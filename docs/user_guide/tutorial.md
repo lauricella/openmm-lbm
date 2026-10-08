@@ -56,20 +56,20 @@ simulations of atoms and molecules.
 
 `LBMForce` fills the periodic box with a fluid described by the lattice Boltzmann method: the box is
 divided into cubic cells, and at each node of the lattice the fluid has a density and a velocity
-u. The parameters are those of a real fluid:
+$`\mathbf u`$. The parameters are those of a real fluid:
 
-- `setGridSize(nx, ny, nz)`: the number of nodes along each side. The spacing dx = box length / nodes
-  must be the same in the three directions.
-- `setFluidDensity(rho)`: in Da/nm^3 (water: 602 Da/nm^3).
-- `setKinematicViscosity(nu)`: in nm^2/ps (water at 300 K: about 0.9 nm^2/ps).
+- `setGridSize(nx, ny, nz)`: the number of nodes along each side. The spacing
+  $`\Delta x = \text{box length}/\text{nodes}`$ must be the same in the three directions.
+- `setFluidDensity(rho)`: in Da/nm³ (water: 602 Da/nm³).
+- `setKinematicViscosity(nu)`: in nm²/ps (water at 300 K: about 0.9 nm²/ps).
 
 The particles added with `addParticle(i)` are **coupled** to the fluid. At every step each one feels,
 from the node nearest to it,
 
-- a friction force -gamma m (v - u): the particle is dragged towards the velocity of the fluid
+- a friction force $`-\gamma m(\mathbf v - \mathbf u)`$: the particle is dragged towards the velocity of the fluid
   (`setFriction(gamma)`, in 1/ps);
 - a random force whose size is set by the temperature (`setTemperature(T)`), which keeps the particles
-  at the temperature T. This is the Euler-Maruyama scheme; the scheme `NVE` has no random force.
+  at the temperature $`T`$. This is the Euler-Maruyama scheme; the scheme `NVE` has no random force.
 
 The opposite of these forces is given to the fluid, so the total momentum of particles and fluid is
 conserved. A particle that moves pushes the fluid, and the fluid pushes the other particles: this is
@@ -91,19 +91,19 @@ python $EX/plot.py kick_bead_lb_on.txt kick_bead_lb_off.txt --x 1 --y 5 --logy -
 (`--nodes 30` makes the box smaller, 9 nm instead of 30 nm, so that the run takes about 15 seconds on
 one processor core instead of 10 minutes; on a GPU leave it out.) Open `kick.png`.
 
-- **Without the fluid** the speed falls as exp(-gamma t), a straight line on the logarithmic axis, and
-  the bead stops after v0/gamma = 0.9 nm.
+- **Without the fluid** the speed falls as $`\exp(-\gamma t)`$, a straight line on the logarithmic axis, and
+  the bead stops after $`v_0/\gamma = 0.9`$ nm.
 - **With the fluid** the first steps are the same, then the decay slows down: the fluid around the bead
   has been set in motion and drags it along. The bead travels further, and its speed decays as a power
-  of time (about t^(-3/2), the "long-time tail" of hydrodynamics) until it reaches the velocity of the
-  whole fluid, m v0 / (m + M), where M is the mass of the fluid.
+  of time (about $`t^{-3/2}`$, the "long-time tail" of hydrodynamics) until it reaches the velocity of the
+  whole fluid, $`m v_0/(m + M)`$, where $`M`$ is the mass of the fluid.
 
 Exercises:
 
 1. Look at the end of the two output files: what is the distance travelled in each case?
 2. Double the friction (`--friction 20`). How do the two curves change?
 3. With `--nodes 20` the box is smaller and the fluid lighter: compare the final velocity with
-   m v0 / (m + M). The script prints the mass of the bead; the fluid has mass density x box^3.
+   $`m v_0/(m + M)`$. The script prints the mass of the bead; the fluid has mass $`\text{density}\times\text{box}^3`$.
 
 ## 4. Lesson 2: momentum and energy (`uniform_flow.py`)
 
@@ -117,7 +117,7 @@ The table shows, every 50 steps, the velocity of the bead relative to the fluid,
 bead, the change of the total momentum, and the kinetic energies of bead and fluid relative to the
 initial one.
 
-- The bead reaches the velocity of the fluid in about 1/gamma = 0.1 ps.
+- The bead reaches the velocity of the fluid in about $`1/\gamma = 0.1`$ ps.
 - `p_total/p0 - 1` stays at the level of rounding, below 1e-13: momentum is conserved exactly.
 - `E_total/E0` decreases: kinetic energy is not conserved. The friction turns it into heat, and so
   does the viscosity of the fluid. The fluid of the lattice Boltzmann method has a constant
@@ -126,13 +126,13 @@ initial one.
 Exercises:
 
 1. Change the viscosity through the relaxation time (`--tau 0.6`, `--tau 1.5`). Does the final energy
-   change? (The relaxation time tau sets the viscosity: nu = (tau - 1/2) dx^2 / (3 dt).)
+   change? (The relaxation time $`\tau`$ sets the viscosity: $`\nu = (\tau - \tfrac12)\Delta x^2/(3\Delta t)`$.)
 2. Make the bead heavier (`--cells 100`). The common final velocity is printed in the second line:
    check it at the end of a longer run (`--steps 5000 --interval 500`).
 
 ## 5. Lesson 3: temperature (`thermal.py`)
 
-The fluid also works as a thermostat. One bead, started with the velocity sqrt(kT/m) along x, is brought
+The fluid also works as a thermostat. One bead, started with the velocity $`\sqrt{k_BT/m}`$ along $`x`$, is brought
 to 300 K by the friction and the random force:
 
 ```bash
@@ -178,15 +178,15 @@ Exercises:
 
 ## 6. Lesson 4: the fluid alone (`initial_state.py`)
 
-This example has no coupled particles. It starts the fluid from a wave, u_x = U sin(2 pi y / L),
+This example has no coupled particles. It starts the fluid from a wave, $`u_x = U\sin(2\pi y/L)`$,
 and prints its amplitude while the viscosity damps it:
 
 ```bash
 python $EX/fluid/initial_state.py --platform Reference --save state.npz
 ```
 
-The two columns are the measured amplitude and the decay U exp(-nu k^2 t) of a fluid with the
-viscosity nu that was set; they agree within 1%.
+The two columns are the measured amplitude and the decay $`U\exp(-\nu k^2 t)`$ of a fluid with the
+viscosity $`\nu`$ that was set; they agree within 1%.
 
 - The script builds the initial populations of the lattice from the density and the velocity with the
   function `equilibrium_deviation()`, and gives them to the plugin with `setFluidState()`. Read it:
@@ -200,10 +200,10 @@ python $EX/fluid/initial_state.py --platform Reference --load state.npz
 
 Exercises:
 
-1. Measure the viscosity: take the amplitude at two times, A1 and A2, and compute
-   nu = ln(A1/A2) / (k^2 (t2 - t1)) with k = 2 pi / L. Compare it with the value printed at the start.
+1. Measure the viscosity: take the amplitude at two times, $`A_1`$ and $`A_2`$, and compute
+   $`\nu = \ln(A_1/A_2)/(k^2(t_2 - t_1))`$ with $`k = 2\pi/L`$. Compare it with the value printed at the start.
 2. Repeat with `--viscosity 3` and `--viscosity 0.3`. How does the decay rate change? The script
-   prints the relaxation time tau: below 0.505 (or above 2) the plugin warns that the model is no longer
+   prints the relaxation time $`\tau`$: below 0.505 (or above 2) the plugin warns that the model is no longer
    accurate, and close to 0.5 the fluid may become unstable.
 
 ## 7. Lesson 5: a protein in the fluid (`cocomo/diffusion.py`)

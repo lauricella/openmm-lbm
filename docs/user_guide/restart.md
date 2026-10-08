@@ -274,7 +274,7 @@ dependency: `sbatch --dependency=afterany:<number of the previous job> job.sh`.
   `--checkpoint` and `--restart`) does this for you: it cuts its text files at the checkpoint, and starts a
   new trajectory file `<prefix>_<step>.dcd`.
 - **Cost.** A checkpoint holds the whole fluid: 19 numbers per node, 8 bytes each in mixed and double
-  precision, so 4 MB for 30^3 nodes and 150 MB for 100^3. Save one every 10 to 60 minutes of computing time,
+  precision, so 4 MB for $`30^3`$ nodes and 150 MB for $`100^3`$. Save one every 10 to 60 minutes of computing time,
   not every few steps.
 - **Safe writing.** The file is written under a temporary name and then renamed, so a job killed while it
   writes leaves the previous checkpoint intact.

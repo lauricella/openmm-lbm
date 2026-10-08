@@ -16,21 +16,21 @@ step, and continue with the [tutorial](tutorial.md).
 Know these before using the plugin for a study:
 
 - **By default the fluid has no thermal fluctuations of its own.** The random force acts on the coupled particles
-  only, and the fluid receives its reaction. As a consequence the diffusion coefficient of a free particle,
-  or of the centre of mass of a protein, stays close to kT/(m friction), the value without hydrodynamics,
-  although the fluid does carry the hydrodynamic interactions (a kick or a drag shows them): the Einstein
-  relation with the hydrodynamic mobility is not satisfied. The temperature of the coupled particles is
-  below the set temperature: with the explicit drag (the default) 1-2% with friction x dt = 0.1, about 13%
-  with a very large friction (100/ps); with the centred drag more, 7% for SOD1 at friction x dt = 0.1
-  ([choosing the drag](lattice.md#choosing-the-drag)). See [validation.md](../validation.md). A fluctuating lattice Boltzmann fluid, which removes
-  these limits, is available with
-  [`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations);
-  with it use the centred drag, whose particles then have the set temperature and the diffusion coefficient
-  with the hydrodynamic contribution (the explicit drag makes them too hot;
-  [choosing the drag](lattice.md#choosing-the-drag)).
+  only, and the fluid receives its reaction. As a consequence the diffusion coefficient of a free particle, or of
+  the centre of mass of a protein, stays close to $`k_BT/(m\,\text{friction})`$, the value without hydrodynamics,
+  although the fluid does carry the hydrodynamic interactions (a kick or a drag shows them): the Einstein relation
+  with the hydrodynamic mobility is not satisfied. The temperature of the coupled particles is below the set
+  temperature: with the explicit drag (the default) 1-2% with $`\text{friction}\times\Delta t = 0.1`$, about 13%
+  with a very large friction (100/ps); with the centred drag more, 7% for SOD1 at
+  $`\text{friction}\times\Delta t = 0.1`$ ([choosing the drag](lattice.md#choosing-the-drag)). See
+  [validation.md](../validation.md). A fluctuating lattice Boltzmann fluid, which removes these limits, is available
+  with [`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations); with
+  it use the centred drag, whose particles then have the set temperature and the diffusion coefficient with the
+  hydrodynamic contribution (the explicit drag makes them too hot; [choosing the
+  drag](lattice.md#choosing-the-drag)).
 - **Nearest-node coupling.** Each particle is coupled to the nearest lattice node, so the forces jump when
   a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
-  lattice spacing and on tau.
+  lattice spacing and on $`\tau`$.
 - **Walls and open faces.** Solid nodes are no-slip walls at rest, with bounce-back (the default) or
   regularized walls (`setWallScheme()`); a moving plate, an inlet or an outlet is an open face with an
   imposed velocity or density (`setFaceBoundary()`). The particles stay in OpenMM's periodic box also with
