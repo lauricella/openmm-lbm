@@ -4,11 +4,16 @@
 # SPDX-License-Identifier: MIT
 # --------------------------------------------------------------------------
 
-"""The Reference platform with the domain decomposition against one domain, on every rank (docs/theory.md,
-section 8; docs/validation.md, Domain decomposition).  It needs the plugin built with MPI (-DOPENMM_LBM_MPI=ON) and
-runs under MPI, so pytest does not collect it:
+"""The domain decomposition against one domain, on every rank (docs/theory.md, section 8; docs/validation.md, Domain
+decomposition).  It needs the plugin built with MPI (-DOPENMM_LBM_MPI=ON) and runs under MPI, so pytest does not
+collect it:
 
-    mpirun -n 4 python mpi_decomposition.py 2 2 1 [OpenCL]
+    mpirun -n 4 python mpi_decomposition.py 2 2 1 [OpenCL] [--platform CUDA --precision double --devices 4]
+
+By default it runs on the Reference platform.  With --platform the fluid cases run on that platform and precision,
+against one domain on the same platform (each rank on device local rank % devices with --devices), and the parts not
+available yet there with the decomposition (coupled particles, exchange of the halo, checkpoints) must stop every rank
+with an error.
 
 Every rank runs each case twice in the same process, with one domain (no communication) and with px*py*pz domains,
 and compares with the single domain: the state of the fluid nodes of its domain (getFluidState(), getLocalDomain()),
@@ -27,9 +32,22 @@ import openmm.unit as unit
 import openmmlbm
 from openmmlbm import LBMForce
 
-px, py, pz = (int(a) for a in sys.argv[1:4])
-other_platform = sys.argv[4] if len(sys.argv) > 4 else None
+args = sys.argv[1:]
+options = {}
+for name in ('--platform', '--precision', '--devices'):
+    if name in args:
+        i = args.index(name)
+        options[name] = args[i+1]
+        del args[i:i+2]
+px, py, pz = (int(a) for a in args[0:3])
+other_platform = args[3] if len(args) > 3 else None
+PLATFORM = options.get('--platform', 'Reference')
 rank, size = openmmlbm.mpiRank(), openmmlbm.mpiSize()
+PROPERTIES = {}
+if PLATFORM != 'Reference':
+    PROPERTIES['Precision'] = options.get('--precision', 'double')
+    if '--devices' in options:
+        PROPERTIES['DeviceIndex'] = str(openmmlbm.mpiLocalRank() % int(options['--devices']))
 N = (8, 6, 6)
 
 DENSITY, VELOCITY = unit.dalton/unit.nanometer**3, unit.nanometer/unit.picosecond
@@ -50,7 +68,8 @@ def state_of_block(state, domain):
 def arrays(fields):
     return np.array(fields[0].value_in_unit(DENSITY)), np.array(fields[1].value_in_unit(VELOCITY)).reshape(-1, 3)
 
-def run(case, decomposition, steps=60, density_halo=True, velocity_halo=True):
+def run(case, decomposition, steps=60, density_halo=True, velocity_halo=True, platform='Reference', properties={},
+        checkpoint=False):
     system = mm.System()
     system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 3, 0), mm.Vec3(0, 0, 3))
     system.addParticle(1.0)
@@ -60,8 +79,12 @@ def run(case, decomposition, steps=60, density_halo=True, velocity_halo=True):
     force.setBodyAcceleration(mm.Vec3(0.5, -0.2, 0.1))
     force.setInitialFluidVelocity(mm.Vec3(0.5, 0.2, -0.3))
     force.setFluidMomentumRemovalFrequency(3 if case == 'removal' else 0)
+    if case == 'fluctuating':
+        force.setTemperature(300.0)
+        force.setFluidFluctuations(True)
+        force.setRandomNumberSeed(1234)
     solid = []
-    if case in ('bounceback', 'regularized', 'faces'):
+    if case in ('bounceback', 'regularized', 'faces', 'fluctuating'):
         nx, ny, nz = N
         solid = sorted(set([i + nx*ny*k for k in range(nz) for i in range(nx)] +
                            [i + nx*(j + ny*k) for k in (2, 3) for j in (2, 3) for i in (3, 4)]))
@@ -78,7 +101,9 @@ def run(case, decomposition, steps=60, density_halo=True, velocity_halo=True):
     force.setVelocityHaloExchange(velocity_halo)
     system.addForce(force)
     integrator = mm.VerletIntegrator(0.01)
-    context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName(platform), properties)
+    if checkpoint:
+        force.createCheckpoint(context)     # the checkpoint of the fluid (OpenMM checkpoints do not hold it)
     context.setPositions([mm.Vec3(0.1, 0.7, 0.3)])
     # Populations perturbed by up to 1e-3 as a function of the global index: rank 0 gathers the state of the lattice,
     # changes it and scatters it (with one domain, gather and scatter change nothing).
@@ -128,7 +153,8 @@ POSITIONS = [(1.70, 0.40, 0.30), (1.70, 2.00, 1.30), (0.05, 2.90, 2.95), (3.20, 
 VELOCITIES = [(1.5, 0.3, -2.0), (-1.0, 0.5, 0.2), (-0.8, 1.0, 0.6), (0.4, -0.6, 0.9), (0.0, 0.0, -1.5),
               (0.3, 0.2, -0.4), (-0.2, -0.3, 0.5)]
 
-def run_particles(case, decomposition, steps=60, platform='Reference', thermostat=False, perturb=False, check=True):
+def run_particles(case, decomposition, steps=60, platform='Reference', thermostat=False, perturb=False, check=True,
+                  properties={}, halo=False, checkpoint=False):
     system = mm.System()
     system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 3, 0), mm.Vec3(0, 0, 3))
     field = mm.CustomExternalForce('-3*x+2*y-z')
@@ -170,9 +196,12 @@ def run_particles(case, decomposition, steps=60, platform='Reference', thermosta
         force.setFaceDensity(LBMForce.XMax, 605.0)
     force.setDomainDecomposition(*decomposition)
     force.setParticleCopiesCheck(check)
+    force.setVelocityHaloExchange(halo)
     system.addForce(force)
     integrator = mm.VerletIntegrator(0.01)
-    context = mm.Context(system, integrator, mm.Platform.getPlatformByName(platform))
+    context = mm.Context(system, integrator, mm.Platform.getPlatformByName(platform), properties)
+    if checkpoint:
+        context.createCheckpoint()
     context.setPositions([mm.Vec3(*x) for x in POSITIONS])
     scale = 1.0 + (1e-12 if perturb and rank == size - 1 else 0.0)
     context.setVelocities([mm.Vec3(*v)*scale for v in VELOCITIES])
@@ -183,10 +212,13 @@ def run_particles(case, decomposition, steps=60, platform='Reference', thermosta
     wall = np.array(force.getWallForce(context).value_in_unit(unit.kilojoule_per_mole/unit.nanometer))
     return np.array(force.getFluidState(context)).reshape(19, -1), wall, solid, particles, force.getLocalDomain(context)
 
-def expect_error(name, text, **options):
+def expect_error(name, text, case='explicit', **options):
     # Every rank must stop with the same error, and none may hang in a communication.
     try:
-        run_particles('explicit', (px, py, pz), steps=5, **options)
+        if case == 'fluid':
+            run('periodic', (px, py, pz), steps=5, **options)
+        else:
+            run_particles(case, (px, py, pz), steps=5, **options)
         message = 'no error  FAILED'
     except Exception as e:
         message = ('stops with the expected error' if text in str(e) else 'unexpected error: %s  FAILED' % e)
@@ -200,10 +232,14 @@ PRESSURE_FORCE = 602.214*(0.5/0.01)**2/3*4*3
 def verdict(diff):
     return 'bitwise identical' if diff == 0 else 'max difference %.1e' % diff
 
-for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal', 'velocityhalo'):
-    halos = dict(density_halo=(case != 'velocityhalo'))
-    single = run('periodic' if case == 'velocityhalo' else case, (1, 1, 1))
-    split = run('periodic' if case == 'velocityhalo' else case, (px, py, pz), **halos)
+# The exchange of the halo of the density and the velocity is on the Reference platform only, for now.
+reference = (PLATFORM == 'Reference')
+ON = dict(platform=PLATFORM, properties=PROPERTIES)
+single_precision = (PROPERTIES.get('Precision') == 'single')
+for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal') + (('velocityhalo',) if reference else ()):
+    halos = dict(density_halo=(case != 'velocityhalo' and reference), velocity_halo=reference)
+    single = run('periodic' if case == 'velocityhalo' else case, (1, 1, 1), **ON)
+    split = run('periodic' if case == 'velocityhalo' else case, (px, py, pz), **halos, **ON)
     # The slots of solid nodes only hold what the fluid nodes pushed into them in the last streaming, on the rank of
     # each fluid node: they are not part of the state of the fluid.
     fluid = fluid_of_block(single['solid'], split['domain'])
@@ -219,11 +255,34 @@ for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal', 'veloc
         gathered_fields = 0 if len(split['gathered_fields'][0]) == 0 else np.inf
     halo = compare_halo(single, split, case, **halos)
     walldiff = np.abs(split['wall'] - single['wall']).max()/max(1.0, np.abs(single['wall']).max())
-    tolerance = 1e-15 if case == 'removal' else 0
-    ok = max(diff, gathered, gathered_fields, halo) <= tolerance and walldiff < 1e-11
+    tolerance = (1e-6 if single_precision else 1e-15) if case == 'removal' else 0
+    # In single precision each rank sums in float the links of a solid node to its own fluid nodes, one domain all of
+    # them: the force on the walls then agrees to float rounding.
+    ok = max(diff, gathered, gathered_fields, halo) <= tolerance and walldiff < (1e-6 if single_precision else 1e-11)
     print('rank %d/%d %s %-12s state %s (%d nodes), gathered %s; fields with halo %s, gathered %s; wall force relative '
           'difference %.1e%s' % (rank, size, (px, py, pz), case, verdict(diff), fluid.sum(), verdict(gathered),
                                  verdict(halo), verdict(gathered_fields), walldiff, '' if ok else '  FAILED'), flush=True)
+
+# With the fluctuating fluid each rank draws its own random numbers, so the run differs from that of one domain; the
+# total mass is conserved in both.
+single = run('fluctuating', (1, 1, 1), steps=40, density_halo=False, velocity_halo=False, **ON)
+split = run('fluctuating', (px, py, pz), steps=40, density_halo=False, velocity_halo=False, **ON)
+if rank == 0:
+    fluid = np.ones(np.prod(N), dtype=bool)
+    fluid[single['solid']] = False
+    mass1, mass2 = (r['gathered'].reshape(19, -1)[:, fluid].sum() for r in (single, split))
+    changed = np.abs(split['gathered'] - single['gathered']).max()
+    ok = abs(mass2 - mass1) < (1e-3 if single_precision else 1e-10) and changed > 0
+    print('rank %d/%d %s fluctuating  runs; mass deviation %.3e against %.3e with one domain, populations differ by '
+          '%.1e%s' % (rank, size, (px, py, pz), mass2, mass1, changed, '' if ok else '  FAILED'), flush=True)
+
+if not reference:
+    # Not available yet on this platform with the decomposition: every rank must stop with the error.
+    expect_error('particles', 'coupled particles with the domain decomposition', **ON)
+    expect_error('halo', 'exchange of the halo', case='fluid', density_halo=False, velocity_halo=True, **ON)
+    expect_error('checkpoint', 'checkpoints with the domain decomposition', case='fluid', density_halo=False,
+                 velocity_halo=False, checkpoint=True, **ON)
+    sys.exit(0)
 
 for case in ('explicit', 'centered', 'faces'):
     single, wall1, solid, particles1, _ = run_particles(case, (1, 1, 1))

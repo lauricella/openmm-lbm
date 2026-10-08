@@ -11,6 +11,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "LBMKernels.h"
+#include "internal/LBMDecomposition.h"
 #include "openmm/common/ComputeArray.h"
 #include "openmm/common/ComputeContext.h"
 #include "openmm/common/ComputeKernel.h"
@@ -31,6 +32,13 @@ namespace LBMPlugin {
  * With the Centered drag scheme the coupling needs the other forces on the particles at the time of the force
  * evaluation, which OpenMM completes only at the end of it: the kernel then does its work in a
  * ForcePostComputation, registered when the Context is created, and execute() does nothing.
+ *
+ * With the domain decomposition (docs/theory.md, section 8) each rank stores only its block of the lattice, plus a
+ * layer of halo nodes along the divided axes (kernels/lbmFluid.cc).  After the collision of the frame of the block
+ * (the fluid nodes that push populations into other ranks) the populations pushed into the halo are packed, copied to
+ * the host and sent to their owners with non-blocking MPI calls while the interior of the block collides; the
+ * populations received are then copied into the block, before the walls and the boundaries.  The lists of slots are
+ * built once, in the order of (node, q) of the Reference platform.
  */
 class CommonCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
@@ -66,9 +74,24 @@ private:
     void setFluidParameters();
     void checkMachNumber();
     double computeMachNumber();
+    void removeFluidMomentum();
+    void collideAndStream();
+    /** The global index of node n of the block, and its storage index (kernels/lbmFluid.cc). */
+    int globalNode(int n) const;
+    int storageIndex(int n) const;
     OpenMM::ComputeContext& cc;
     const OpenMM::System& system;
     LBMLatticeParameters lattice;
+    /** The decomposition of the lattice, the first node and the extent of the block of the rank along each axis, 1
+        along the divided axes (which have a layer of halo nodes on each side) and 0 along the others, and the number
+        of nodes of the block and of entries per component of the arrays.  Without the decomposition the block is the
+        lattice and numStored = numLocal. */
+    LBMDecomposition decomposition;
+    int localStart[3], localCount[3], pad[3];
+    int numLocal, numStored;
+    /** The number of entries of solidNodes (the solid nodes, with the decomposition those linked to fluid nodes of the
+        block), and of the fluid nodes of the frame and of the interior of the block. */
+    int numSolidEntries, numFrameNodes, numInteriorNodes;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;
     /** Step count of the Context: set by beginStep() at the start of a lattice step, incremented at its end. */
@@ -107,7 +130,13 @@ private:
     /** 1 for fluid nodes and 0 for solid nodes; the list of the solid nodes; the momentum given to each solid node by the deviations f - w in the last step
         (3 components of numSolidNodes each); with bounce-back walls, the fluid nodes next to the solid nodes and the
         bits 1 << q of their directions q towards solid nodes (LBMBoundaries::findWallLinks()). */
-    OpenMM::ComputeArray isFluid, solidNodes, wallExchange, wallNodes, wallLinks;
+    OpenMM::ComputeArray isFluid, solidNodes, solidLinks, wallExchange, wallNodes, wallLinks;
+    /** With the domain decomposition: the fluid nodes of the frame and of the interior of the block; the slots of the
+        populations to send (in the halo) and to receive (in the block), rank after rank; the buffers of the device; and
+        the number of slots for each rank and the buffers of the host. */
+    OpenMM::ComputeArray frameNodes, interiorNodes, sendSlots, receiveSlots, sendBuffer, receiveBuffer;
+    std::vector<int> sendCounts, receiveCounts;
+    std::vector<std::vector<double> > sendBuffers, receiveBuffers;
     /** Boundary nodes (regularized walls and open faces, internal/LBMBoundaries.h): the nodes, the bits of their
         unknown and solid directions, kind + 4*(face + 1), the momentum given to the wall by each node in the last
         step (deviations f - w, 3 components of numBoundaryNodes each), and the velocity and density minus 1 of the
@@ -131,7 +160,7 @@ private:
     OpenMM::ComputeKernel computeMomentsKernel, sumMomentumKernel, centerVelocityKernel, removeMomentumKernel;
     OpenMM::ComputeKernel collideKernel, bounceBackKernel, wallExchangeKernel, applyBoundariesKernel, maxSpeedKernel;
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
-    OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel;
+    OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel;
 };
 
 } // namespace LBMPlugin

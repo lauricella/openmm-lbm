@@ -160,7 +160,9 @@ public:
      * fluid of its domain.  The copies of the particles must stay identical: the same positions and velocities on
      * every rank, the same platform and precision, and no AndersenThermostat or Monte Carlo barostat; the plugin
      * checks them.  More than one domain needs a plugin built with MPI (CMake option OPENMM_LBM_MPI), and the
-     * product must be the number of MPI ranks.  It is fixed when the Context is created.
+     * product must be the number of MPI ranks.  It is fixed when the Context is created.  For now the CUDA, OpenCL
+     * and HIP platforms decompose the fluid, the walls and the open faces, but refuse coupled particles and the
+     * exchange of the halo with more than one domain.
      *
      * @param px    the number of domains along x
      * @param py    the number of domains along y

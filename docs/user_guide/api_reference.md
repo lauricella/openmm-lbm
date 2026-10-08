@@ -77,8 +77,11 @@ one domain: the whole lattice in one process, without MPI. A 0 lets MPI choose t
 More than one domain needs the plugin built with MPI (`-DOPENMM_LBM_MPI=ON`, [installation](installation.md)), and
 the product must be the number of MPI ranks; otherwise creating the Context raises an error. It is fixed when the
 Context is created. In this version the Reference platform decomposes the fluid, the walls, the open faces and the
-coupling of the particles ([theory](../theory.md#8-domain-decomposition-in-development-for-version-040)); a Context
-with more than one domain refuses checkpoints, and the CUDA, OpenCL and HIP platforms refuse more than one domain.
+coupling of the particles, and the CUDA, OpenCL and HIP platforms the fluid, the walls and the open faces, each rank
+on its own GPU ([theory](../theory.md#8-domain-decomposition-in-development-for-version-040)); a Context with more
+than one domain refuses checkpoints, and on the CUDA, OpenCL and HIP platforms coupled particles and the exchange of
+the halo. To give each rank its own GPU, launch with one GPU per task (`srun --gpus-per-task=1`) or set the platform
+property `DeviceIndex` to `openmmlbm.mpiLocalRank()`.
 `getFluidFields()`, `getFluidState()` and `setFluidState()` work on the domain of each rank, or gather the whole
 lattice on rank 0 ([reading and writing the fluid](#reading-and-writing-the-fluid-of-a-context)).
 `getWallForce()`, `getFluidMachNumber()`, `getState(getForces=True)`, `setFluidState()` and the calls with `gather`

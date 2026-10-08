@@ -567,7 +567,7 @@ ParaView 5.13 (`vtkXMLImageDataReader`, `vtkXMLPolyDataReader`, the `.pvd` reade
 coordinates of the nodes, the fields and the times agree, within 5e-8 relative in single precision and exactly in
 double precision, and the readers return the strings of the `units` array of the field data.
 
-## Domain decomposition (`python/tests/mpi_decomposition.py`, Reference, MPI)
+## Domain decomposition (`python/tests/mpi_decomposition.py`, MPI)
 
 The script runs each case on every rank twice, with one domain and with the decomposition given on the command line,
 and compares the populations of the fluid nodes that the rank owns (`docs/theory.md`, section 8). Lattice
@@ -599,6 +599,26 @@ NaN. Over the six decompositions (22 ranks): identical bit for bit in the four c
 momentum and in the sixth (110 of 110); with the removal the state agrees to $`1.1 \cdot 10^{-19}`$ and the fields to
 $`3.1 \cdot 10^{-17}`$ (density relative to $`\rho_0`$, velocity in nm/ps). With one domain
 `test_local_fields_halo_and_gather` checks the same rules (pytest, with and without open faces).
+
+**CUDA and OpenCL platforms.** The same fluid cases, without the exchange of the halo (not available yet on these
+platforms), on one node with four A100 GPUs, one GPU per rank, against one domain on the same platform and precision,
+plugin built with `-DOPENMM_LBM_MPI=ON`, OpenMM 8.6.1 (`--platform`, `--precision` and `--devices` of the script).
+CUDA in double precision with $`2 \times 1 \times 1`$, $`1 \times 2 \times 1`$, $`1 \times 1 \times 2`$,
+$`2 \times 2 \times 1`$, $`1 \times 2 \times 2`$ and $`4 \times 1 \times 1`$, in mixed and single precision with
+$`2 \times 1 \times 1`$ and $`2 \times 2 \times 1`$; OpenCL in double precision with $`2 \times 1 \times 1`$ and
+$`1 \times 2 \times 2`$, in single precision with $`2 \times 2 \times 1`$ (40 ranks in all):
+
+| Precision | State, gathered state, fields of the domain, gathered fields | Removal of the fluid momentum | Force on the walls (relative) |
+|---|---|---|---|
+| double, mixed | identical bit for bit on every rank (120 of 120) | at most $`1.0 \cdot 10^{-17}`$ | at most $`1.3 \cdot 10^{-13}`$ |
+| single | identical bit for bit on every rank (40 of 40) | at most $`4.4 \cdot 10^{-9}`$ | at most $`1.8 \cdot 10^{-8}`$ |
+
+In single precision each rank sums in float the links of a solid node to its own fluid nodes, and one domain sums all
+of them, so the force on the walls agrees to float rounding. A fluctuating fluid (300 K, 40 steps) runs on every rank
+and conserves the mass as one domain does. Checkpoints, coupled particles and the exchange of the halo with more than
+one domain stop every rank with an error (120 of 120). Without the decomposition nothing changes on these platforms:
+the regression cases of the walls and the open faces (7 cases, with and without coupled particles and fluctuations)
+are identical bit for bit to the previous version on CUDA and OpenCL in the three precisions.
 
 **Coupled particles.** Seven particles of 50 Da, with a constant field and a soft pair force, at $`T = 0`$: near the
 borders of the blocks, two on the same node, one crossing the periodic boundaries and two moving into the solid

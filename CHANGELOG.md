@@ -30,7 +30,13 @@ versions the API may still change.
   domain, filled for the fields whose halo is exchanged at the end of every step (`setDensityHaloExchange()`,
   `setVelocityHaloExchange()`, off by default, serialized in version 8) and NaN otherwise. With one domain the new
   arguments change nothing, and the halo comes from the lattice across the periodic boundaries. Not yet: checkpoints
-  and `LBMVTKReporter` with more than one domain, GPU platforms.
+  and `LBMVTKReporter` with more than one domain.
+- CUDA, OpenCL and HIP platforms: the fluid, the walls and the open faces with more than one domain, one GPU per rank.
+  Each rank stores only its block and a layer of halo nodes along the divided axes; the populations pushed into the
+  halo are packed on the device, sent through the host with non-blocking MPI calls while the interior of the block
+  collides, and unpacked into the blocks of their owners. Identical bit for bit to one domain on the same platform and
+  precision without the removal of the fluid momentum. Without the decomposition the arithmetic and the kernels do not
+  change. Not yet with more than one domain on these platforms: coupled particles and the exchange of the halo.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations

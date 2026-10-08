@@ -421,7 +421,7 @@ Reference), plus 3 for each GPU platform. Without the Python module, `make Pytho
 | `PYTHON_EXECUTABLE`, `SWIG_EXECUTABLE` | the full path of `python` and `swig`, if they are not the first ones in `PATH` |
 | `CMAKE_C_COMPILER`, `CMAKE_CXX_COMPILER` | the compilers, if not the default ones; use those that compiled OpenMM |
 | `LBM_DEBUG` | `ON` adds diagnostics of the fluid (`docs/theory.md`, section 6) |
-| `OPENMM_LBM_MPI` | `ON` builds the decomposition of the lattice over MPI ranks (`setDomainDecomposition()`, in development for version 0.4.0: for now on the Reference platform only); it needs an MPI library (`mpicc` in `PATH`), the same one that runs the program. `OFF` (the default) needs no MPI |
+| `OPENMM_LBM_MPI` | `ON` builds the decomposition of the lattice over MPI ranks (`setDomainDecomposition()`, in development for version 0.4.0: the fluid on every platform, the coupled particles and the exchange of the halo for now on the Reference platform only); it needs an MPI library (`mpicc` in `PATH`), the same one that runs the program. `OFF` (the default) needs no MPI |
 
 ### Checks on OpenMM
 

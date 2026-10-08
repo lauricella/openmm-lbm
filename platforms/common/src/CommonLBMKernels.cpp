@@ -16,10 +16,13 @@
 #include "openmm/common/ContextSelector.h"
 #include "openmm/common/IntegrationUtilities.h"
 #include "openmm/internal/ContextImpl.h"
+#include "openmm/internal/OSRngSeed.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <numeric>
 #include <sstream>
 
 using namespace LBMPlugin;
@@ -77,103 +80,195 @@ static void downloadAsDouble(const ComputeArray& array, vector<double>& data) {
     }
 }
 
+int CommonCalcLBMForceKernel::globalNode(int n) const {
+    int i = n%localCount[0], j = (n/localCount[0])%localCount[1], k = n/(localCount[0]*localCount[1]);
+    return (localStart[0]+i) + lattice.nx*((localStart[1]+j) + lattice.ny*(localStart[2]+k));
+}
+
+int CommonCalcLBMForceKernel::storageIndex(int n) const {
+    int i = n%localCount[0], j = (n/localCount[0])%localCount[1], k = n/(localCount[0]*localCount[1]);
+    return (i+pad[0]) + (localCount[0]+2*pad[0])*((j+pad[1]) + (localCount[1]+2*pad[1])*(k+pad[2]));
+}
+
 void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& force, const LBMLatticeParameters& lattice) {
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
-    if (lattice.isDecomposed()) {
+    decomposition = LBMDecomposition(lattice.nx, lattice.ny, lattice.nz, lattice.procs);
+    bool decomposed = decomposition.isDecomposed();
+    if (decomposed) {
         // The same collective check of the platform and precision as on the Reference platform, so that ranks on
-        // different platforms all stop with the same error.
+        // different platforms all stop with the same error.  The parts not available yet with the decomposition on
+        // these platforms depend only on the System and the force, which are the same on every rank, so all the
+        // ranks stop together.
         string precision = (cc.getUseDoublePrecision() ? "double" : cc.getUseMixedPrecision() ? "mixed" : "single");
-        LBMDecomposition(lattice.nx, lattice.ny, lattice.nz, lattice.procs).requireSameOnAllRanks(
-                getPlatform().getName() + " platform in " + precision + " precision", "platform and precision");
-        throw OpenMMException("LBMForce: the domain decomposition (setDomainDecomposition()) is not available yet on "
-                "the CUDA, OpenCL and HIP platforms");
+        decomposition.requireSameOnAllRanks(getPlatform().getName() + " platform in " + precision + " precision", "platform and precision");
+        if (!lattice.particles.empty())
+            throw OpenMMException("LBMForce: coupled particles with the domain decomposition (setDomainDecomposition()) are not "
+                    "available yet on the CUDA, OpenCL and HIP platforms");
+        if (lattice.densityHaloExchange || lattice.velocityHaloExchange)
+            throw OpenMMException("LBMForce: the exchange of the halo (setDensityHaloExchange(), setVelocityHaloExchange()) is not "
+                    "available yet on the CUDA, OpenCL and HIP platforms");
     }
     this->lattice = lattice;
     forceGroup = force.getForceGroup();
     bool centered = (lattice.dragScheme == LBMForce::Centered);
 
-    // The fluid is stored in the mixed type: double unless the platform runs in single precision.
+    // The block of the rank, the whole lattice without the decomposition.  Along the divided axes the arrays hold a
+    // layer of halo nodes on each side (kernels/lbmFluid.cc); stored is their extent.
 
     int numNodes = lattice.getNumNodes();
+    int size[3] = {lattice.nx, lattice.ny, lattice.nz}, stored[3];
+    decomposition.getLocalDomain(localStart, localCount);
+    for (int a = 0; a < 3; a++) {
+        pad[a] = (localCount[a] < size[a] ? 1 : 0);
+        stored[a] = localCount[a]+2*pad[a];
+    }
+    numLocal = localCount[0]*localCount[1]*localCount[2];
+    numStored = stored[0]*stored[1]*stored[2];
+
+    // The global node next to the node with coordinates index along c (wrapped around), and whether the link crosses
+    // an open face; the storage index of the node next to the node of the block with local coordinates index.
+    auto globalNeighbor = [&] (const int index[3], const int c[3], bool& crossesFace) {
+        int target[3];
+        crossesFace = false;
+        for (int a = 0; a < 3; a++) {
+            target[a] = index[a] + c[a];
+            crossesFace = crossesFace || (lattice.isOpenAxis(a) && (target[a] < 0 || target[a] >= size[a]));
+            target[a] = (target[a] + size[a])%size[a];
+        }
+        return target[0] + lattice.nx*(target[1] + lattice.ny*target[2]);
+    };
+    auto neighborStorage = [&] (const int local[3], const int c[3]) {
+        int index[3];
+        for (int a = 0; a < 3; a++)
+            index[a] = (pad[a] ? local[a]+c[a]+1 : (local[a]+c[a]+localCount[a])%localCount[a]);
+        return index[0] + stored[0]*(index[1] + stored[1]*index[2]);
+    };
+    auto localIndex = [&] (int node) {
+        int i = node%lattice.nx - localStart[0], j = (node/lattice.nx)%lattice.ny - localStart[1];
+        int k = node/(lattice.nx*lattice.ny) - localStart[2];
+        return i + localCount[0]*(j + localCount[1]*k);
+    };
+
+    // The fluid is stored in the mixed type: double unless the platform runs in single precision.
+
     useDouble = (cc.getUseDoublePrecision() || cc.getUseMixedPrecision());
     int elementSize = (useDouble ? sizeof(double) : sizeof(float));
     blockSize = ComputeContext::ThreadBlockSize;
-    numGroups = max(1, min(cc.getNumThreadBlocks(), (numNodes+blockSize-1)/blockSize));
-    populations.initialize(cc, D3Q19::numVelocities*numNodes, elementSize, "lbmPopulations");
-    densityDeviation.initialize(cc, numNodes, elementSize, "lbmDensityDeviation");
-    momentum.initialize(cc, 3*numNodes, elementSize, "lbmMomentum");
-    piNeq.initialize(cc, 6*numNodes, elementSize, "lbmPiNeq");
+    numGroups = max(1, min(cc.getNumThreadBlocks(), (numLocal+blockSize-1)/blockSize));
+    populations.initialize(cc, D3Q19::numVelocities*numStored, elementSize, "lbmPopulations");
+    densityDeviation.initialize(cc, numStored, elementSize, "lbmDensityDeviation");
+    momentum.initialize(cc, 3*numStored, elementSize, "lbmMomentum");
+    piNeq.initialize(cc, 6*numStored, elementSize, "lbmPiNeq");
     partialSums.initialize(cc, 4*numGroups, elementSize, "lbmPartialSums");
     partialMax.initialize(cc, numGroups, elementSize, "lbmPartialMax");
-    centerVelocity.initialize(cc, 3, elementSize, "lbmCenterVelocity");
+    centerVelocity.initialize(cc, (decomposed ? 4 : 3), elementSize, "lbmCenterVelocity");
 
     // The fluid starts at equilibrium, with lattice density 1 and the initial velocity.  As on the Reference
-    // platform, the populations are stored as deviations from the rest equilibrium, f_q - w_q.
+    // platform, the populations are stored as deviations from the rest equilibrium, f_q - w_q.  The nodes of the
+    // halo take the type of their node (those beyond an open face, which nothing reads, are fluid).
 
-    vector<double> f(D3Q19::numVelocities*numNodes);
+    int numSolidNodes = lattice.solidNodes.size();
+    isFluidHost.assign(numNodes, 1);
+    for (int node : lattice.solidNodes)
+        isFluidHost[node] = 0;
+    vector<int> isFluidStored = isFluidHost;
+    if (decomposed) {
+        isFluidStored.assign(numStored, 1);
+        for (int c = 0; c < stored[2]; c++)
+            for (int b = 0; b < stored[1]; b++)
+                for (int a = 0; a < stored[0]; a++) {
+                    int index[3] = {localStart[0]+a-pad[0], localStart[1]+b-pad[1], localStart[2]+c-pad[2]};
+                    int zero[3] = {0, 0, 0};
+                    bool beyondFace;
+                    int node = globalNeighbor(index, zero, beyondFace);
+                    if (!beyondFace)
+                        isFluidStored[a + stored[0]*(b + stored[1]*c)] = isFluidHost[node];
+                }
+    }
+    vector<double> f(D3Q19::numVelocities*numStored);
     double dfeq[D3Q19::numVelocities];
     D3Q19::equilibriumDeviation(0.0, lattice.initialVelocity[0], lattice.initialVelocity[1], lattice.initialVelocity[2], dfeq);
     for (int q = 0; q < D3Q19::numVelocities; q++)
-        for (int node = 0; node < numNodes; node++)
-            f[q*numNodes+node] = dfeq[q];
+        for (int node = 0; node < numStored; node++)
+            f[q*numStored+node] = (isFluidStored[node] ? dfeq[q] : -D3Q19::w[q]);
 
     // Solid nodes hold no fluid: their populations start at zero, that is at the deviation -w_q.  With bounce-back
     // the part w of the populations gives the walls the same momentum in every step (the static pressure): it is
     // computed here once, in double precision, with the links from the solid nodes to the fluid nodes that do not
     // cross an open face.  The same links, seen from the fluid nodes next to the walls (wallNodes), are the bits of
-    // wallLinks: along them the bounce-back returns the populations to the fluid.
+    // wallLinks: along them the bounce-back returns the populations to the fluid; seen from the solid nodes, they are
+    // the bits of solidLinks, for the momentum exchange.  With the decomposition a rank counts the links to its own
+    // fluid nodes, and the solid node may lie in its halo; a solid node seen at two places of the halo (an axis divided
+    // in two blocks of one node) has an entry for each.
 
-    int numSolidNodes = lattice.solidNodes.size();
-    int size[3] = {lattice.nx, lattice.ny, lattice.nz};
-    isFluidHost.assign(numNodes, 1);
-    for (int node : lattice.solidNodes)
-        isFluidHost[node] = 0;
     staticWallMomentum = Vec3();
+    vector<int> solidSlotsHost, solidLinksHost;
     for (int node : lattice.solidNodes) {
         int index[3] = {node%lattice.nx, (node/lattice.nx)%lattice.ny, node/(lattice.nx*lattice.ny)};
-        for (int q = 0; q < D3Q19::numVelocities; q++)
-            f[q*numNodes+node] = -D3Q19::w[q];
-        if (lattice.wallScheme != LBMForce::BounceBack)
-            continue;
+        vector<pair<int, int> > entries;
+        if (!decomposed)
+            entries.push_back(make_pair(node, 0));
         for (int q = 1; q < D3Q19::numVelocities; q++) {
-            int c[3] = {D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]}, target[3];
-            bool crossesFace = false;
-            for (int a = 0; a < 3; a++) {
-                target[a] = index[a] + c[a];
-                crossesFace = crossesFace || (lattice.isOpenAxis(a) && (target[a] < 0 || target[a] >= size[a]));
-                target[a] = (target[a] + size[a])%size[a];
-            }
-            if (!crossesFace && isFluidHost[target[0] + lattice.nx*(target[1] + lattice.ny*target[2])])
+            int c[3] = {D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]};
+            bool crossesFace;
+            int target = globalNeighbor(index, c, crossesFace);
+            if (crossesFace || !isFluidHost[target] || !decomposition.owns(target))
+                continue;
+            if (lattice.wallScheme == LBMForce::BounceBack)
                 staticWallMomentum -= Vec3(c[0], c[1], c[2])*(2.0*D3Q19::w[q]);
+            int slot = node;
+            if (decomposed) {
+                int t = localIndex(target);
+                int local[3] = {t%localCount[0], (t/localCount[0])%localCount[1], t/(localCount[0]*localCount[1])};
+                int back[3] = {-c[0], -c[1], -c[2]};
+                slot = neighborStorage(local, back);
+            }
+            int e = 0;
+            while (e < (int) entries.size() && entries[e].first != slot)
+                e++;
+            if (e == (int) entries.size())
+                entries.push_back(make_pair(slot, 0));
+            entries[e].second |= 1<<q;
+        }
+        for (auto& entry : entries) {
+            solidSlotsHost.push_back(entry.first);
+            solidLinksHost.push_back(entry.second);
         }
     }
+    numSolidEntries = solidSlotsHost.size();
 
     // Boundary nodes (docs/theory.md, section 1, and internal/LBMBoundaries.h): with regularized walls the fluid
     // nodes next to the solid nodes, and the fluid nodes on the open faces.  They are fluid nodes like the others,
     // except that applyBoundaries rebuilds their unknown populations.  The part w of the populations that a wall node
     // sends into the solid nodes and receives from them gives the walls the same momentum in every step, -2 c_q w_q
-    // for each solid direction q.
+    // for each solid direction q.  With the decomposition each rank keeps the boundary nodes of its block, and the
+    // kernels see the local indices of the nodes.
 
     LBMBoundaries boundaries;
     boundaries.find(lattice, isFluidHost);
-    int numBoundaryNodes = boundaries.nodes.size();
+    vector<int> boundaryLocal, unknownLocal, solidLocal, kindAndFace;
     staticBoundaryMomentum = Vec3();
-    vector<int> kindAndFace(numBoundaryNodes);
-    for (int b = 0; b < numBoundaryNodes; b++) {
-        kindAndFace[b] = boundaries.kind[b] + 4*(boundaries.face[b] + 1);
+    for (int b = 0; b < (int) boundaries.nodes.size(); b++) {
+        if (!decomposition.owns(boundaries.nodes[b]))
+            continue;
+        boundaryLocal.push_back(localIndex(boundaries.nodes[b]));
+        unknownLocal.push_back(boundaries.unknown[b]);
+        solidLocal.push_back(boundaries.solid[b]);
+        kindAndFace.push_back(boundaries.kind[b] + 4*(boundaries.face[b] + 1));
         for (int q = 1; q < D3Q19::numVelocities; q++)
             if (boundaries.solid[b] & (1<<q))
                 staticBoundaryMomentum -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*D3Q19::w[q]);
     }
+    int numBoundaryNodes = boundaryLocal.size();
     if (numBoundaryNodes > 0) {
         boundaryNodes.initialize<int>(cc, numBoundaryNodes, "lbmBoundaryNodes");
-        boundaryNodes.upload(boundaries.nodes);
+        boundaryNodes.upload(boundaryLocal);
         boundaryUnknown.initialize<int>(cc, numBoundaryNodes, "lbmBoundaryUnknown");
-        boundaryUnknown.upload(boundaries.unknown);
+        boundaryUnknown.upload(unknownLocal);
         boundarySolid.initialize<int>(cc, numBoundaryNodes, "lbmBoundarySolid");
-        boundarySolid.upload(boundaries.solid);
+        boundarySolid.upload(solidLocal);
         boundaryKindAndFace.initialize<int>(cc, numBoundaryNodes, "lbmBoundaryKindAndFace");
         boundaryKindAndFace.upload(kindAndFace);
         boundaryExchange.initialize(cc, 3*numBoundaryNodes, elementSize, "lbmBoundaryExchange");
@@ -181,27 +276,119 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         faceParameters.initialize(cc, 24, elementSize, "lbmFaceParameters");
     }
     populations.upload(f, true);
-    isFluid.initialize<int>(cc, numNodes, "lbmIsFluid");
-    isFluid.upload(isFluidHost);
-    vector<int> wallNodesHost, wallLinksHost;
+    isFluid.initialize<int>(cc, numStored, "lbmIsFluid");
+    isFluid.upload(isFluidStored);
+    vector<int> wallNodesHost, wallLinksHost, wallNodesLocal, wallLinksLocal;
     LBMBoundaries::findWallLinks(lattice, isFluidHost, wallNodesHost, wallLinksHost);
-    int numWallNodes = wallNodesHost.size();
+    for (int b = 0; b < (int) wallNodesHost.size(); b++)
+        if (decomposition.owns(wallNodesHost[b])) {
+            wallNodesLocal.push_back(localIndex(wallNodesHost[b]));
+            wallLinksLocal.push_back(wallLinksHost[b]);
+        }
+    int numWallNodes = wallNodesLocal.size();
     if (numWallNodes > 0) {
         wallNodes.initialize<int>(cc, numWallNodes, "lbmWallNodes");
-        wallNodes.upload(wallNodesHost);
+        wallNodes.upload(wallNodesLocal);
         wallLinks.initialize<int>(cc, numWallNodes, "lbmWallLinks");
-        wallLinks.upload(wallLinksHost);
+        wallLinks.upload(wallLinksLocal);
     }
-    solidNodes.initialize<int>(cc, max(1, numSolidNodes), "lbmSolidNodes");
-    wallExchange.initialize(cc, 3*max(1, numSolidNodes), elementSize, "lbmWallExchange");
-    if (numSolidNodes > 0)
-        solidNodes.upload(lattice.solidNodes);
+    solidNodes.initialize<int>(cc, max(1, numSolidEntries), "lbmSolidNodes");
+    solidLinks.initialize<int>(cc, max(1, numSolidEntries), "lbmSolidLinks");
+    wallExchange.initialize(cc, 3*max(1, numSolidEntries), elementSize, "lbmWallExchange");
+    if (numSolidEntries > 0) {
+        solidNodes.upload(solidSlotsHost);
+        solidLinks.upload(solidLinksHost);
+    }
     wallExchange.upload(vector<double>(wallExchange.getSize(), 0.0), true);
+
+    // The exchange of the populations with the domain decomposition (docs/theory.md, section 8).  A population that a
+    // fluid node of the block pushes along c_q into a fluid node t of another rank, without crossing an open face, goes
+    // to the owner of t, which writes it at the slot (q, t); a population pushed into a solid node stays in the halo,
+    // where the bounce-back and the momentum exchange read it.  Both sides list the slots in the order of (t, q), as on
+    // the Reference platform.  The frame of the block is made of the fluid nodes that send populations.
+
+    if (decomposed) {
+        int numRanks = decomposition.getSize();
+        vector<vector<pair<pair<int, int>, int> > > send(numRanks), receive(numRanks);
+        vector<int> frameHost, interiorHost;
+        for (int n = 0; n < numLocal; n++) {
+            int node = globalNode(n);
+            if (!isFluidHost[node])
+                continue;
+            int local[3] = {n%localCount[0], (n/localCount[0])%localCount[1], n/(localCount[0]*localCount[1])};
+            int index[3] = {localStart[0]+local[0], localStart[1]+local[1], localStart[2]+local[2]};
+            bool sends = false;
+            for (int q = 1; q < D3Q19::numVelocities; q++) {
+                int c[3] = {D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]}, back[3] = {-c[0], -c[1], -c[2]};
+                bool leaves = false, arrives = false;
+                for (int a = 0; a < 3; a++) {
+                    leaves = leaves || (pad[a] && (local[a]+c[a] < 0 || local[a]+c[a] >= localCount[a]));
+                    arrives = arrives || (pad[a] && (local[a]-c[a] < 0 || local[a]-c[a] >= localCount[a]));
+                }
+                bool crossesFace;
+                if (leaves) {
+                    int target = globalNeighbor(index, c, crossesFace);
+                    if (!crossesFace && isFluidHost[target]) {
+                        send[decomposition.ownerOfNode(target)].push_back(make_pair(make_pair(target, q), q*numStored + neighborStorage(local, c)));
+                        sends = true;
+                    }
+                }
+                if (arrives) {
+                    int source = globalNeighbor(index, back, crossesFace);
+                    if (!crossesFace && isFluidHost[source])
+                        receive[decomposition.ownerOfNode(source)].push_back(make_pair(make_pair(node, q), q*numStored + storageIndex(n)));
+                }
+            }
+            (sends ? frameHost : interiorHost).push_back(n);
+        }
+        vector<int> sendSlotsHost, receiveSlotsHost;
+        sendCounts.assign(numRanks, 0);
+        receiveCounts.assign(numRanks, 0);
+        sendBuffers.resize(numRanks);
+        receiveBuffers.resize(numRanks);
+        for (int r = 0; r < numRanks; r++) {
+            std::sort(send[r].begin(), send[r].end());
+            std::sort(receive[r].begin(), receive[r].end());
+            for (auto& link : send[r])
+                sendSlotsHost.push_back(link.second);
+            for (auto& link : receive[r])
+                receiveSlotsHost.push_back(link.second);
+            sendCounts[r] = send[r].size();
+            receiveCounts[r] = receive[r].size();
+            sendBuffers[r].resize(sendCounts[r]);
+            receiveBuffers[r].resize(receiveCounts[r]);
+        }
+        numFrameNodes = frameHost.size();
+        numInteriorNodes = interiorHost.size();
+        frameNodes.initialize<int>(cc, max(1, numFrameNodes), "lbmFrameNodes");
+        interiorNodes.initialize<int>(cc, max(1, numInteriorNodes), "lbmInteriorNodes");
+        sendSlots.initialize<int>(cc, max<int>(1, sendSlotsHost.size()), "lbmSendSlots");
+        receiveSlots.initialize<int>(cc, max<int>(1, receiveSlotsHost.size()), "lbmReceiveSlots");
+        sendBuffer.initialize(cc, max<int>(1, sendSlotsHost.size()), elementSize, "lbmSendBuffer");
+        receiveBuffer.initialize(cc, max<int>(1, receiveSlotsHost.size()), elementSize, "lbmReceiveBuffer");
+        if (numFrameNodes > 0)
+            frameNodes.upload(frameHost);
+        if (numInteriorNodes > 0)
+            interiorNodes.upload(interiorHost);
+        if (!sendSlotsHost.empty())
+            sendSlots.upload(sendSlotsHost);
+        if (!receiveSlotsHost.empty())
+            receiveSlots.upload(receiveSlotsHost);
+    }
 
     // Coupled particles: their index in the list of the force for every atom, masses in units of the mass of a
     // cell, m_c = rho0 dx^3, and no coupling force before the first step.  The random force uses OpenMM's
-    // generator, seeded with the seed of the force.
+    // generator, seeded with the seed of the force.  With the decomposition each rank has its own seed, from the seed
+    // of rank 0 as on the Reference platform: the same seed everywhere would give the nodes of every block the same
+    // random numbers.
 
+    unsigned int seed = (unsigned int) lattice.randomNumberSeed;
+    if (decomposed) {
+        int first = (lattice.randomNumberSeed == 0 ? osrngseed() : lattice.randomNumberSeed);
+        seed = (uint32_t) decomposition.broadcast(first) + 1000003u*(uint32_t) decomposition.getRank();
+        if (seed == 0)
+            seed = 1;       // 0 would let OpenMM choose a seed
+    }
     int numCoupled = lattice.particles.size();
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     cellReaction.initialize(cc, (numCoupled > 0 ? 3*numNodes : 1), elementSize, "lbmCellReaction");
@@ -229,7 +416,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         noise.initialize<mm_float4>(cc, numCoupled, "lbmNoise");
         noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
         sort = cc.createSort(new CouplingSortTrait(), numCoupled, false);
-        cc.getIntegrationUtilities().initRandomNumberGenerator((unsigned int) lattice.randomNumberSeed);
+        cc.getIntegrationUtilities().initRandomNumberGenerator(seed);
     }
 
     // A fluctuating fluid (docs/theory.md, section 7) draws four float4 of normal numbers per node and step from
@@ -237,7 +424,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     // populations with the coefficients w_q e_k(c_q)/sqrt(b_k) of the orthogonal basis, k = 4...18.
 
     if (lattice.fluidFluctuations) {
-        cc.getIntegrationUtilities().initRandomNumberGenerator((unsigned int) lattice.randomNumberSeed);
+        cc.getIntegrationUtilities().initRandomNumberGenerator(seed);
         vector<double> basis(D3Q19::numVelocities*15);
         for (int q = 0; q < D3Q19::numVelocities; q++)
             for (int m = 0; m < 15; m++)
@@ -249,16 +436,25 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         // checkpoints of OpenMM write the buffer as it is but read it back with the size it has in the Context that
         // loads them (OpenMM 8.3), so a Context created to load a checkpoint must already have the same size.  The
         // boundary nodes draw four float4 more each, after those of all the nodes.
-        cc.getIntegrationUtilities().prepareRandomNumbers(4*(numNodes+numBoundaryNodes));
+        cc.getIntegrationUtilities().prepareRandomNumbers(4*(numLocal+numBoundaryNodes));
     }
 
     // Compile the kernels.
 
     map<string, string> defines;
-    defines["NUM_NODES"] = cc.intToString(numNodes);
-    defines["NX"] = cc.intToString(lattice.nx);
-    defines["NY"] = cc.intToString(lattice.ny);
-    defines["NZ"] = cc.intToString(lattice.nz);
+    defines["NUM_NODES"] = cc.intToString(numLocal);
+    defines["NX"] = cc.intToString(localCount[0]);
+    defines["NY"] = cc.intToString(localCount[1]);
+    defines["NZ"] = cc.intToString(localCount[2]);
+    if (decomposed) {
+        defines["DOMAIN_DECOMPOSITION"] = "1";
+        defines["PAD_X"] = cc.intToString(pad[0]);
+        defines["PAD_Y"] = cc.intToString(pad[1]);
+        defines["PAD_Z"] = cc.intToString(pad[2]);
+        defines["SX"] = cc.intToString(stored[0]);
+        defines["SY"] = cc.intToString(stored[1]);
+        defines["NUM_STORED"] = cc.intToString(numStored);
+    }
     defines["LBM_BLOCK_SIZE"] = cc.intToString(blockSize);
     defines["W0"] = cc.doubleToString(1.0/3.0, true);
     defines["W1"] = cc.doubleToString(1.0/18.0, true);
@@ -266,7 +462,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     defines["CS2"] = cc.doubleToString(1.0/3.0, true);
     if (numSolidNodes > 0) {
         defines["HAS_SOLID_NODES"] = "1";
-        defines["NUM_SOLID_NODES"] = cc.intToString(numSolidNodes);
+        defines["NUM_SOLID_NODES"] = cc.intToString(numSolidEntries);
     }
     if (numCoupled > 0)
         defines["HAS_COUPLED_PARTICLES"] = "1";
@@ -320,6 +516,20 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         collideKernel->addArg();        // mu = kT/cs^2, set by setFluidParameters()
         collideKernel->addArg(0);       // index of the random numbers, set in every step
     }
+    if (decomposed) {
+        collideKernel->addArg(frameNodes);  // the list of nodes and its size, set in every step
+        collideKernel->addArg(0);
+        packKernel = program->createKernel("packPopulations");
+        packKernel->addArg(populations);
+        packKernel->addArg(sendSlots);
+        packKernel->addArg(sendBuffer);
+        packKernel->addArg((int) sendSlots.getSize());
+        unpackKernel = program->createKernel("unpackPopulations");
+        unpackKernel->addArg(populations);
+        unpackKernel->addArg(receiveSlots);
+        unpackKernel->addArg(receiveBuffer);
+        unpackKernel->addArg((int) receiveSlots.getSize());
+    }
     if (numWallNodes > 0) {
         bounceBackKernel = program->createKernel("bounceBack");
         bounceBackKernel->addArg(populations);
@@ -327,7 +537,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         bounceBackKernel->addArg(wallLinks);
         wallExchangeKernel = program->createKernel("computeWallExchange");
         wallExchangeKernel->addArg(populations);
-        wallExchangeKernel->addArg(isFluid);
+        wallExchangeKernel->addArg(solidLinks);
         wallExchangeKernel->addArg(solidNodes);
         wallExchangeKernel->addArg(wallExchange);
     }
@@ -569,13 +779,9 @@ double CommonCalcLBMForceKernel::evaluate(long long stepCount, bool includeForce
 }
 
 void CommonCalcLBMForceKernel::advanceFluid() {
-    int numNodes = lattice.getNumNodes();
-    computeMomentsKernel->execute(numNodes);
-    if (lattice.momentumRemovalFrequency > 0 && stepIndex%lattice.momentumRemovalFrequency == 0) {
-        sumMomentumKernel->execute(numGroups*blockSize, blockSize);
-        centerVelocityKernel->execute(blockSize, blockSize);
-        removeMomentumKernel->execute(numNodes);
-    }
+    computeMomentsKernel->execute(numLocal);
+    if (lattice.momentumRemovalFrequency > 0 && stepIndex%lattice.momentumRemovalFrequency == 0)
+        removeFluidMomentum();
     int numCoupled = lattice.particles.size();
     if (numCoupled > 0)
         computeCouplingForces(true);
@@ -583,17 +789,17 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     // may already have drawn: the sequence is the same in both cases.
     if (lattice.fluidFluctuations && lattice.fluidKT > 0) {
         int numBoundaryNodes = (boundaryNodes.isInitialized() ? boundaryNodes.getSize() : 0);
-        int randomIndex = cc.getIntegrationUtilities().prepareRandomNumbers(4*(numNodes+numBoundaryNodes));
+        int randomIndex = cc.getIntegrationUtilities().prepareRandomNumbers(4*(numLocal+numBoundaryNodes));
         collideKernel->setArg(13, randomIndex);
         if (applyBoundariesKernel)
             applyBoundariesKernel->setArg(17, randomIndex);
     }
-    collideKernel->execute(numNodes);
+    collideAndStream();
     if (numCoupled > 0)
         clearReactionsKernel->execute(numCoupled);
     if (bounceBackKernel) {
         bounceBackKernel->execute(wallNodes.getSize());
-        wallExchangeKernel->execute(lattice.solidNodes.size());
+        wallExchangeKernel->execute(numSolidEntries);
     }
     if (applyBoundariesKernel)
         applyBoundariesKernel->execute(boundaryNodes.getSize());
@@ -609,14 +815,71 @@ void CommonCalcLBMForceKernel::computeNextStepForces(long long nextStep) {
     // reaction on the fluid.  The step recomputes it, with the same random numbers, after any change of the
     // velocities in between (the reflection at the walls, setVelocities()).
     stepForcesCurrent = false;
-    int numNodes = lattice.getNumNodes();
-    computeMomentsKernel->execute(numNodes);
-    if (lattice.momentumRemovalFrequency > 0 && nextStep%lattice.momentumRemovalFrequency == 0) {
-        sumMomentumKernel->execute(numGroups*blockSize, blockSize);
-        centerVelocityKernel->execute(blockSize, blockSize);
-        removeMomentumKernel->execute(numNodes);
-    }
+    computeMomentsKernel->execute(numLocal);
+    if (lattice.momentumRemovalFrequency > 0 && nextStep%lattice.momentumRemovalFrequency == 0)
+        removeFluidMomentum();
     computeCouplingForces(false);
+}
+
+void CommonCalcLBMForceKernel::removeFluidMomentum() {
+    // Sums by work group, then over the groups.  With the domain decomposition the second stage writes the sums of
+    // rho - 1 and j over the block, and the host adds them over the ranks in rank order, as on the Reference platform.
+    sumMomentumKernel->execute(numGroups*blockSize, blockSize);
+    centerVelocityKernel->execute(blockSize, blockSize);
+    if (decomposition.isDecomposed()) {
+        vector<double> sums;
+        downloadAsDouble(centerVelocity, sums);
+        decomposition.sumInRankOrder(sums.data(), 4);
+        double mass = lattice.getNumNodes() + sums[0];
+        vector<double> velocity = {sums[1]/mass, sums[2]/mass, sums[3]/mass, 0.0};
+        centerVelocity.upload(velocity, true);
+    }
+    removeMomentumKernel->execute(numLocal);
+}
+
+void CommonCalcLBMForceKernel::collideAndStream() {
+    if (!decomposition.isDecomposed()) {
+        collideKernel->execute(numLocal);
+        return;
+    }
+
+    // With the domain decomposition: the frame of the block first; then its populations that went into the halo are
+    // copied to the host and sent while the interior collides, and those received are copied into the block.  The
+    // kernels run in order on the device, and the downloads and uploads wait for them.
+    int listArgument = (lattice.fluidFluctuations ? 14 : 10);
+    if (numFrameNodes > 0) {
+        collideKernel->setArg(listArgument, frameNodes);
+        collideKernel->setArg(listArgument+1, numFrameNodes);
+        collideKernel->execute(numFrameNodes);
+    }
+    int numRanks = decomposition.getSize();
+    int numSent = accumulate(sendCounts.begin(), sendCounts.end(), 0);
+    if (numSent > 0) {
+        vector<double> buffer;
+        packKernel->execute(numSent);
+        downloadAsDouble(sendBuffer, buffer);
+        int offset = 0;
+        for (int r = 0; r < numRanks; r++) {
+            copy(buffer.begin()+offset, buffer.begin()+offset+sendCounts[r], sendBuffers[r].begin());
+            offset += sendCounts[r];
+        }
+    }
+    decomposition.startExchange(sendBuffers, receiveBuffers);
+    if (numInteriorNodes > 0) {
+        collideKernel->setArg(listArgument, interiorNodes);
+        collideKernel->setArg(listArgument+1, numInteriorNodes);
+        collideKernel->execute(numInteriorNodes);
+    }
+    decomposition.finishExchange();
+    int numReceived = accumulate(receiveCounts.begin(), receiveCounts.end(), 0);
+    if (numReceived > 0) {
+        vector<double> buffer;
+        buffer.reserve(numReceived);
+        for (int r = 0; r < numRanks; r++)
+            buffer.insert(buffer.end(), receiveBuffers[r].begin(), receiveBuffers[r].end());
+        receiveBuffer.upload(buffer, true);
+        unpackKernel->execute(numReceived);
+    }
 }
 
 void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
@@ -688,12 +951,13 @@ void CommonCalcLBMForceKernel::checkMachNumber() {
 }
 
 double CommonCalcLBMForceKernel::computeMachNumber() {
-    // Ma = max |j/rho|/c_s, with c_s^2 = 1/3: maxima by work group on the device, then over the groups here.
+    // Ma = max |j/rho|/c_s, with c_s^2 = 1/3: maxima by work group on the device, then over the groups here, and with
+    // the domain decomposition over the ranks (every rank must call it).
     maxSpeedKernel->execute(numGroups*blockSize, blockSize);
     vector<double> maxima;
     downloadAsDouble(partialMax, maxima);
     double maxSpeed2 = *max_element(maxima.begin(), maxima.end());
-    return sqrt(3.0*maxSpeed2);
+    return sqrt(3.0*decomposition.maximum(maxSpeed2));
 }
 
 void CommonCalcLBMForceKernel::copyParametersToContext(ContextImpl& context, const LBMLatticeParameters& lattice) {
@@ -704,25 +968,28 @@ void CommonCalcLBMForceKernel::copyParametersToContext(ContextImpl& context, con
 
 void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<double>& density, vector<Vec3>& velocity) {
     // The velocity of the forced fluid is u = (j + F/2)/rho, with F = rho*g from the body acceleration.  The
-    // moments are recomputed from the populations; the next step computes them again before using them.
+    // moments are recomputed from the populations; the next step computes them again before using them.  With the
+    // domain decomposition the nodes of other ranks are NaN (LBMForceImpl keeps the block of the rank).
     ContextSelector selector(cc);
     int numNodes = lattice.getNumNodes();
-    computeMomentsKernel->execute(numNodes);
+    computeMomentsKernel->execute(numLocal);
     vector<double> dr, j;
     downloadAsDouble(densityDeviation, dr);
     downloadAsDouble(momentum, j);
     double velocityScale = lattice.getVelocityScale();
-    density.resize(numNodes);
-    velocity.resize(numNodes);
-    for (int node = 0; node < numNodes; node++) {
+    double nan = numeric_limits<double>::quiet_NaN();
+    density.assign(numNodes, nan);
+    velocity.assign(numNodes, Vec3(nan, nan, nan));
+    for (int n = 0; n < numLocal; n++) {
+        int node = globalNode(n), s = storageIndex(n);
         if (!isFluidHost[node]) {
             density[node] = 0;
             velocity[node] = Vec3();
             continue;
         }
-        double r = 1.0 + dr[node];
+        double r = 1.0 + dr[s];
         density[node] = r*lattice.density;
-        velocity[node] = (Vec3(j[node], j[numNodes+node], j[2*numNodes+node])*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
+        velocity[node] = (Vec3(j[s], j[numStored+s], j[2*numStored+s])*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
     }
 }
 
@@ -730,16 +997,16 @@ Vec3 CommonCalcLBMForceKernel::getWallForce(ContextImpl& context) {
     // The momentum given to the solid nodes in the last step, divided by dt: the part of the deviations f - w,
     // summed over the solid nodes in the order of the list (bounce-back) or over the boundary nodes of the walls
     // in the order of their list (regularized walls), plus the static part of the weights w, plus the reflections
-    // and reactions of the coupled particles, summed in particle order.
-    int numSolidNodes = lattice.solidNodes.size();
-    if (numSolidNodes == 0 || !hasAdvanced)
+    // and reactions of the coupled particles, summed in particle order.  With the domain decomposition each rank sums
+    // the links to its own fluid nodes, and the momenta of the ranks are added in rank order (every rank must call it).
+    if (lattice.solidNodes.empty() || !hasAdvanced)
         return Vec3();
     ContextSelector selector(cc);
     vector<double> exchange;
     downloadAsDouble(wallExchange, exchange);
     Vec3 momentum;
-    for (int i = 0; i < numSolidNodes; i++)
-        momentum += Vec3(exchange[i], exchange[numSolidNodes+i], exchange[2*numSolidNodes+i]);
+    for (int i = 0; i < numSolidEntries; i++)
+        momentum += Vec3(exchange[i], exchange[numSolidEntries+i], exchange[2*numSolidEntries+i]);
     momentum += staticWallMomentum;
     if (boundaryExchange.isInitialized()) {
         int numBoundaryNodes = boundaryNodes.getSize();
@@ -755,6 +1022,11 @@ Vec3 CommonCalcLBMForceKernel::getWallForce(ContextImpl& context) {
         for (int i = 0; i < numCoupled; i++)
             momentum += Vec3(particles[i], particles[numCoupled+i], particles[2*numCoupled+i]);
     }
+    if (decomposition.isDecomposed()) {
+        double sums[3] = {momentum[0], momentum[1], momentum[2]};
+        decomposition.sumInRankOrder(sums, 3);
+        momentum = Vec3(sums[0], sums[1], sums[2]);
+    }
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     return momentum*(cellMass*lattice.dx/lattice.dt)*(1.0/lattice.dt);
 }
@@ -765,15 +1037,42 @@ double CommonCalcLBMForceKernel::getFluidMachNumber(ContextImpl& context) {
 }
 
 void CommonCalcLBMForceKernel::getFluidState(ContextImpl& context, vector<double>& state) {
+    // With the domain decomposition the state of the whole lattice, valid at the nodes of the block of the rank and NaN
+    // elsewhere (LBMForceImpl keeps the block).
     ContextSelector selector(cc);
-    downloadAsDouble(populations, state);
+    if (!decomposition.isDecomposed()) {
+        downloadAsDouble(populations, state);
+        return;
+    }
+    vector<double> stored;
+    downloadAsDouble(populations, stored);
+    int numNodes = lattice.getNumNodes();
+    state.assign(D3Q19::numVelocities*numNodes, numeric_limits<double>::quiet_NaN());
+    for (int n = 0; n < numLocal; n++) {
+        int node = globalNode(n), s = storageIndex(n);
+        for (int q = 0; q < D3Q19::numVelocities; q++)
+            state[q*numNodes+node] = stored[q*numStored+s];
+    }
 }
 
 void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<double>& state) {
+    // With the domain decomposition the state of the whole lattice, of which the rank takes the nodes of its block.
     ContextSelector selector(cc);
-    if (state.size() != populations.getSize())
+    int numNodes = lattice.getNumNodes();
+    if (state.size() != D3Q19::numVelocities*numNodes)
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
-    populations.upload(state, true);
+    if (!decomposition.isDecomposed())
+        populations.upload(state, true);
+    else {
+        vector<double> stored;
+        downloadAsDouble(populations, stored);
+        for (int n = 0; n < numLocal; n++) {
+            int node = globalNode(n), s = storageIndex(n);
+            for (int q = 0; q < D3Q19::numVelocities; q++)
+                stored[q*numStored+s] = state[q*numNodes+node];
+        }
+        populations.upload(stored, true);
+    }
     stepForcesCurrent = false;
 }
 
@@ -800,6 +1099,8 @@ void CommonCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& s
     // The populations, the random numbers drawn for the next step and the momentum given to the walls in the
     // last step, as they are on the device, so that the checkpoint is exact in every precision.  The random
     // number generator belongs to OpenMM and is part of OpenMM checkpoints.
+    if (decomposition.isDecomposed())
+        throw OpenMMException("LBMForce: checkpoints with the domain decomposition are not available yet");
     ContextSelector selector(cc);
     int elementSize = populations.getElementSize();
     stream.write((const char*) &elementSize, sizeof(int));
@@ -813,6 +1114,8 @@ void CommonCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& s
 }
 
 void CommonCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& stream) {
+    if (decomposition.isDecomposed())
+        throw OpenMMException("LBMForce: checkpoints with the domain decomposition are not available yet");
     ContextSelector selector(cc);
     int elementSize;
     stream.read((char*) &elementSize, sizeof(int));

@@ -87,16 +87,20 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    | OpenMM's `ComputeSort` (explicit drag: in a lattice step; centred drag: in every evaluation) | | keys | sorted keys |
    | `sumCellReactions` (explicit drag, in a lattice step) | one per key | sorted keys, forces | the reaction of each node, written by its first key |
    | `solveCenteredDrag` (centred drag) | one per key | sorted keys, $`\tilde{\mathbf v}`$, random forces, moments of the node, body acceleration | the forces of the particles of each node, written by its first key; in a lattice step also the reaction $`-\mathbf S`$ of the node, and at a solid node $`-\mathbf S`$ as wall momentum |
-   | `collideAndStream` | one per node (solid nodes do nothing) | moments and reaction of the node; with a fluctuating fluid, four float4 of OpenMM's random numbers per node, drawn after those of the particles, and the coefficients of the basis | the 19 populations it sends to the neighbours |
+   | `collideAndStream` | one per node (solid nodes do nothing); with the domain decomposition one per node of a list, run for the frame of the block and then for its interior | moments and reaction of the node; with a fluctuating fluid, four float4 of OpenMM's random numbers per node, drawn after those of the particles, and the coefficients of the basis | the 19 populations it sends to the neighbours |
+   | `packPopulations`, `unpackPopulations` (with the domain decomposition, between the two `collideAndStream`) | one per slot | the populations pushed into the halo; the buffer received from the other ranks | the buffer sent to the other ranks through the host; the populations of the nodes of the block that come from other ranks |
    | `clearCellReactions` | one per key | sorted keys | zero reaction at the nodes of the step |
    | `bounceBack` (with solid nodes and the `BounceBack` wall scheme) | one per fluid node next to a solid node | the populations that the node sent into its solid neighbours, except across an open face (`wallNodes`, `wallLinks`) | the same populations, as its own populations in the opposite directions |
-   | `computeWallExchange` (with solid nodes and the `BounceBack` wall scheme) | one per solid node | populations that the fluid neighbours sent into the solid node, except across an open face | its momentum exchange |
+   | `computeWallExchange` (with solid nodes and the `BounceBack` wall scheme) | one per solid node | populations that the fluid neighbours sent into the solid node, except across an open face (the links of `solidLinks`; with the domain decomposition only those to fluid nodes of the block) | its momentum exchange |
    | `applyBoundaries` (with regularized walls or open faces) | one per boundary node | populations of the node and the solid slots it wrote in the streaming, its moments of the step, velocities and densities of the faces, body acceleration, relaxation rate; with a fluctuating fluid four float4 of OpenMM's random numbers per boundary node, after those of the nodes | its rebuilt unknown populations and, next to solid nodes, its momentum exchange |
    | `computeMaxFluidSpeed` (when the Mach check is due) | work groups of 64 | populations | one maximum per group, reduced on the host |
    | `applyCouplingForces` (with coupled particles, in every force evaluation that includes forces) | one per atom | coupling forces | OpenMM's fixed point force buffer |
 
    The moments are stored component by component, $`[k\cdot\mathrm{numNodes} + \mathrm{node}]`$, so that consecutive
-   threads read consecutive addresses; the Reference platform stores them node by node. With solid nodes, the kernels
+   threads read consecutive addresses; the Reference platform stores them node by node. With the domain decomposition
+   (`DOMAIN_DECOMPOSITION`, `docs/theory.md` section 8) the arrays hold the block of the rank and a layer of halo nodes
+   along the divided axes (`PAD_X`, `PAD_Y`, `PAD_Z`), and `STORAGE_INDEX` and `neighborIndex()` give the position of
+   a node; without it they reduce to the node index and to the periodic wrap of the lattice. With solid nodes, the kernels
    are compiled with `HAS_SOLID_NODES` and read a mask of the fluid nodes; without them they do not read it. With
    boundary nodes they are also compiled with `HAS_BOUNDARY_NODES` (the boundary nodes are fluid nodes in the mask);
    `OPEN_X`, `OPEN_Y` and `OPEN_Z` mark the axes with open faces, across which the bounce-back returns nothing; with

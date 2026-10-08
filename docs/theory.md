@@ -1079,7 +1079,7 @@ domain, nothing changes.
 - The arrays cover the whole lattice on every rank, and each rank advances only the nodes it owns: moments,
   collision and streaming, bounce-back, rebuilt boundary nodes. The Reference platform is the platform of
   correctness, so it keeps the global indices, the periodic wrap and the arithmetic of one domain; the GPU
-  platforms will keep only their block and a layer of halo nodes.
+  platforms keep only their block and a layer of halo nodes (below).
 - Each rank sends to rank $`r`$ the populations it pushed into fluid nodes of $`r`$ and receives those that the
   other ranks pushed into its nodes, which is all the communication of a step. Both sides list the slots in the
   order of (node, $`q`$), built once when the Context is created. The communication overlaps the computation: the
@@ -1105,6 +1105,30 @@ domain, nothing changes.
   any decomposition (`docs/validation.md`, Domain decomposition). With the removal they agree to rounding, because
   the sum over the nodes is added in another order; with fluctuations the random numbers differ, so the agreement
   is statistical.
+
+**CUDA, OpenCL and HIP platforms** (the fluid, walls, open faces and fluctuating fluid; not yet the coupled particles,
+the exchange of the halo and the checkpoints).
+- Each rank stores only its block, plus one layer of halo nodes on each side along the divided axes: for a block of
+  $`n_x \times n_y \times n_z`$ nodes divided along the three axes the arrays hold $`(n_x + 2)(n_y + 2)(n_z + 2)`$
+  nodes, in the layout of one domain (`platforms/common/src/kernels/lbmFluid.cc`). Along an axis that is not divided
+  the block is the whole axis and the streaming wraps around within it, as with one domain. The memory of the fluid
+  is divided among the ranks, and each node is computed with the arithmetic of one domain.
+- The streaming pushes the populations that leave the block into the halo. After the collision of the frame of the
+  block a kernel packs those that go to fluid nodes of other ranks into a buffer, which is copied to the host and
+  sent (`MPI_Isend`); the interior of the block collides on the device meanwhile, and after `MPI_Waitall` the
+  populations received are copied to the device and unpacked at their slots, before the walls and the boundary
+  nodes. The slots are listed in the order of (node, $`q`$) of the Reference platform, with the same rules for the
+  solid nodes and the open faces: a population pushed into a solid node of the halo stays there, where the
+  bounce-back of the node reads it. A rank sends one message to each rank it shares links with, at most 18 (6 faces
+  and 12 edges: the D3Q19 lattice has no velocity along the diagonals of the cube), rather than exchanging along
+  $`x`$, $`y`$ and $`z`$ in turn and forwarding the populations of the edges; the volume is the same.
+- The sums of the removal of the fluid momentum and of the force on the walls, and the Mach number, are reduced on
+  the device over the block and then over the ranks as on the Reference platform. A fluctuating fluid draws its
+  numbers from OpenMM's generator of the Context of each rank, seeded with the seed of rank 0 plus $`1000003\,r`$.
+- With the same platform and precision, the fluid nodes are identical bit for bit to those of one domain without the
+  removal of the fluid momentum (`docs/validation.md`, Domain decomposition).
+
+**Particles, errors, fields and state** (for now the coupled particles and the halo on the Reference platform only).
 - **Particles: replicated data.** Every rank has a Context with all the particles and integrates all of them; only
   the fluid is divided. The copies must stay identical on every rank. The rank that owns the nearest node of a
   coupled particle computes its coupling force (explicit or centred drag, section 2) and the reaction on that node;
@@ -1154,8 +1178,8 @@ domain, nothing changes.
   halo wraps; beyond open faces it does not exist (NaN). The fields between steps are those of the populations at the
   end of the step, which are also those the next step starts from. With one domain the halo comes from the lattice
   itself. No observable of the plugin uses the halo yet.
-- For now a Context with more than one domain refuses checkpoints, `LBMVTKReporter` cannot write its fluid, and the
-  CUDA, OpenCL and HIP platforms refuse more than one domain.
+- For now a Context with more than one domain refuses checkpoints and `LBMVTKReporter` cannot write its fluid; on the
+  CUDA, OpenCL and HIP platforms it also refuses coupled particles and the exchange of the halo.
 
 ## References
 
