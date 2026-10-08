@@ -77,6 +77,8 @@ private:
         return owned.empty() || owned[node];
     }
     void exchangePopulations();
+    /** Collision and streaming of one node; normal holds its 15 normal numbers with a fluctuating fluid. */
+    void collideNode(int node, double mu, const double* normal);
     LBMLatticeParameters lattice;
     /** The domain decomposition (docs/theory.md, Domain decomposition): the arrays cover the whole lattice on every
         rank, and each rank advances the nodes it owns (owned, empty without decomposition).  After the streaming
@@ -86,6 +88,13 @@ private:
     LBMDecomposition decomposition;
     std::vector<char> owned;
     std::vector<std::vector<int> > sendSlots, receiveSlots;
+    /** With the decomposition the owned fluid nodes are advanced in two groups, the frame (nodes that push into
+        other ranks) and the interior, with the exchange of the frame running meanwhile.  The normal numbers of a
+        fluctuating fluid are drawn first, in node order (normalIndex gives the place of each node), so that the
+        order of the groups does not change them. */
+    std::vector<int> frameNodes, interiorNodes, normalIndex;
+    std::vector<double> fluidNormals;
+    std::vector<std::vector<double> > sendBuffers, receiveBuffers;
     /** Deviations of the populations from the rest equilibrium at lattice density 1, f_q - w_q, stored as
         [q*numNodes + node].  They keep the precision of small signals, and they are the fluid state of
         getFluidState() and setFluidState(), so that saving and restoring the fluid is exact. */

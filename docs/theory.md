@@ -1080,9 +1080,14 @@ domain, nothing changes.
   collision and streaming, bounce-back, rebuilt boundary nodes. The Reference platform is the platform of
   correctness, so it keeps the global indices, the periodic wrap and the arithmetic of one domain; the GPU
   platforms will keep only their block and a layer of halo nodes.
-- After the streaming each rank sends to rank $`r`$ the populations it pushed into fluid nodes of $`r`$ and
-  receives those that the other ranks pushed into its nodes, which is all the communication of a step. Both
-  sides list the slots in the order of (node, $`q`$), built once when the Context is created.
+- Each rank sends to rank $`r`$ the populations it pushed into fluid nodes of $`r`$ and receives those that the
+  other ranks pushed into its nodes, which is all the communication of a step. Both sides list the slots in the
+  order of (node, $`q`$), built once when the Context is created. The communication overlaps the computation: the
+  rank first collides and streams the frame of its block (the nodes that push into other ranks), starts the sends
+  and receives without blocking (`MPI_Isend`, `MPI_Irecv`), collides and streams the interior, and then waits
+  (`MPI_Waitall`) before the walls and the boundary nodes, which read the received populations. With a fluctuating
+  fluid the normal numbers of all the nodes of the rank are drawn first, in node order, so that the order of the two
+  groups does not change them.
 - The populations pushed into solid nodes are not exchanged: the fluid node next to a wall finds, on its own rank,
   what it pushed into the solid node, also when the solid node belongs to another rank, so the bounce-back and the
   rebuilt boundary nodes need no communication (section 1: they use only the populations of the node and the solid

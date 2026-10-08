@@ -146,6 +146,22 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
                     receive[decomposition.ownerOfNode(node)].push_back(make_pair(t, q));
             }
         }
+        vector<char> frame(numNodes, 0);
+        for (int r = 0; r < numRanks; r++)
+            for (auto& link : send[r]) {
+                int q = link.second, t = link.first;
+                int ti = t%lattice.nx, tj = (t/lattice.nx)%lattice.ny, tk = t/(lattice.nx*lattice.ny);
+                int si = (ti - D3Q19::cx[q] + size[0])%size[0], sj = (tj - D3Q19::cy[q] + size[1])%size[1];
+                int sk = (tk - D3Q19::cz[q] + size[2])%size[2];
+                frame[si + lattice.nx*(sj + lattice.ny*sk)] = 1;
+            }
+        normalIndex.assign(numNodes, -1);
+        for (int node = 0; node < numNodes; node++) {
+            if (!owned[node] || (!isFluid.empty() && !isFluid[node]))
+                continue;
+            normalIndex[node] = frameNodes.size() + interiorNodes.size();
+            (frame[node] ? frameNodes : interiorNodes).push_back(node);
+        }
         sendSlots.resize(numRanks);
         receiveSlots.resize(numRanks);
         for (int r = 0; r < numRanks; r++) {
@@ -244,9 +260,10 @@ void ReferenceCalcLBMForceKernel::advanceFluid(ContextImpl& context) {
         removeFluidMomentum();
     if (!lattice.particles.empty())
         couple(context, true);
-    collideAndStream();
     if (decomposition.isDecomposed())
         exchangePopulations();
+    else
+        collideAndStream();
     if (!wallNodes.empty()) {
         bounceBack();
         computeWallMomentum();
@@ -580,59 +597,81 @@ void ReferenceCalcLBMForceKernel::collideAndStream() {
     // amplitudes sqrt(mu rho omega (2 - omega)) on the stress modes and sqrt(mu rho) on the ghost modes, which
     // relax with rate 1, and mu = kT/cs^2 in lattice units.  The 15 normal numbers of a node are drawn from the
     // generator of the force, node after node in index order.
-    int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
     int numNodes = lattice.getNumNodes();
-    double omega = lattice.omega;
-    double dfeq[D3Q19::numVelocities], fneq[D3Q19::numVelocities], s[D3Q19::numVelocities];
-    double xi[D3Q19::numVelocities], normal[15];
     bool fluctuate = (lattice.fluidFluctuations && lattice.fluidKT > 0);
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     double mu = 3.0*lattice.fluidKT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
-    for (int k = 0; k < nz; k++)
-        for (int j = 0; j < ny; j++)
-            for (int i = 0; i < nx; i++) {
-                int node = i + nx*(j + ny*k);
-                if (!isOwned(node) || (!isFluid.empty() && !isFluid[node]))
-                    continue;
-                double r = rho[node];
-                const double* F = &forceDensity[3*node];
-                double ux = (momentum[3*node] + 0.5*F[0])/r;
-                double uy = (momentum[3*node+1] + 0.5*F[1])/r;
-                double uz = (momentum[3*node+2] + 0.5*F[2])/r;
-                D3Q19::equilibriumDeviation(densityDeviation[node], ux, uy, uz, dfeq);
-                D3Q19::regularizedNonEquilibrium(&piNeq[6*node], fneq);
-                D3Q19::guoForcing(ux, uy, uz, F[0], F[1], F[2], s);
-                if (fluctuate) {
-                    for (int m = 0; m < 15; m++)
-                        normal[m] = getGaussianRandom();
-                    D3Q19::fluctuation(normal, sqrt(mu*r*omega*(2.0-omega)), sqrt(mu*r), xi);
-                }
-                for (int q = 0; q < D3Q19::numVelocities; q++) {
-                    int di = (i + D3Q19::cx[q] + nx)%nx;
-                    int dj = (j + D3Q19::cy[q] + ny)%ny;
-                    int dk = (k + D3Q19::cz[q] + nz)%nz;
-                    double value = dfeq[q] + (1.0-omega)*fneq[q] + 0.5*s[q];
-                    if (fluctuate)
-                        value += xi[q];
-                    populations[q*numNodes + di + nx*(dj + ny*dk)] = value;
-                }
-            }
+    double normal[15];
+    for (int node = 0; node < numNodes; node++) {
+        if (!isFluid.empty() && !isFluid[node])
+            continue;
+        if (fluctuate)
+            for (int m = 0; m < 15; m++)
+                normal[m] = getGaussianRandom();
+        collideNode(node, mu, fluctuate ? normal : NULL);
+    }
+}
+
+void ReferenceCalcLBMForceKernel::collideNode(int node, double mu, const double* normal) {
+    int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
+    int numNodes = lattice.getNumNodes();
+    int i = node%nx, j = (node/nx)%ny, k = node/(nx*ny);
+    double omega = lattice.omega;
+    double dfeq[D3Q19::numVelocities], fneq[D3Q19::numVelocities], s[D3Q19::numVelocities];
+    double xi[D3Q19::numVelocities];
+    double r = rho[node];
+    const double* F = &forceDensity[3*node];
+    double ux = (momentum[3*node] + 0.5*F[0])/r;
+    double uy = (momentum[3*node+1] + 0.5*F[1])/r;
+    double uz = (momentum[3*node+2] + 0.5*F[2])/r;
+    D3Q19::equilibriumDeviation(densityDeviation[node], ux, uy, uz, dfeq);
+    D3Q19::regularizedNonEquilibrium(&piNeq[6*node], fneq);
+    D3Q19::guoForcing(ux, uy, uz, F[0], F[1], F[2], s);
+    if (normal != NULL)
+        D3Q19::fluctuation(normal, sqrt(mu*r*omega*(2.0-omega)), sqrt(mu*r), xi);
+    for (int q = 0; q < D3Q19::numVelocities; q++) {
+        int di = (i + D3Q19::cx[q] + nx)%nx;
+        int dj = (j + D3Q19::cy[q] + ny)%ny;
+        int dk = (k + D3Q19::cz[q] + nz)%nz;
+        double value = dfeq[q] + (1.0-omega)*fneq[q] + 0.5*s[q];
+        if (normal != NULL)
+            value += xi[q];
+        populations[q*numNodes + di + nx*(dj + ny*dk)] = value;
+    }
 }
 
 void ReferenceCalcLBMForceKernel::exchangePopulations() {
-    // The populations that this rank pushed into fluid nodes of rank r go to r, which writes them into its own
-    // nodes; both sides list the slots in the order of (node, q).
-    int numRanks = decomposition.getSize();
-    vector<vector<double> > send(numRanks), receive(numRanks);
-    for (int r = 0; r < numRanks; r++) {
-        for (int slot : sendSlots[r])
-            send[r].push_back(populations[slot]);
-        receive[r].resize(receiveSlots[r].size());
+    // Collision and streaming with the domain decomposition, overlapped with the communication: first the frame of
+    // the block (the nodes that push into other ranks), then the exchange starts without blocking, then the
+    // interior, then the wait.  This rank sends to rank r the populations it pushed into fluid nodes of r and writes
+    // those it receives into its own nodes; both sides list the slots in the order of (node, q).  The normal
+    // numbers of a fluctuating fluid are drawn before, in node order, as without the decomposition.
+    bool fluctuate = (lattice.fluidFluctuations && lattice.fluidKT > 0);
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    double mu = 3.0*lattice.fluidKT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
+    if (fluctuate) {
+        fluidNormals.resize(15*(frameNodes.size() + interiorNodes.size()));
+        for (double& value : fluidNormals)
+            value = getGaussianRandom();
     }
-    decomposition.exchange(send, receive);
+    for (int node : frameNodes)
+        collideNode(node, mu, fluctuate ? &fluidNormals[15*normalIndex[node]] : NULL);
+    int numRanks = decomposition.getSize();
+    sendBuffers.resize(numRanks);
+    receiveBuffers.resize(numRanks);
+    for (int r = 0; r < numRanks; r++) {
+        sendBuffers[r].resize(sendSlots[r].size());
+        for (int k = 0; k < (int) sendSlots[r].size(); k++)
+            sendBuffers[r][k] = populations[sendSlots[r][k]];
+        receiveBuffers[r].resize(receiveSlots[r].size());
+    }
+    decomposition.startExchange(sendBuffers, receiveBuffers);
+    for (int node : interiorNodes)
+        collideNode(node, mu, fluctuate ? &fluidNormals[15*normalIndex[node]] : NULL);
+    decomposition.finishExchange();
     for (int r = 0; r < numRanks; r++)
         for (int k = 0; k < (int) receiveSlots[r].size(); k++)
-            populations[receiveSlots[r][k]] = receive[r][k];
+            populations[receiveSlots[r][k]] = receiveBuffers[r][k];
 }
 
 void ReferenceCalcLBMForceKernel::bounceBack() {

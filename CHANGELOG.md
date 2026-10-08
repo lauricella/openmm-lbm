@@ -11,7 +11,8 @@ versions the API may still change.
   `isMPIAvailable()`, `getMPIRank()`/`getMPISize()`/`getMPILocalRank()` (`openmmlbm.mpiRank()` and the like in
   Python), serialization version 8 with the decomposition. Without MPI, or with one domain, nothing changes.
 - Reference platform: the fluid, the walls and the open faces with more than one domain (`docs/theory.md`, section 8):
-  each rank advances the nodes of its block and exchanges the populations streamed between blocks; identical bit for
+  each rank advances the nodes of its block and exchanges the populations streamed between blocks, overlapping the
+  exchange with the collision of the interior of the block; identical bit for
   bit to one domain without the removal of the fluid momentum (`python/tests/mpi_decomposition.py`). Not yet:
   coupled particles, checkpoints, local `getFluidState()`/`getFluidFields()`, GPU platforms.
 

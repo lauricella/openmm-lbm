@@ -181,6 +181,30 @@ int LBMDecomposition::broadcast(int value) const {
     return value;
 }
 
+void LBMDecomposition::startExchange(const vector<vector<double> >& send, vector<vector<double> >& receive) {
+    numRequests = 0;
+    if (size == 1)
+        return;
+#ifdef OPENMM_LBM_MPI
+    requests.resize(2*size*sizeof(MPI_Request));
+    MPI_Request* request = (MPI_Request*) requests.data();
+    for (int r = 0; r < size; r++)
+        if (!receive[r].empty())
+            MPI_Irecv(receive[r].data(), (int) receive[r].size(), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, &request[numRequests++]);
+    for (int r = 0; r < size; r++)
+        if (!send[r].empty())
+            MPI_Isend(send[r].data(), (int) send[r].size(), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, &request[numRequests++]);
+#endif
+}
+
+void LBMDecomposition::finishExchange() {
+#ifdef OPENMM_LBM_MPI
+    if (numRequests > 0)
+        MPI_Waitall(numRequests, (MPI_Request*) requests.data(), MPI_STATUSES_IGNORE);
+#endif
+    numRequests = 0;
+}
+
 void LBMDecomposition::exchange(const vector<vector<double> >& send, vector<vector<double> >& receive) const {
     if (size == 1)
         return;

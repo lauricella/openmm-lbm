@@ -77,8 +77,14 @@ public:
     /** Exchange values with other ranks: send[r] goes to rank r, and receive[r], already sized, comes from rank r.
         Empty vectors are not sent. */
     void exchange(const std::vector<std::vector<double> >& send, std::vector<std::vector<double> >& receive) const;
+    /** The same exchange without blocking: it starts the sends and the receives and returns at once, so that the
+        caller can compute meanwhile; finishExchange() waits for them.  The vectors must not change in between. */
+    void startExchange(const std::vector<std::vector<double> >& send, std::vector<std::vector<double> >& receive);
+    void finishExchange();
 private:
     int n[3], procs[3], coords[3], rank, size;
+    std::vector<char> requests;         // the MPI_Request of the pending exchange (mpi.h is not included here)
+    int numRequests = 0;
 };
 
 } // namespace LBMPlugin
