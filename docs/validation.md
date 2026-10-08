@@ -567,6 +567,27 @@ ParaView 5.13 (`vtkXMLImageDataReader`, `vtkXMLPolyDataReader`, the `.pvd` reade
 coordinates of the nodes, the fields and the times agree, within 5e-8 relative in single precision and exactly in
 double precision, and the readers return the strings of the `units` array of the field data.
 
+## Domain decomposition (`python/tests/mpi_decomposition.py`, Reference, MPI)
+
+The script runs each case on every rank twice, with one domain and with the decomposition given on the command line,
+and compares the populations of the fluid nodes that the rank owns (`docs/theory.md`, section 8). Lattice
+$`8 \times 6 \times 6`$, $`\tau = 0.8`$, a body force, an initial velocity and populations perturbed by up to
+$`10^{-3}`$, 60 steps; cases: periodic; the solid plane $`j = 0`$ and a block of 8 solid nodes with bounce-back walls,
+with regularized walls, and with regularized walls and open faces along x (a `Velocity` inlet and a `Density` outlet);
+periodic with the removal of the fluid momentum every third step. Run with OpenMPI 4.1.6 on one node, plugin built with
+`-DOPENMM_LBM_MPI=ON`, OpenMM 8.6.1, decompositions $`2 \times 1 \times 1`$, $`1 \times 2 \times 1`$,
+$`1 \times 1 \times 2`$, $`2 \times 2 \times 1`$, $`4 \times 1 \times 1`$, $`1 \times 2 \times 2`$ and
+$`2 \times 2 \times 2`$:
+
+| Case | Fluid nodes of each rank | Force on the walls (relative) |
+|---|---|---|
+| periodic, bounce-back, regularized walls, open faces | identical bit for bit on every rank and decomposition (104 of 104) | at most $`3.3 \cdot 10^{-13}`$ |
+| removal of the fluid momentum | at most $`1.1 \cdot 10^{-19}`$ | |
+
+The force on the walls and the removal differ by rounding because the ranks add their sums in another order. The
+slots of the solid nodes are not compared: they hold what the fluid nodes pushed into them, on the rank of each
+fluid node, and are not part of the state of the fluid.
+
 ## Equivalence with the reference implementation: coupled particles (E0)
 
 The Reference platform was compared with the validation campaign of the reference CUDA library (version

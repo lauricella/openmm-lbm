@@ -9,8 +9,11 @@ versions the API may still change.
 - Decomposition of the lattice over MPI ranks, first part: CMake option `OPENMM_LBM_MPI` (off by default; only the
   MPI C API, in `openmmapi/src/LBMDecomposition.cpp`), `setDomainDecomposition()`/`getDomainDecomposition()`,
   `isMPIAvailable()`, `getMPIRank()`/`getMPISize()`/`getMPILocalRank()` (`openmmlbm.mpiRank()` and the like in
-  Python), serialization version 8 with the decomposition. The domains are not computed yet: a Context with more
-  than one domain raises an error on every platform. Without MPI, or with one domain, nothing changes.
+  Python), serialization version 8 with the decomposition. Without MPI, or with one domain, nothing changes.
+- Reference platform: the fluid, the walls and the open faces with more than one domain (`docs/theory.md`, section 8):
+  each rank advances the nodes of its block and exchanges the populations streamed between blocks; identical bit for
+  bit to one domain without the removal of the fluid momentum (`python/tests/mpi_decomposition.py`). Not yet:
+  coupled particles, checkpoints, local `getFluidState()`/`getFluidFields()`, GPU platforms.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations

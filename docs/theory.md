@@ -1065,6 +1065,45 @@ choose).
   the fourth shell on); decay of the thermal shear and sound modes as in the deterministic model; stability near
   $`\tau = 1/2`$ (above); coupled particles with both drags (above).
 
+## 8. Domain decomposition (in development for version 0.4.0)
+
+`setDomainDecomposition(px, py, pz)` divides the lattice into $`p_x p_y p_z`$ blocks, one per MPI rank of
+`MPI_COMM_WORLD`, for runs of the same script in several processes. Rank $`r = c_x + p_x(c_y + p_y c_z)`$ owns the
+block with coordinates $`(c_x, c_y, c_z)`$; along an axis of $`n`$ nodes block $`c`$ holds the nodes
+$`[\lfloor nc/p\rfloor, \lfloor n(c + 1)/p\rfloor)`$, so blocks differ by at most one node. A 0 lets
+`MPI_Dims_create` choose; the product must be the number of ranks. All MPI calls are in
+`openmmapi/src/LBMDecomposition.cpp`, compiled only with the CMake option `OPENMM_LBM_MPI`; without it, or with one
+domain, nothing changes.
+
+**Reference platform** (the fluid, walls and open faces; not yet the coupled particles and the checkpoints).
+- The arrays cover the whole lattice on every rank, and each rank advances only the nodes it owns: moments,
+  collision and streaming, bounce-back, rebuilt boundary nodes. The Reference platform is the platform of
+  correctness, so it keeps the global indices, the periodic wrap and the arithmetic of one domain; the GPU
+  platforms will keep only their block and a layer of halo nodes.
+- After the streaming each rank sends to rank $`r`$ the populations it pushed into fluid nodes of $`r`$ and
+  receives those that the other ranks pushed into its nodes, which is all the communication of a step. Both
+  sides list the slots in the order of (node, $`q`$), built once when the Context is created.
+- The populations pushed into solid nodes are not exchanged: the fluid node next to a wall finds, on its own rank,
+  what it pushed into the solid node, also when the solid node belongs to another rank, so the bounce-back and the
+  rebuilt boundary nodes need no communication (section 1: they use only the populations of the node and the solid
+  slots it wrote). The slots of a solid node therefore differ between ranks; they are not part of the state of
+  the fluid. Populations that leave through an open face are not exchanged either: the face node of the other
+  side rebuilds them.
+- The sums of the removal of the fluid momentum and of the force on the walls are added on each rank and then in
+  rank order (`MPI_Allgather`), the Mach number is the largest over the ranks (`MPI_Allreduce`): the result is the
+  same on every rank and in every run with the same decomposition. `getWallForce()` and `getFluidMachNumber()`
+  are therefore collective: every rank must call them.
+- Each rank draws its own random numbers (fluctuating fluid, rebuilt boundary nodes) from the generator of the
+  force, with the seed of rank 0 plus $`1000003\,r`$: the same seed on every rank would give the nodes of every
+  block the same random numbers.
+- Without the removal of the fluid momentum the fluid nodes are identical, bit for bit, to those of one domain, for
+  any decomposition (`docs/validation.md`, Domain decomposition). With the removal they agree to rounding, because
+  the sum over the nodes is added in another order; with fluctuations the random numbers differ, so the agreement
+  is statistical.
+- For now `getFluidState()` and `getFluidFields()` return the whole lattice on every rank, valid only on the nodes
+  of the rank, and a Context with more than one domain refuses coupled particles and checkpoints; the CUDA, OpenCL
+  and HIP platforms refuse more than one domain.
+
 ## References
 
 1. J. Latt and B. Chopard, Math. Comput. Simul. 72, 165 (2006): regularized collision.

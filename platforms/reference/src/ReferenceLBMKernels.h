@@ -11,6 +11,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "LBMKernels.h"
+#include "internal/LBMDecomposition.h"
 #include "openmm/Platform.h"
 #include "sfmt/SFMT.h"
 #include <vector>
@@ -71,7 +72,20 @@ private:
     void applyBoundaries();
     void checkMachNumber();
     double computeMachNumber() const;
+    /** True if this rank advances the node (always without domain decomposition). */
+    bool isOwned(int node) const {
+        return owned.empty() || owned[node];
+    }
+    void exchangePopulations();
     LBMLatticeParameters lattice;
+    /** The domain decomposition (docs/theory.md, Domain decomposition): the arrays cover the whole lattice on every
+        rank, and each rank advances the nodes it owns (owned, empty without decomposition).  After the streaming
+        it sends to rank r the populations it pushed into fluid nodes of r, at the slots q*numNodes + node of
+        sendSlots[r], and receives those of its own nodes at receiveSlots[r]; both lists are in the order of
+        (node, q).  The slots of solid nodes are neither sent nor received. */
+    LBMDecomposition decomposition;
+    std::vector<char> owned;
+    std::vector<std::vector<int> > sendSlots, receiveSlots;
     /** Deviations of the populations from the rest equilibrium at lattice density 1, f_q - w_q, stored as
         [q*numNodes + node].  They keep the precision of small signals, and they are the fluid state of
         getFluidState() and setFluidState(), so that saving and restoring the fluid is exact. */

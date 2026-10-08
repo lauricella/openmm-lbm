@@ -72,6 +72,8 @@ public:
     void sumInRankOrder(double* values, int n) const;
     /** The largest value over the ranks. */
     double maximum(double value) const;
+    /** The value of rank 0, on every rank. */
+    int broadcast(int value) const;
     /** Exchange values with other ranks: send[r] goes to rank r, and receive[r], already sized, comes from rank r.
         Empty vectors are not sent. */
     void exchange(const std::vector<std::vector<double> >& send, std::vector<std::vector<double> >& receive) const;

@@ -173,6 +173,14 @@ double LBMDecomposition::maximum(double value) const {
 #endif
 }
 
+int LBMDecomposition::broadcast(int value) const {
+#ifdef OPENMM_LBM_MPI
+    if (size > 1)
+        MPI_Bcast(&value, 1, MPI_INT, 0, MPI_COMM_WORLD);
+#endif
+    return value;
+}
+
 void LBMDecomposition::exchange(const vector<vector<double> >& send, vector<vector<double> >& receive) const {
     if (size == 1)
         return;
