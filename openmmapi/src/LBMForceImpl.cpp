@@ -10,6 +10,11 @@
 #include "internal/LBMDecomposition.h"
 #include "internal/LBMForceImpl.h"
 #include "LBMKernels.h"
+#include "openmm/AndersenThermostat.h"
+#include "openmm/MonteCarloAnisotropicBarostat.h"
+#include "openmm/MonteCarloBarostat.h"
+#include "openmm/MonteCarloFlexibleBarostat.h"
+#include "openmm/MonteCarloMembraneBarostat.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/VerletIntegrator.h"
 #include "openmm/internal/ContextImpl.h"
@@ -181,9 +186,32 @@ void LBMForceImpl::initialize(ContextImpl& context) {
                 throw OpenMMException("LBMForce: the Centered drag scheme does not support virtual sites");
     }
 
+    // With the domain decomposition every rank integrates all the particles, which must stay identical on every
+    // rank (docs/theory.md, section 8).  The integrator is a VerletIntegrator, which draws no random numbers, but an
+    // AndersenThermostat or a Monte Carlo barostat would draw different ones on each rank (each rank has its own
+    // seed, and a seed 0 is chosen at random by each process).
+
+    if (lattice.isDecomposed()) {
+        const System& system = context.getSystem();
+        for (int i = 0; i < system.getNumForces(); i++) {
+            const Force& f = system.getForce(i);
+            if (dynamic_cast<const AndersenThermostat*>(&f) != NULL || dynamic_cast<const MonteCarloBarostat*>(&f) != NULL ||
+                    dynamic_cast<const MonteCarloAnisotropicBarostat*>(&f) != NULL ||
+                    dynamic_cast<const MonteCarloMembraneBarostat*>(&f) != NULL ||
+                    dynamic_cast<const MonteCarloFlexibleBarostat*>(&f) != NULL)
+                throw OpenMMException("LBMForce: with the domain decomposition (setDomainDecomposition()) the System "
+                        "cannot contain an AndersenThermostat or a Monte Carlo barostat: their random numbers would differ "
+                        "between the MPI ranks, which hold copies of the same particles");
+        }
+    }
+
+    // The warnings are printed once, by rank 0, with the domain decomposition.
+
+    bool warn = (!lattice.isDecomposed() || LBMDecomposition::getWorldRank() == 0);
+
     // The model is accurate for moderate relaxation times (docs/theory.md, section 6).
 
-    if (lattice.tau < 0.505 || lattice.tau > 2.0)
+    if (warn && (lattice.tau < 0.505 || lattice.tau > 2.0))
         cerr << "Warning: LBMForce: the relaxation time tau = " << lattice.tau << " is outside the range [0.505, 2] "
              << "in which the lattice Boltzmann model is accurate. tau = 3 nu dt/dx^2 + 1/2: change the viscosity, "
              << "the time step or the lattice spacing." << endl;
@@ -192,7 +220,7 @@ void LBMForceImpl::initialize(ContextImpl& context) {
     // decreases as tau grows and becomes negative at tau = 1.79 (docs/theory.md, section 2).  With the centred drag
     // it stays positive.
 
-    if (!lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.tau > 1.7)
+    if (warn && !lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.tau > 1.7)
         cerr << "Warning: LBMForce: tau = " << lattice.tau << " > 1.7: with the explicit drag at the nearest node "
              << "the hydrodynamic self-mobility of a coupled particle is small, and negative above tau = 1.79, so "
              << "particles move less than they should. Reduce the viscosity or the time step, or use a coarser "
@@ -202,7 +230,7 @@ void LBMForceImpl::initialize(ContextImpl& context) {
     // (docs/theory.md, section 2).  The centred drag is stable for any friction.
 
     double gammaDt = lattice.friction*lattice.dt;
-    if (!lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && gammaDt > 1.0)
+    if (warn && !lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && gammaDt > 1.0)
         cerr << "Warning: LBMForce: friction*dt = " << gammaDt << " > 1: with the explicit drag the velocity of a "
              << "particle relative to the fluid changes sign at every step" << (gammaDt >= 2.0 ? ", and grows without "
              "bound since friction*dt >= 2" : "") << ". Reduce the friction or the time step." << endl;
@@ -212,7 +240,7 @@ void LBMForceImpl::initialize(ContextImpl& context) {
     // gives the right temperature (docs/theory.md, section 7).  The warning gives the bound gamma dt m/(2 m_c) for the
     // heaviest coupled particle.
 
-    if (!lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.fluidFluctuations &&
+    if (warn && !lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.fluidFluctuations &&
             lattice.kT > 0 && gammaDt > 0) {
         double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
         double maxMass = 0;

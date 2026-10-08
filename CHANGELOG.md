@@ -13,8 +13,15 @@ versions the API may still change.
 - Reference platform: the fluid, the walls and the open faces with more than one domain (`docs/theory.md`, section 8):
   each rank advances the nodes of its block and exchanges the populations streamed between blocks, overlapping the
   exchange with the collision of the interior of the block; identical bit for
-  bit to one domain without the removal of the fluid momentum (`python/tests/mpi_decomposition.py`). Not yet:
-  coupled particles, checkpoints, local `getFluidState()`/`getFluidFields()`, GPU platforms.
+  bit to one domain without the removal of the fluid momentum (`python/tests/mpi_decomposition.py`).
+- Reference platform: coupled particles with more than one domain. The particles are replicated on every rank; the
+  rank of the nearest node computes the coupling force, and the forces are summed over the ranks (exact). The
+  reflection at the walls is done by every rank, and its momentum counted once. Identical bit for bit to one domain at
+  T = 0, with both drag schemes. Checks that stop every rank together: the same platform and precision on every rank,
+  identical copies of the particles (a hash of positions and velocities, at the first step and then with the period
+  of the Mach number check); an `AndersenThermostat` or a Monte Carlo barostat is refused with more than one domain. With more than one
+  domain the warnings of the Context are printed by rank 0 only. Not yet: checkpoints, local
+  `getFluidState()`/`getFluidFields()`, GPU platforms.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations

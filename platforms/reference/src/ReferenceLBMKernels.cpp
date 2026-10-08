@@ -14,6 +14,7 @@
 #include "openmm/reference/ReferencePlatform.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <sstream>
 
@@ -37,10 +38,14 @@ static vector<Vec3>& extractForces(ContextImpl& context) {
 }
 
 void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForce& force, const LBMLatticeParameters& lattice) {
-    if (lattice.isDecomposed() && !lattice.particles.empty())
-        throw OpenMMException("LBMForce: coupled particles with the domain decomposition (setDomainDecomposition()) "
-                "are not available yet");
     this->lattice = lattice;
+
+    // With the domain decomposition every rank must run on the same platform with the same precision, or the copies
+    // of the particles would drift apart.  The check is collective: if one rank differs, every rank stops.
+
+    decomposition = LBMDecomposition(lattice.nx, lattice.ny, lattice.nz, lattice.procs);
+    if (decomposition.isDecomposed())
+        decomposition.requireSameOnAllRanks(getPlatform().getName() + " platform in double precision", "platform and precision");
 
     // The fluid starts at equilibrium, with lattice density 1 and the initial velocity.  The populations are
     // stored as deviations from the rest equilibrium, f_q - w_q.
@@ -89,7 +94,6 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
     // fluid nodes next to the walls that it owns.  The exchange lists pair the links x -> x + c_q that join nodes of
     // two ranks: populations streamed into solid nodes, or across open faces, are not exchanged.
 
-    decomposition = LBMDecomposition(lattice.nx, lattice.ny, lattice.nz, lattice.procs);
     owned.clear();
     sendSlots.clear();
     receiveSlots.clear();
@@ -187,6 +191,7 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
     noiseDrawn = false;
     reaction.resize(3*numNodes);
     wallMomentum = Vec3();
+    replicasChecked = false;
     int seed = lattice.randomNumberSeed;
     if (seed == 0)
         seed = osrngseed();
@@ -211,7 +216,11 @@ void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
     // pointing into the wall, has every component of its velocity reversed, as for a no-slip wall.  A particle
     // that already moves out of the wall keeps its velocity.  This is done here, at the start of the step,
     // where OpenMM's AndersenThermostat also changes velocities, so that the coupling and the integrator see
-    // the new values.  The wall receives the momentum 2 m v taken from the particle.
+    // the new values.  The wall receives the momentum 2 m v taken from the particle.  With the domain decomposition
+    // every rank reflects its copy of the particles, and rank 0 alone counts the momentum of the wall.
+    if (decomposition.isDecomposed() && (!replicasChecked ||
+            (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)))
+        checkReplicas(context);
     wallMomentum = Vec3();
     if (!isFluid.empty()) {
         vector<Vec3>& positions = extractPositions(context);
@@ -221,7 +230,8 @@ void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
             int particle = lattice.particles[i];
             Vec3 v = velocities[particle];
             if (!isFluid[nearestNode(positions[particle])] && v.dot(wallNormal(positions[particle])) > 0) {
-                wallMomentum += v*(2.0*particleMass[i]*cellMass);
+                if (decomposition.getRank() == 0)
+                    wallMomentum += v*(2.0*particleMass[i]*cellMass);
                 velocities[particle] = -v;
             }
         }
@@ -393,7 +403,9 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
     // the momentum of the fluid before the force of this step, j(t - dt/2).  In a lattice step (isStep) the
     // particle receives F and the node -F: the reactions of the particles of a node are summed in particle
     // order, then added to the force density of the node.  A solid node has rho = 0 and is at rest; the
-    // reaction it receives leaves the fluid.  The random numbers are drawn once per step, in particle order.
+    // reaction it receives leaves the fluid.  The random numbers are drawn once per step, in particle order.  With the
+    // domain decomposition the rank that owns the node computes the force, and the forces are then summed over the
+    // ranks; every rank draws the random numbers of all the particles, and uses those of its own.
     vector<Vec3>& positions = extractPositions(context);
     vector<Vec3>& velocities = extractVelocities(context);
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
@@ -409,6 +421,10 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
     for (int i = 0; i < (int) lattice.particles.size(); i++) {
         int particle = lattice.particles[i];
         int node = nearestNode(positions[particle]);
+        if (!isOwned(node)) {
+            particleForces[i] = Vec3();
+            continue;
+        }
         Vec3 u;
         if (rho[node] > 0)
             u = Vec3(momentum[3*node], momentum[3*node+1], momentum[3*node+2])*(1.0/rho[node]);
@@ -422,6 +438,7 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
             for (int k = 0; k < 3; k++)
                 reaction[3*node+k] -= f[k];
     }
+    sumParticleForces();
     if (isStep)
         applyReaction();
 }
@@ -440,7 +457,8 @@ void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, 
     // A solid node is a wall at rest of infinite mass: u_c(t) = 0; the boundary nodes of regularized walls and open
     // faces are fluid nodes like the others.  Fc_k is read from the forces of OpenMM, to which
     // the other forces of the System have been added since LBMForce is the last one.  The particles of a node are
-    // summed in particle order, as on the GPU platforms (keys node*N + k, sorted).
+    // summed in particle order, as on the GPU platforms (keys node*N + k, sorted).  With the domain decomposition the
+    // rank that owns the node computes the forces of its particles, which are then summed over the ranks.
     int numParticles = lattice.particles.size();
     vector<Vec3>& positions = extractPositions(context);
     vector<Vec3>& velocities = extractVelocities(context);
@@ -478,6 +496,12 @@ void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, 
             particleMomentum += knownVelocity[i]*particleMass[i];
             random += randomForces[i];
         }
+        if (!isOwned(node)) {
+            for (int k = first; k < end; k++)
+                particleForces[keys[k]%numParticles] = Vec3();
+            first = end;
+            continue;
+        }
         Vec3 u, sum;
         if (rho[node] > 0) {
             const double* j = &momentum[3*node];
@@ -498,8 +522,51 @@ void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, 
                 reaction[3*node+k] = -sum[k];
         first = end;
     }
+    sumParticleForces();
     if (isStep)
         applyReaction();
+}
+
+void ReferenceCalcLBMForceKernel::sumParticleForces() {
+    // With the domain decomposition each coupling force has been computed by one rank, and is zero on the others:
+    // the sum is exact, and the same on every rank.
+    if (!decomposition.isDecomposed())
+        return;
+    int numParticles = lattice.particles.size();
+    vector<double> values(3*numParticles);
+    for (int i = 0; i < numParticles; i++)
+        for (int k = 0; k < 3; k++)
+            values[3*i+k] = particleForces[i][k];
+    decomposition.sum(values.data(), 3*numParticles);
+    for (int i = 0; i < numParticles; i++)
+        particleForces[i] = Vec3(values[3*i], values[3*i+1], values[3*i+2]);
+}
+
+void ReferenceCalcLBMForceKernel::checkReplicas(ContextImpl& context) {
+    // With the domain decomposition every rank integrates its own copy of all the particles, and the coupling needs
+    // the copies to be identical.  They stay identical if they start so, since every rank computes the same forces and
+    // the coupling forces are summed; copies that start differently (velocities drawn with a different seed on each
+    // rank, for example) would give wrong results without any sign.  The bits of the positions and velocities are
+    // compared, through a hash, at the first lattice step and then every machCheckFrequency steps.  The check is
+    // collective.
+    replicasChecked = true;
+    unsigned long long hash = 14695981039346656037ULL;
+    for (const vector<Vec3>* values : {&extractPositions(context), &extractVelocities(context)})
+        for (const Vec3& value : *values)
+            for (int k = 0; k < 3; k++) {
+                double component = value[k];
+                unsigned long long bits;
+                memcpy(&bits, &component, sizeof(bits));
+                hash = (hash^bits)*1099511628211ULL;
+            }
+    if (!decomposition.isSameOnAllRanks(hash)) {
+        stringstream msg;
+        msg << "LBMForce: the positions or velocities of the particles differ between the MPI ranks at lattice step "
+            << stepIndex << ". With the domain decomposition every rank holds a copy of all the particles, and the copies "
+            << "must be identical: set positions and velocities in the same way on every rank (for example "
+            << "setVelocitiesToTemperature() with a fixed random seed)";
+        throw OpenMMException(msg.str());
+    }
 }
 
 void ReferenceCalcLBMForceKernel::drawNoise() {

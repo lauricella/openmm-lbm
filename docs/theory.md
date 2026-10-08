@@ -1075,7 +1075,7 @@ $`[\lfloor nc/p\rfloor, \lfloor n(c + 1)/p\rfloor)`$, so blocks differ by at mos
 `openmmapi/src/LBMDecomposition.cpp`, compiled only with the CMake option `OPENMM_LBM_MPI`; without it, or with one
 domain, nothing changes.
 
-**Reference platform** (the fluid, walls and open faces; not yet the coupled particles and the checkpoints).
+**Reference platform** (the fluid, walls, open faces and coupled particles; not yet the checkpoints).
 - The arrays cover the whole lattice on every rank, and each rank advances only the nodes it owns: moments,
   collision and streaming, bounce-back, rebuilt boundary nodes. The Reference platform is the platform of
   correctness, so it keeps the global indices, the periodic wrap and the arithmetic of one domain; the GPU
@@ -1105,9 +1105,36 @@ domain, nothing changes.
   any decomposition (`docs/validation.md`, Domain decomposition). With the removal they agree to rounding, because
   the sum over the nodes is added in another order; with fluctuations the random numbers differ, so the agreement
   is statistical.
+- **Particles: replicated data.** Every rank has a Context with all the particles and integrates all of them; only
+  the fluid is divided. The copies must stay identical on every rank. The rank that owns the nearest node of a
+  coupled particle computes its coupling force (explicit or centred drag, section 2) and the reaction on that node;
+  the other ranks set it to zero, and the forces are summed over the ranks (`MPI_Allreduce`). Each force has one
+  contribution different from zero, so the sum is exact and the same on every rank. The particles of a node all
+  belong to the rank of the node, so the centred drag, which couples them, needs nothing else; the other forces on a
+  particle, which the centred drag reads, are the same on every rank. Every rank draws the random numbers of all the
+  coupled particles from its own generator, and the force uses those of the owner. Every rank reflects its copy of
+  the particles at the walls (the solid nodes are known everywhere), and rank 0 alone counts the momentum given to
+  the wall.
+- The copies stay identical only if nothing else draws different random numbers on different ranks. The integrator
+  is a `VerletIntegrator`, which draws none (section 2); a System with an `AndersenThermostat` or a Monte Carlo
+  barostat is refused with more than one domain. The positions and velocities must also start the same on every
+  rank: velocities drawn at random need the same seed on every rank, for example
+  `setVelocitiesToTemperature(T, seed)`. Copies that differ would give wrong results without any sign, so the
+  plugin compares a hash of the bits of all positions and velocities over the ranks at the first lattice step and
+  then with the period of the Mach number check (`setMachCheckFrequency()`), and stops with an error if they differ.
+- The coupling forces of the next step, which OpenMM evaluates between steps when a script asks for the forces
+  (`getState(getForces=True)`), are summed over the ranks too: like `getWallForce()`, such a call is collective.
+- **Errors.** An error found by one rank only would leave the others waiting forever in the next communication.
+  The checks that depend on the rank are collective: all ranks must run on the same platform with the same
+  precision (the replicated particles would drift apart otherwise), which is checked when the Context is created;
+  if a rank differs, every rank stops with the same error. The Mach number check uses the largest value over the
+  ranks, and the comparison of the particles a hash compared over the ranks, so every rank stops at the same step.
+  The other checks depend only on the System, the same on every rank.
+- The MD part is not divided: every rank computes all the other forces of the System. This suits coarse-grained
+  systems, in which the fluid dominates the cost.
 - For now `getFluidState()` and `getFluidFields()` return the whole lattice on every rank, valid only on the nodes
-  of the rank, and a Context with more than one domain refuses coupled particles and checkpoints; the CUDA, OpenCL
-  and HIP platforms refuse more than one domain.
+  of the rank, and a Context with more than one domain refuses checkpoints; the CUDA, OpenCL and HIP platforms
+  refuse more than one domain.
 
 ## References
 

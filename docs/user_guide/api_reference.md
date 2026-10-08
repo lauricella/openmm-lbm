@@ -76,11 +76,17 @@ one per MPI rank, for runs of the same script in several processes (`srun` or `m
 one domain: the whole lattice in one process, without MPI. A 0 lets MPI choose the number of domains along that axis.
 More than one domain needs the plugin built with MPI (`-DOPENMM_LBM_MPI=ON`, [installation](installation.md)), and
 the product must be the number of MPI ranks; otherwise creating the Context raises an error. It is fixed when the
-Context is created. In this version the Reference platform decomposes the fluid, the walls and the open faces
-([theory](../theory.md#8-domain-decomposition-in-development-for-version-040)); a Context with more than one domain
-refuses coupled particles and checkpoints, the CUDA, OpenCL and HIP platforms refuse more than one domain, and
+Context is created. In this version the Reference platform decomposes the fluid, the walls, the open faces and the
+coupling of the particles ([theory](../theory.md#8-domain-decomposition-in-development-for-version-040)); a Context
+with more than one domain refuses checkpoints, the CUDA, OpenCL and HIP platforms refuse more than one domain, and
 `getFluidState()` and `getFluidFields()` return the whole lattice on every rank, valid only on the nodes of the rank.
-`getWallForce()` and `getFluidMachNumber()` must then be called by every rank.
+`getWallForce()`, `getFluidMachNumber()` and `getState(getForces=True)` must then be called by every rank.
+
+The particles are replicated: every rank builds the same System and integrates all the particles, and the copies must
+stay identical. Set positions and velocities in the same way on every rank (velocities drawn at random need a fixed
+seed, `setVelocitiesToTemperature(T, seed)`); the plugin compares the copies at the first step and then with the
+period of the Mach number check (`setMachCheckFrequency()`), and stops with an error if they differ. With more than one domain the System cannot contain an
+`AndersenThermostat` or a Monte Carlo barostat, and every rank must use the same platform and precision.
 
 `LBMForce.isMPIAvailable()` says whether the plugin was built with MPI. `openmmlbm.mpiRank()`, `openmmlbm.mpiSize()`
 and `openmmlbm.mpiLocalRank()` (also `LBMForce.getMPIRank()`, `getMPISize()`, `getMPILocalRank()`) give the rank of

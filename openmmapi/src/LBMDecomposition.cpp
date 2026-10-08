@@ -161,6 +161,14 @@ void LBMDecomposition::sumInRankOrder(double* values, int count) const {
 #endif
 }
 
+void LBMDecomposition::sum(double* values, int count) const {
+    if (size == 1)
+        return;
+#ifdef OPENMM_LBM_MPI
+    MPI_Allreduce(MPI_IN_PLACE, values, count, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+#endif
+}
+
 double LBMDecomposition::maximum(double value) const {
     if (size == 1)
         return value;
@@ -179,6 +187,65 @@ int LBMDecomposition::broadcast(int value) const {
         MPI_Bcast(&value, 1, MPI_INT, 0, MPI_COMM_WORLD);
 #endif
     return value;
+}
+
+string LBMDecomposition::broadcast(const string& value) const {
+    if (size == 1)
+        return value;
+#ifdef OPENMM_LBM_MPI
+    int length = broadcast((int) value.size());
+    vector<char> buffer(value.begin(), value.end());
+    buffer.resize(length);
+    MPI_Bcast(buffer.data(), length, MPI_CHAR, 0, MPI_COMM_WORLD);
+    return string(buffer.begin(), buffer.end());
+#else
+    return value;
+#endif
+}
+
+bool LBMDecomposition::isSameOnAllRanks(unsigned long long value) const {
+    if (size == 1)
+        return true;
+#ifdef OPENMM_LBM_MPI
+    // The largest of the values and of their complements, that is the largest and the smallest value, in one call.
+    unsigned long long local[2] = {value, ~value}, result[2];
+    MPI_Allreduce(local, result, 2, MPI_UNSIGNED_LONG_LONG, MPI_MAX, MPI_COMM_WORLD);
+    return result[0] == ~result[1];
+#else
+    return true;
+#endif
+}
+
+void LBMDecomposition::throwIfAnyError(const string& error) const {
+    if (size == 1) {
+        if (!error.empty())
+            throw OpenMMException(error);
+        return;
+    }
+#ifdef OPENMM_LBM_MPI
+    int local = (error.empty() ? size : rank), first;
+    MPI_Allreduce(&local, &first, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    if (first == size)
+        return;
+    int length = (int) error.size();
+    MPI_Bcast(&length, 1, MPI_INT, first, MPI_COMM_WORLD);
+    vector<char> message(error.begin(), error.end());
+    message.resize(length);
+    MPI_Bcast(message.data(), length, MPI_CHAR, first, MPI_COMM_WORLD);
+    throw OpenMMException(string(message.begin(), message.end()));
+#endif
+}
+
+void LBMDecomposition::requireSameOnAllRanks(const string& value, const string& what) const {
+    string first = broadcast(value);
+    string error;
+    if (value != first) {
+        stringstream message;
+        message << "LBMForce: with the domain decomposition every MPI rank must use the same " << what << ": rank "
+                << rank << " has " << value << ", rank 0 has " << first;
+        error = message.str();
+    }
+    throwIfAnyError(error);
 }
 
 void LBMDecomposition::startExchange(const vector<vector<double> >& send, vector<vector<double> >& receive) {

@@ -40,7 +40,7 @@ class ReferenceCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     ReferenceCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform) : CalcLBMForceKernel(name, platform),
             stepPending(false), stepForcesCurrent(false), stepIndex(0), machWarningPrinted(false), noiseDrawn(false), hasStoredGaussian(false),
-            storedGaussian(0) {
+            storedGaussian(0), replicasChecked(false) {
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
@@ -77,6 +77,10 @@ private:
         return owned.empty() || owned[node];
     }
     void exchangePopulations();
+    /** With the domain decomposition: sum the coupling forces over the ranks, and check that the copies of the
+        particles are the same on every rank (collective). */
+    void sumParticleForces();
+    void checkReplicas(OpenMM::ContextImpl& context);
     /** Collision and streaming of one node; normal holds its 15 normal numbers with a fluctuating fluid. */
     void collideNode(int node, double mu, const double* normal);
     LBMLatticeParameters lattice;
@@ -95,6 +99,8 @@ private:
     std::vector<int> frameNodes, interiorNodes, normalIndex;
     std::vector<double> fluidNormals;
     std::vector<std::vector<double> > sendBuffers, receiveBuffers;
+    /** True once the copies of the particles have been compared (checkReplicas()). */
+    bool replicasChecked;
     /** Deviations of the populations from the rest equilibrium at lattice density 1, f_q - w_q, stored as
         [q*numNodes + node].  They keep the precision of small signals, and they are the fluid state of
         getFluidState() and setFluidState(), so that saving and restoring the fluid is exact. */

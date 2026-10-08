@@ -9,6 +9,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "internal/windowsExportLBM.h"
+#include <string>
 #include <vector>
 
 namespace LBMPlugin {
@@ -70,10 +71,25 @@ public:
     /** Replace each of the n values by its sum over the ranks, added in rank order (the same on every rank and for
         every run with the same decomposition). */
     void sumInRankOrder(double* values, int n) const;
+    /** Replace each of the n values by its sum over the ranks (MPI_Allreduce).  Exact, and the same on every rank,
+        when at most one rank has a value different from zero, as for the coupling forces of the particles. */
+    void sum(double* values, int n) const;
     /** The largest value over the ranks. */
     double maximum(double value) const;
     /** The value of rank 0, on every rank. */
     int broadcast(int value) const;
+    std::string broadcast(const std::string& value) const;
+    /** True on every rank if the value is the same on every rank. */
+    bool isSameOnAllRanks(unsigned long long value) const;
+    /**
+     * Collective error check: if the error of some rank is not empty, every rank throws an OpenMMException with the
+     * message of the first such rank; otherwise it returns.  An error found by one rank only must reach all of them,
+     * or the others would wait forever in the next communication.
+     */
+    void throwIfAnyError(const std::string& error) const;
+    /** Collective check that a setting (for example the platform and its precision) is the same on every rank: if
+        not, every rank throws an OpenMMException that names it. */
+    void requireSameOnAllRanks(const std::string& value, const std::string& what) const;
     /** Exchange values with other ranks: send[r] goes to rank r, and receive[r], already sized, comes from rank r.
         Empty vectors are not sent. */
     void exchange(const std::vector<std::vector<double> >& send, std::vector<std::vector<double> >& receive) const;

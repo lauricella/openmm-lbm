@@ -157,8 +157,10 @@ public:
      * (docs/theory.md, Domain decomposition).  The default, 1, 1, 1, is one domain: the whole lattice in one process,
      * without MPI.  A 0 lets MPI choose the number of domains along that axis (MPI_Dims_create).  Every rank runs
      * the same script with the same System; the particles are replicated on every rank, and each rank advances the
-     * fluid of its domain.  More than one domain needs a plugin built with MPI (CMake option OPENMM_LBM_MPI), and
-     * the product must be the number of MPI ranks.  It is fixed when the Context is created.
+     * fluid of its domain.  The copies of the particles must stay identical: the same positions and velocities on
+     * every rank, the same platform and precision, and no AndersenThermostat or Monte Carlo barostat; the plugin
+     * checks them.  More than one domain needs a plugin built with MPI (CMake option OPENMM_LBM_MPI), and the
+     * product must be the number of MPI ranks.  It is fixed when the Context is created.
      *
      * @param px    the number of domains along x
      * @param py    the number of domains along y

@@ -11,6 +11,7 @@
 #include "CommonLBMKernelSources.h"
 #include "internal/D3Q19.h"
 #include "internal/LBMBoundaries.h"
+#include "internal/LBMDecomposition.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/common/ContextSelector.h"
 #include "openmm/common/IntegrationUtilities.h"
@@ -80,9 +81,15 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
-    if (lattice.isDecomposed())
+    if (lattice.isDecomposed()) {
+        // The same collective check of the platform and precision as on the Reference platform, so that ranks on
+        // different platforms all stop with the same error.
+        string precision = (cc.getUseDoublePrecision() ? "double" : cc.getUseMixedPrecision() ? "mixed" : "single");
+        LBMDecomposition(lattice.nx, lattice.ny, lattice.nz, lattice.procs).requireSameOnAllRanks(
+                getPlatform().getName() + " platform in " + precision + " precision", "platform and precision");
         throw OpenMMException("LBMForce: the domain decomposition (setDomainDecomposition()) is not available yet on "
                 "the CUDA, OpenCL and HIP platforms");
+    }
     this->lattice = lattice;
     forceGroup = force.getForceGroup();
     bool centered = (lattice.dragScheme == LBMForce::Centered);
