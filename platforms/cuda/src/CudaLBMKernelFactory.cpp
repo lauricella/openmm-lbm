@@ -44,8 +44,12 @@ extern "C" OPENMM_EXPORT void registerLBMCudaKernelFactories() {
 }
 
 KernelImpl* CudaLBMKernelFactory::createKernelImpl(std::string name, const Platform& platform, ContextImpl& context) const {
-    CudaContext& cc = *static_cast<CudaPlatform::PlatformData*>(context.getPlatformData())->contexts[0];
-    if (name == CalcLBMForceKernel::Name())
-        return new CommonCalcLBMForceKernel(name, platform, cc, context.getSystem());
+    CudaPlatform::PlatformData* data = static_cast<CudaPlatform::PlatformData*>(context.getPlatformData());
+    CudaContext& cc = *data->contexts[0];
+    if (name == CalcLBMForceKernel::Name()) {
+        CommonCalcLBMForceKernel* kernel = new CommonCalcLBMForceKernel(name, platform, cc, context.getSystem());
+        kernel->setDeterministicForces(data->deterministicForces);
+        return kernel;
+    }
     throw OpenMMException((std::string("Tried to create kernel with illegal kernel name '")+name+"'").c_str());
 }

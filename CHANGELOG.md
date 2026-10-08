@@ -36,7 +36,11 @@ versions the API may still change.
   halo are packed on the device, sent through the host with non-blocking MPI calls while the interior of the block
   collides, and unpacked into the blocks of their owners. Identical bit for bit to one domain on the same platform and
   precision without the removal of the fluid momentum. Without the decomposition the arithmetic and the kernels do not
-  change. Not yet with more than one domain on these platforms: coupled particles and the exchange of the halo.
+  change. Coupled particles as on the Reference platform: the rank of the nearest node computes the coupling force,
+  the forces are summed over the ranks, and the CUDA and HIP platforms need the property `DeterministicForces`; the
+  copies of the particles are compared over the ranks as on the Reference platform. The exchange of the halo of the
+  density and the velocity: the device copies the moments of the nodes to send, and the host computes their fields as
+  `getFluidFields()` does and sends them, so that the copies are identical bit for bit.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations

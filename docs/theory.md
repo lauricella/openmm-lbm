@@ -1106,8 +1106,7 @@ domain, nothing changes.
   the sum over the nodes is added in another order; with fluctuations the random numbers differ, so the agreement
   is statistical.
 
-**CUDA, OpenCL and HIP platforms** (the fluid, walls, open faces and fluctuating fluid; not yet the coupled particles,
-the exchange of the halo and the checkpoints).
+**CUDA, OpenCL and HIP platforms** (everything that the Reference platform decomposes).
 - Each rank stores only its block, plus one layer of halo nodes on each side along the divided axes: for a block of
   $`n_x \times n_y \times n_z`$ nodes divided along the three axes the arrays hold $`(n_x + 2)(n_y + 2)(n_z + 2)`$
   nodes, in the layout of one domain (`platforms/common/src/kernels/lbmFluid.cc`). Along an axis that is not divided
@@ -1125,10 +1124,26 @@ the exchange of the halo and the checkpoints).
 - The sums of the removal of the fluid momentum and of the force on the walls, and the Mach number, are reduced on
   the device over the block and then over the ranks as on the Reference platform. A fluctuating fluid draws its
   numbers from OpenMM's generator of the Context of each rank, seeded with the seed of rank 0 plus $`1000003\,r`$.
-- With the same platform and precision, the fluid nodes are identical bit for bit to those of one domain without the
-  removal of the fluid momentum (`docs/validation.md`, Domain decomposition).
+- The coupled particles follow the rules of the Reference platform (below). The coupling kernels find the nearest node
+  in the whole lattice; the rank that owns it computes the coupling force and the reaction on the node, the other ranks
+  set the force to zero and give the particle a sort key past all the nodes of the block, so that it enters no
+  segment; the forces are summed over the ranks on the host. Every rank reflects its copy of the particles with the
+  mask of the whole lattice. The copies stay identical only if every rank computes the same forces of OpenMM: on the
+  CUDA and HIP platforms some sums may depend on the order of the threads unless the platform property
+  `DeterministicForces` is `true`, which a Context with more than one domain and coupled particles requires (checked
+  when it is created). The OpenCL platform has no such property; the comparison of the copies would stop a run whose
+  copies drift apart.
+- The exchange of the halo of the density and the velocity (below): at the end of the step a kernel computes the
+  moments of the populations and copies $`\rho - 1`$ and $`\mathbf j`$ of the nodes of the block that are in the halo of
+  other ranks into a buffer; the host computes their fields as `getFluidFields()` does and sends them, so the copies
+  are identical bit for bit to what the owner returns. It costs one more pass over the populations per step, and the
+  transfer of the halo through the host. For now the host keeps the fields of the halo, and the kernels give the
+  fields and the state, over the whole lattice (NaN outside the block and its halo): memory of the host, not of the
+  GPU, that grows with the lattice.
+- With the same platform and precision, the fluid nodes and the particles are identical bit for bit to those of one
+  domain without the removal of the fluid momentum (`docs/validation.md`, Domain decomposition).
 
-**Particles, errors, fields and state** (for now the coupled particles and the halo on the Reference platform only).
+**Particles, errors, fields and state** (every platform).
 - **Particles: replicated data.** Every rank has a Context with all the particles and integrates all of them; only
   the fluid is divided. The copies must stay identical on every rank. The rank that owns the nearest node of a
   coupled particle computes its coupling force (explicit or centred drag, section 2) and the reaction on that node;
@@ -1178,8 +1193,7 @@ the exchange of the halo and the checkpoints).
   halo wraps; beyond open faces it does not exist (NaN). The fields between steps are those of the populations at the
   end of the step, which are also those the next step starts from. With one domain the halo comes from the lattice
   itself. No observable of the plugin uses the halo yet.
-- For now a Context with more than one domain refuses checkpoints and `LBMVTKReporter` cannot write its fluid; on the
-  CUDA, OpenCL and HIP platforms it also refuses coupled particles and the exchange of the halo.
+- For now a Context with more than one domain refuses checkpoints and `LBMVTKReporter` cannot write its fluid.
 
 ## References
 

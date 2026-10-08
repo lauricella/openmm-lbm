@@ -19,10 +19,12 @@
 #include "openmm/internal/OSRngSeed.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <numeric>
+#include <set>
 #include <sstream>
 
 using namespace LBMPlugin;
@@ -103,12 +105,14 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         // ranks stop together.
         string precision = (cc.getUseDoublePrecision() ? "double" : cc.getUseMixedPrecision() ? "mixed" : "single");
         decomposition.requireSameOnAllRanks(getPlatform().getName() + " platform in " + precision + " precision", "platform and precision");
-        if (!lattice.particles.empty())
-            throw OpenMMException("LBMForce: coupled particles with the domain decomposition (setDomainDecomposition()) are not "
-                    "available yet on the CUDA, OpenCL and HIP platforms");
-        if (lattice.densityHaloExchange || lattice.velocityHaloExchange)
-            throw OpenMMException("LBMForce: the exchange of the halo (setDensityHaloExchange(), setVelocityHaloExchange()) is not "
-                    "available yet on the CUDA, OpenCL and HIP platforms");
+
+        // The copies of the particles stay identical only if every rank computes the same forces of OpenMM on them;
+        // the CUDA and HIP platforms do so with the property DeterministicForces.  The property could differ between
+        // the ranks, so the check is collective.
+        decomposition.throwIfAnyError(!lattice.particles.empty() && !deterministicForces ? "LBMForce: with the domain "
+                "decomposition and coupled particles the platform must compute the forces deterministically, so that the "
+                "copies of the particles stay identical on every rank: set the platform property DeterministicForces to "
+                "true" : "");
     }
     this->lattice = lattice;
     forceGroup = force.getForceGroup();
@@ -374,6 +378,50 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             sendSlots.upload(sendSlotsHost);
         if (!receiveSlotsHost.empty())
             receiveSlots.upload(receiveSlotsHost);
+
+        // The halo of the rank, as on the Reference platform: the nodes of other ranks among the 26 neighbours of the
+        // nodes of the block, across periodic boundaries but not across open faces.
+        haloSendNodes.clear();
+        haloReceiveNodes.clear();
+        if (lattice.densityHaloExchange || lattice.velocityHaloExchange) {
+            vector<set<int> > haloSend(numRanks), haloReceive(numRanks);
+            for (int n = 0; n < numLocal; n++) {
+                int node = globalNode(n);
+                int index[3] = {node%lattice.nx, (node/lattice.nx)%lattice.ny, node/(lattice.nx*lattice.ny)};
+                for (int dz = -1; dz <= 1; dz++)
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++) {
+                            int d[3] = {dx, dy, dz};
+                            bool beyondFace;
+                            int t = globalNeighbor(index, d, beyondFace);
+                            if (beyondFace || decomposition.owns(t))
+                                continue;
+                            int r = decomposition.ownerOfNode(t);
+                            haloSend[r].insert(node);
+                            haloReceive[r].insert(t);
+                        }
+            }
+            haloSendNodes.resize(numRanks);
+            haloReceiveNodes.resize(numRanks);
+            vector<int> storage;
+            for (int r = 0; r < numRanks; r++) {
+                haloSendNodes[r].assign(haloSend[r].begin(), haloSend[r].end());
+                haloReceiveNodes[r].assign(haloReceive[r].begin(), haloReceive[r].end());
+                for (int node : haloSendNodes[r]) {
+                    int n = localIndex(node);
+                    storage.push_back(storageIndex(n));
+                }
+            }
+            haloSendStorage.initialize<int>(cc, max<int>(1, storage.size()), "lbmHaloSendStorage");
+            haloBuffer.initialize(cc, 4*max<int>(1, storage.size()), elementSize, "lbmHaloBuffer");
+            if (!storage.empty())
+                haloSendStorage.upload(storage);
+            double nan = numeric_limits<double>::quiet_NaN();
+            if (lattice.densityHaloExchange)
+                haloDensity.assign(numNodes, nan);
+            if (lattice.velocityHaloExchange)
+                haloVelocity.assign(3*numNodes, nan);
+        }
     }
 
     // Coupled particles: their index in the list of the force for every atom, masses in units of the mass of a
@@ -391,7 +439,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     }
     int numCoupled = lattice.particles.size();
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
-    cellReaction.initialize(cc, (numCoupled > 0 ? 3*numNodes : 1), elementSize, "lbmCellReaction");
+    cellReaction.initialize(cc, (numCoupled > 0 ? 3*numStored : 1), elementSize, "lbmCellReaction");
     cellReaction.upload(vector<double>(cellReaction.getSize(), 0.0), true);
     if (numCoupled > 0) {
         vector<int> index(system.getNumParticles(), -1);
@@ -417,6 +465,10 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
         sort = cc.createSort(new CouplingSortTrait(), numCoupled, false);
         cc.getIntegrationUtilities().initRandomNumberGenerator(seed);
+        if (decomposed && numSolidNodes > 0) {
+            globalIsFluid.initialize<int>(cc, numNodes, "lbmGlobalIsFluid");
+            globalIsFluid.upload(isFluidHost);
+        }
     }
 
     // A fluctuating fluid (docs/theory.md, section 7) draws four float4 of normal numbers per node and step from
@@ -529,6 +581,14 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         unpackKernel->addArg(receiveSlots);
         unpackKernel->addArg(receiveBuffer);
         unpackKernel->addArg((int) receiveSlots.getSize());
+        if (haloSendStorage.isInitialized()) {
+            packFieldsKernel = program->createKernel("packFields");
+            packFieldsKernel->addArg(densityDeviation);
+            packFieldsKernel->addArg(momentum);
+            packFieldsKernel->addArg(haloSendStorage);
+            packFieldsKernel->addArg(haloBuffer);
+            packFieldsKernel->addArg((int) haloSendStorage.getSize());
+        }
     }
     if (numWallNodes > 0) {
         bounceBackKernel = program->createKernel("bounceBack");
@@ -575,6 +635,16 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         defines["DX"] = cc.doubleToString(lattice.dx, true);
         defines["VELOCITY_SCALE"] = cc.doubleToString(lattice.getVelocityScale(), true);
         defines["FORCE_SCALE"] = cc.doubleToString(cellMass*lattice.dx/(lattice.dt*lattice.dt), true);
+        if (decomposed) {
+            defines["GNX"] = cc.intToString(lattice.nx);
+            defines["GNY"] = cc.intToString(lattice.ny);
+            defines["GNZ"] = cc.intToString(lattice.nz);
+            defines["OX"] = cc.intToString(localStart[0]);
+            defines["OY"] = cc.intToString(localStart[1]);
+            defines["OZ"] = cc.intToString(localStart[2]);
+            if (decomposition.getRank() != 0)
+                defines["SKIP_REFLECTION_MOMENTUM"] = "1";
+        }
         if (centered && hasFloatForceBuffers())
             defines["HAS_FLOAT_FORCE_BUFFERS"] = "1";
         ComputeProgram coupling = cc.compileProgram(CommonLBMKernelSources::lbmCoupling, defines);
@@ -585,7 +655,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             reflectKernel->addArg(cc.getVelm());
             reflectKernel->addArg(cc.getAtomIndexArray());
             reflectKernel->addArg(couplingIndex);
-            reflectKernel->addArg(isFluid);
+            reflectKernel->addArg(decomposed ? globalIsFluid : isFluid);
             reflectKernel->addArg(particleMass);
             reflectKernel->addArg(particleWallMomentum);
         }
@@ -637,6 +707,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             if (hasFloatForceBuffers())
                 for (int i = 0; i < 2; i++)
                     prepareCenteredKernel->addArg();    // floating point force buffers and their number, set on first use
+            if (decomposed)
+                prepareCenteredKernel->addArg(particleForce);
             solveCenteredKernel = coupling->createKernel("solveCenteredDrag");
             solveCenteredKernel->addArg(sortKeys);
             solveCenteredKernel->addArg(particleMass);
@@ -659,6 +731,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
 
     if (centered)
         cc.addPostComputation(new CenteredDragPostComputation(*this));
+    if (packFieldsKernel)
+        exchangeHalo();
 }
 
 void CommonCalcLBMForceKernel::setFluidParameters() {
@@ -743,10 +817,49 @@ void CommonCalcLBMForceKernel::beginStep(ContextImpl& context) {
     // are reflected here, where OpenMM's AndersenThermostat also changes velocities.
     stepIndex = context.getStepCount();
     stepPending = true;
+    if (decomposition.isDecomposed() && !lattice.particles.empty() && lattice.particleCopiesCheck && (!replicasChecked ||
+            (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)))
+        checkReplicas(context);
     if (!lattice.particles.empty() && !lattice.solidNodes.empty()) {
         ContextSelector selector(cc);
         reflectKernel->execute(cc.getNumAtoms());
     }
+}
+
+void CommonCalcLBMForceKernel::checkReplicas(ContextImpl& context) {
+    // As on the Reference platform: with the domain decomposition every rank integrates its own copy of all the
+    // particles, and the bits of the positions and velocities are compared over the ranks, through a hash, at the first
+    // lattice step and then every machCheckFrequency steps.  The check is collective.
+    replicasChecked = true;
+    vector<Vec3> positions, velocities;
+    context.getPositions(positions);
+    context.getVelocities(velocities);
+    unsigned long long hash = 14695981039346656037ULL;
+    for (const vector<Vec3>* values : {&positions, &velocities})
+        for (const Vec3& value : *values)
+            for (int k = 0; k < 3; k++) {
+                double component = value[k];
+                unsigned long long bits;
+                memcpy(&bits, &component, sizeof(bits));
+                hash = (hash^bits)*1099511628211ULL;
+            }
+    if (!decomposition.isSameOnAllRanks(hash)) {
+        stringstream msg;
+        msg << "LBMForce: the positions or velocities of the particles differ between the MPI ranks at lattice step "
+            << stepIndex << ". With the domain decomposition every rank holds a copy of all the particles, and the copies "
+            << "must be identical: set positions and velocities in the same way on every rank (for example "
+            << "setVelocitiesToTemperature() with a fixed random seed)";
+        throw OpenMMException(msg.str());
+    }
+}
+
+void CommonCalcLBMForceKernel::sumParticleForces() {
+    // With the domain decomposition each coupling force has been computed by the rank of the nearest node, and is zero
+    // on the others: the sum is exact, and the same on every rank.
+    vector<double> forces;
+    downloadAsDouble(particleForce, forces);
+    decomposition.sum(forces.data(), forces.size());
+    particleForce.upload(forces, true);
 }
 
 double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
@@ -803,6 +916,8 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     }
     if (applyBoundariesKernel)
         applyBoundariesKernel->execute(boundaryNodes.getSize());
+    if (packFieldsKernel)
+        exchangeHalo();
     hasAdvanced = true;
     stepForcesCurrent = true;
     stepIndex++;
@@ -930,6 +1045,8 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
     }
     if (isStep)
         noiseDrawn = false;
+    if (decomposition.isDecomposed())
+        sumParticleForces();
 }
 
 void CommonCalcLBMForceKernel::checkMachNumber() {
@@ -990,6 +1107,66 @@ void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<doubl
         double r = 1.0 + dr[s];
         density[node] = r*lattice.density;
         velocity[node] = (Vec3(j[s], j[numStored+s], j[2*numStored+s])*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
+    }
+
+    // The nodes of the halo, exchanged at the end of the last step (decomposition only).
+    if (!haloDensity.empty() || !haloVelocity.empty())
+        for (int node = 0; node < numNodes; node++) {
+            if (decomposition.owns(node))
+                continue;
+            if (!haloDensity.empty())
+                density[node] = haloDensity[node];
+            if (!haloVelocity.empty())
+                velocity[node] = Vec3(haloVelocity[3*node], haloVelocity[3*node+1], haloVelocity[3*node+2]);
+        }
+}
+
+void CommonCalcLBMForceKernel::exchangeHalo() {
+    // The fields of the nodes of the block that are in the halo of other ranks go to those ranks, and the fields of the
+    // halo of the rank come from their owners (the lists of initialize()).  Collective.  The device copies rho - 1 and
+    // j of the nodes to send from the moments of the current populations, and the host computes the fields as
+    // getFluidFields() does, so the copies are identical bit for bit to what the owner returns.
+    computeMomentsKernel->execute(numLocal);
+    int numRanks = decomposition.getSize(), numSendNodes = 0;
+    for (int r = 0; r < numRanks; r++)
+        numSendNodes += haloSendNodes[r].size();
+    vector<double> moments;
+    if (numSendNodes > 0) {
+        packFieldsKernel->execute(numSendNodes);
+        downloadAsDouble(haloBuffer, moments);
+    }
+    bool exchangeDensity = !haloDensity.empty(), exchangeVelocity = !haloVelocity.empty();
+    double velocityScale = lattice.getVelocityScale();
+    vector<vector<double> > send(numRanks), receive(numRanks);
+    int k = 0;
+    for (int r = 0; r < numRanks; r++) {
+        for (int node : haloSendNodes[r]) {
+            double density = 0;
+            Vec3 velocity;
+            if (isFluidHost[node]) {
+                double rho = 1.0 + moments[4*k];
+                density = rho*lattice.density;
+                velocity = (Vec3(moments[4*k+1], moments[4*k+2], moments[4*k+3])*(1.0/rho) + lattice.bodyAcceleration*0.5)*velocityScale;
+            }
+            k++;
+            if (exchangeDensity)
+                send[r].push_back(density);
+            if (exchangeVelocity)
+                for (int a = 0; a < 3; a++)
+                    send[r].push_back(velocity[a]);
+        }
+        receive[r].resize(((exchangeDensity ? 1 : 0) + (exchangeVelocity ? 3 : 0))*haloReceiveNodes[r].size());
+    }
+    decomposition.exchange(send, receive);
+    for (int r = 0; r < numRanks; r++) {
+        int i = 0;
+        for (int node : haloReceiveNodes[r]) {
+            if (exchangeDensity)
+                haloDensity[node] = receive[r][i++];
+            if (exchangeVelocity)
+                for (int a = 0; a < 3; a++)
+                    haloVelocity[3*node+a] = receive[r][i++];
+        }
     }
 }
 
@@ -1074,6 +1251,8 @@ void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<
         populations.upload(stored, true);
     }
     stepForcesCurrent = false;
+    if (packFieldsKernel)
+        exchangeHalo();
 }
 
 /** Write the content of an array, as it is on the device, if the array exists. */

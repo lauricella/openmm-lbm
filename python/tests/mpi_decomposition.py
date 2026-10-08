@@ -10,10 +10,10 @@ collect it:
 
     mpirun -n 4 python mpi_decomposition.py 2 2 1 [OpenCL] [--platform CUDA --precision double --devices 4]
 
-By default it runs on the Reference platform.  With --platform the fluid cases run on that platform and precision,
-against one domain on the same platform (each rank on device local rank % devices with --devices), and the parts not
-available yet there with the decomposition (coupled particles, exchange of the halo, checkpoints) must stop every rank
-with an error.
+By default it runs on the Reference platform.  With --platform the cases run on that platform and precision, against
+one domain on the same platform (each rank on device local rank % devices with --devices; on CUDA and HIP with
+DeterministicForces, which the decomposition with coupled particles needs), and the checkpoints, not available yet
+there with the decomposition, must stop every rank with an error.
 
 Every rank runs each case twice in the same process, with one domain (no communication) and with px*py*pz domains,
 and compares with the single domain: the state of the fluid nodes of its domain (getFluidState(), getLocalDomain()),
@@ -48,6 +48,8 @@ if PLATFORM != 'Reference':
     PROPERTIES['Precision'] = options.get('--precision', 'double')
     if '--devices' in options:
         PROPERTIES['DeviceIndex'] = str(openmmlbm.mpiLocalRank() % int(options['--devices']))
+    if PLATFORM in ('CUDA', 'HIP'):
+        PROPERTIES['DeterministicForces'] = 'true'
 N = (8, 6, 6)
 
 DENSITY, VELOCITY = unit.dalton/unit.nanometer**3, unit.nanometer/unit.picosecond
@@ -203,7 +205,9 @@ def run_particles(case, decomposition, steps=60, platform='Reference', thermosta
     if checkpoint:
         context.createCheckpoint()
     context.setPositions([mm.Vec3(*x) for x in POSITIONS])
-    scale = 1.0 + (1e-12 if perturb and rank == size - 1 else 0.0)
+    # In single precision the velocities are stored as float: a perturbation of 1e-12 would vanish.
+    epsilon = 1e-6 if properties.get('Precision') == 'single' else 1e-12
+    scale = 1.0 + (epsilon if perturb and rank == size - 1 else 0.0)
     context.setVelocities([mm.Vec3(*v)*scale for v in VELOCITIES])
     integrator.step(steps)
     state = context.getState(getPositions=True, getVelocities=True)
@@ -232,12 +236,11 @@ PRESSURE_FORCE = 602.214*(0.5/0.01)**2/3*4*3
 def verdict(diff):
     return 'bitwise identical' if diff == 0 else 'max difference %.1e' % diff
 
-# The exchange of the halo of the density and the velocity is on the Reference platform only, for now.
 reference = (PLATFORM == 'Reference')
 ON = dict(platform=PLATFORM, properties=PROPERTIES)
 single_precision = (PROPERTIES.get('Precision') == 'single')
-for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal') + (('velocityhalo',) if reference else ()):
-    halos = dict(density_halo=(case != 'velocityhalo' and reference), velocity_halo=reference)
+for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal', 'velocityhalo'):
+    halos = dict(density_halo=(case != 'velocityhalo'))
     single = run('periodic' if case == 'velocityhalo' else case, (1, 1, 1), **ON)
     split = run('periodic' if case == 'velocityhalo' else case, (px, py, pz), **halos, **ON)
     # The slots of solid nodes only hold what the fluid nodes pushed into them in the last streaming, on the rank of
@@ -278,20 +281,20 @@ if rank == 0:
 
 if not reference:
     # Not available yet on this platform with the decomposition: every rank must stop with the error.
-    expect_error('particles', 'coupled particles with the domain decomposition', **ON)
-    expect_error('halo', 'exchange of the halo', case='fluid', density_halo=False, velocity_halo=True, **ON)
     expect_error('checkpoint', 'checkpoints with the domain decomposition', case='fluid', density_halo=False,
                  velocity_halo=False, checkpoint=True, **ON)
-    sys.exit(0)
+    if PLATFORM in ('CUDA', 'HIP'):
+        expect_error('determinism', 'DeterministicForces', platform=PLATFORM,
+                     properties=dict(PROPERTIES, DeterministicForces='false'))
 
 for case in ('explicit', 'centered', 'faces'):
-    single, wall1, solid, particles1, _ = run_particles(case, (1, 1, 1))
-    split, wall2, _, particles2, domain = run_particles(case, (px, py, pz))
+    single, wall1, solid, particles1, _ = run_particles(case, (1, 1, 1), **ON)
+    split, wall2, _, particles2, domain = run_particles(case, (px, py, pz), **ON)
     fluid = fluid_of_block(solid, domain)
     diff = np.abs(split[:, fluid] - state_of_block(single, domain)[:, fluid]).max()
     pdiff = np.abs(particles2 - particles1).max()
     absdiff = np.abs(wall2 - wall1).max()
-    ok = diff == 0 and pdiff == 0 and absdiff < 1e-12*PRESSURE_FORCE
+    ok = diff == 0 and pdiff == 0 and absdiff < (1e-6 if single_precision else 1e-12)*PRESSURE_FORCE
     print('rank %d/%d %s particles_%-9s fluid %s, particles %s; wall force %.3e, difference %.1e = %.1e of the '
           'pressure force%s' % (rank, size, (px, py, pz), case,
                                 'bitwise identical' if diff == 0 else 'max difference %.1e' % diff,
@@ -302,18 +305,18 @@ for case in ('explicit', 'centered', 'faces'):
 # With the fluctuating fluid the ranks draw different random numbers, so the run differs from that of one domain; the
 # copies of the particles must stay identical (the plugin compares them every 10 steps here, and the hash printed by
 # every rank must be the same).
-_, _, _, particles, _ = run_particles('thermal', (px, py, pz), steps=50)
+_, _, _, particles, _ = run_particles('thermal', (px, py, pz), steps=50, **ON)
 print('rank %d/%d %s thermal      runs; hash of the particles %s'
       % (rank, size, (px, py, pz), hashlib.md5(particles.tobytes()).hexdigest()[:16]), flush=True)
 
-expect_error('copies', 'differ between the MPI ranks', perturb=True)
+expect_error('copies', 'differ between the MPI ranks', perturb=True, **ON)
 # With the check off (setParticleCopiesCheck(False)) the same copies run without an error.
 try:
-    run_particles('explicit', (px, py, pz), steps=5, perturb=True, check=False)
+    run_particles('explicit', (px, py, pz), steps=5, perturb=True, check=False, **ON)
     message = 'not checked, runs'
 except Exception as e:
     message = 'unexpected error: %s  FAILED' % e
 print('rank %d/%d %s %-12s %s' % (rank, size, (px, py, pz), 'unchecked', message), flush=True)
-expect_error('andersen', 'AndersenThermostat', thermostat=True)
+expect_error('andersen', 'AndersenThermostat', thermostat=True, **ON)
 if other_platform is not None:
     expect_error('platforms', 'same platform and precision', platform='Reference' if rank == 0 else other_platform)

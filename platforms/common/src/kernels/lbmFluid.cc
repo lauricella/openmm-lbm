@@ -565,4 +565,20 @@ KERNEL void unpackPopulations(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRI
     for (int i = GLOBAL_ID; i < numSlots; i += GLOBAL_SIZE)
         f[slots[i]] = buffer[i];
 }
+
+/**
+ * The exchange of the halo of the density and the velocity (setDensityHaloExchange(), setVelocityHaloExchange()):
+ * copy rho - 1 and j of the listed nodes (storage indices), four values per node, into a buffer for the host, which
+ * computes the fields as getFluidFields() does and sends them to the ranks whose halo holds the nodes.
+ */
+KERNEL void packFields(GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum,
+        GLOBAL const int* RESTRICT nodes, GLOBAL mixed* RESTRICT buffer, int numListed) {
+    for (int i = GLOBAL_ID; i < numListed; i += GLOBAL_SIZE) {
+        int s = nodes[i];
+        buffer[4*i] = densityDeviation[s];
+        buffer[4*i+1] = momentum[s];
+        buffer[4*i+2] = momentum[NUM_STORED+s];
+        buffer[4*i+3] = momentum[2*NUM_STORED+s];
+    }
+}
 #endif

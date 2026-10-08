@@ -44,8 +44,12 @@ extern "C" OPENMM_EXPORT void registerLBMHipKernelFactories() {
 }
 
 KernelImpl* HipLBMKernelFactory::createKernelImpl(std::string name, const Platform& platform, ContextImpl& context) const {
-    HipContext& cc = *static_cast<HipPlatform::PlatformData*>(context.getPlatformData())->contexts[0];
-    if (name == CalcLBMForceKernel::Name())
-        return new CommonCalcLBMForceKernel(name, platform, cc, context.getSystem());
+    HipPlatform::PlatformData* data = static_cast<HipPlatform::PlatformData*>(context.getPlatformData());
+    HipContext& cc = *data->contexts[0];
+    if (name == CalcLBMForceKernel::Name()) {
+        CommonCalcLBMForceKernel* kernel = new CommonCalcLBMForceKernel(name, platform, cc, context.getSystem());
+        kernel->setDeterministicForces(data->deterministicForces);
+        return kernel;
+    }
     throw OpenMMException((std::string("Tried to create kernel with illegal kernel name '")+name+"'").c_str());
 }

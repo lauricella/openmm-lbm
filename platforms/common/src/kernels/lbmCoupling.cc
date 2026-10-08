@@ -17,7 +17,22 @@
  * Defines, besides those of lbmFluid.cc: NUM_ATOMS, PADDED_NUM_ATOMS, NUM_COUPLED, DX (lattice spacing, nm),
  * VELOCITY_SCALE (dx/dt) and FORCE_SCALE (m_c dx/dt^2, the force unit of the lattice in kJ/mol/nm); with the
  * Centered drag, HAS_FLOAT_FORCE_BUFFERS if the platform also accumulates forces in floating point buffers.
+ *
+ * With the domain decomposition (DOMAIN_DECOMPOSITION, kernels/lbmFluid.cc) GNX, GNY and GNZ are the sizes of the
+ * lattice and OX, OY, OZ the first node of the block of the rank; the moments and reactions are stored at the storage
+ * index of the node in the block.  Every rank holds all the particles: the nearest node and the wall normal come from
+ * the whole lattice (isFluid is then the mask of the whole lattice), the rank that owns the nearest node computes the
+ * coupling force, the others set it to zero and give the particle the key NUM_STORED*NUM_COUPLED + i, which sorts after
+ * all the nodes and is skipped; the host sums the forces over the ranks.  SKIP_REFLECTION_MOMENTUM is defined on the
+ * ranks other than 0, which reflect their copies of the particles but do not count the momentum of the wall.
  */
+
+#ifndef DOMAIN_DECOMPOSITION
+#define NUM_STORED NUM_NODES
+#define GNX NX
+#define GNY NY
+#define GNZ NZ
+#endif
 
 DEVICE mixed4 loadPosition(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection, int index) {
 #ifdef USE_MIXED_PRECISION
@@ -41,10 +56,25 @@ DEVICE mixed wrapCoordinate(mixed x, int size) {
  * The nearest node: after wrapping the position into the box, node i owns the interval [(i - 1/2) dx, (i + 1/2) dx).
  */
 DEVICE int nearestNode(mixed4 pos) {
-    int i = ((int) floor(wrapCoordinate(pos.x, NX) + 0.5f))%NX;
-    int j = ((int) floor(wrapCoordinate(pos.y, NY) + 0.5f))%NY;
-    int k = ((int) floor(wrapCoordinate(pos.z, NZ) + 0.5f))%NZ;
-    return i + NX*(j + NY*k);
+    int i = ((int) floor(wrapCoordinate(pos.x, GNX) + 0.5f))%GNX;
+    int j = ((int) floor(wrapCoordinate(pos.y, GNY) + 0.5f))%GNY;
+    int k = ((int) floor(wrapCoordinate(pos.z, GNZ) + 0.5f))%GNZ;
+    return i + GNX*(j + GNY*k);
+}
+
+/**
+ * The storage index of a node of the lattice, or NUM_STORED if it is not in the block of the rank (only with the
+ * domain decomposition).
+ */
+DEVICE int storedNode(int node) {
+#ifdef DOMAIN_DECOMPOSITION
+    int i = node%GNX - OX, j = (node/GNX)%GNY - OY, k = node/(GNX*GNY) - OZ;
+    if (i < 0 || i >= NX || j < 0 || j >= NY || k < 0 || k >= NZ)
+        return NUM_STORED;
+    return (i+PAD_X) + SX*((j+PAD_Y) + SY*(k+PAD_Z));
+#else
+    return node;
+#endif
 }
 
 #ifdef HAS_SOLID_NODES
@@ -53,8 +83,8 @@ DEVICE int nearestNode(mixed4 pos) {
  * eight nodes of the lattice cell that contains the position: it points from the fluid into the wall.
  */
 DEVICE mixed3 wallNormal(mixed4 pos, GLOBAL const int* RESTRICT isFluid) {
-    mixed s[3] = {wrapCoordinate(pos.x, NX), wrapCoordinate(pos.y, NY), wrapCoordinate(pos.z, NZ)};
-    int size[3] = {NX, NY, NZ};
+    mixed s[3] = {wrapCoordinate(pos.x, GNX), wrapCoordinate(pos.y, GNY), wrapCoordinate(pos.z, GNZ)};
+    int size[3] = {GNX, GNY, GNZ};
     int index[3][2];
     mixed weight[3][2];
     for (int k = 0; k < 3; k++) {
@@ -68,7 +98,7 @@ DEVICE mixed3 wallNormal(mixed4 pos, GLOBAL const int* RESTRICT isFluid) {
     for (int a = 0; a < 2; a++)
         for (int b = 0; b < 2; b++)
             for (int c = 0; c < 2; c++)
-                solid[a][b][c] = (isFluid[index[0][a] + NX*(index[1][b] + NY*index[2][c])] ? 0 : 1);
+                solid[a][b][c] = (isFluid[index[0][a] + GNX*(index[1][b] + GNY*index[2][c])] ? 0 : 1);
     mixed3 gradient = make_mixed3(0, 0, 0);
     for (int a = 0; a < 2; a++)
         for (int b = 0; b < 2; b++) {
@@ -100,6 +130,9 @@ KERNEL void reflectParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const rea
             p = make_mixed3(v.x*scale, v.y*scale, v.z*scale);
             velm[j] = make_mixed4(-v.x, -v.y, -v.z, v.w);
         }
+#ifdef SKIP_REFLECTION_MOMENTUM
+        p = make_mixed3(0, 0, 0);
+#endif
         wallMomentum[i] = p.x;
         wallMomentum[NUM_COUPLED+i] = p.y;
         wallMomentum[2*NUM_COUPLED+i] = p.z;
@@ -128,13 +161,25 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
         if (i < 0)
             continue;
         mixed4 pos = loadPosition(posq, posqCorrection, j);
-        int node = nearestNode(pos);
+        int node = storedNode(nearestNode(pos));
+#ifdef DOMAIN_DECOMPOSITION
+        if (node == NUM_STORED) {
+            // Another rank owns the node: it computes the force.  The random numbers are copied all the same.
+            if (kT > 0 && gamma > 0 && drawNoise)
+                noise[i] = random[randomIndex+i];
+            particleForce[i] = 0;
+            particleForce[NUM_COUPLED+i] = 0;
+            particleForce[2*NUM_COUPLED+i] = 0;
+            sortKeys[i] = ((mm_long) NUM_STORED)*NUM_COUPLED + i;
+            continue;
+        }
+#endif
         mixed rho = 1 + densityDeviation[node];
         mixed ux = 0, uy = 0, uz = 0;
         if (rho > 0) {
             ux = momentum[node]*(1/rho);
-            uy = momentum[NUM_NODES+node]*(1/rho);
-            uz = momentum[2*NUM_NODES+node]*(1/rho);
+            uy = momentum[NUM_STORED+node]*(1/rho);
+            uz = momentum[2*NUM_STORED+node]*(1/rho);
         }
         mixed4 v = velm[j];
         mixed vx = v.x*(1/(mixed) VELOCITY_SCALE), vy = v.y*(1/(mixed) VELOCITY_SCALE), vz = v.z*(1/(mixed) VELOCITY_SCALE);
@@ -177,6 +222,10 @@ KERNEL void sumCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL con
         int node = (int) (sortKeys[k]/NUM_COUPLED);
         if (k > 0 && (int) (sortKeys[k-1]/NUM_COUPLED) == node)
             continue;
+#ifdef DOMAIN_DECOMPOSITION
+        if (node == NUM_STORED)
+            continue;
+#endif
         mixed fx = 0, fy = 0, fz = 0;
         for (int m = k; m < NUM_COUPLED && (int) (sortKeys[m]/NUM_COUPLED) == node; m++) {
             int i = (int) (sortKeys[m] - ((mm_long) node)*NUM_COUPLED);
@@ -185,8 +234,8 @@ KERNEL void sumCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL con
             fz -= particleForce[2*NUM_COUPLED+i];
         }
         cellReaction[node] = fx;
-        cellReaction[NUM_NODES+node] = fy;
-        cellReaction[2*NUM_NODES+node] = fz;
+        cellReaction[NUM_STORED+node] = fy;
+        cellReaction[2*NUM_STORED+node] = fz;
     }
 }
 
@@ -196,9 +245,13 @@ KERNEL void sumCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL con
 KERNEL void clearCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL mixed* RESTRICT cellReaction) {
     for (int k = GLOBAL_ID; k < NUM_COUPLED; k += GLOBAL_SIZE) {
         int node = (int) (sortKeys[k]/NUM_COUPLED);
+#ifdef DOMAIN_DECOMPOSITION
+        if (node == NUM_STORED)
+            continue;
+#endif
         cellReaction[node] = 0;
-        cellReaction[NUM_NODES+node] = 0;
-        cellReaction[2*NUM_NODES+node] = 0;
+        cellReaction[NUM_STORED+node] = 0;
+        cellReaction[2*NUM_STORED+node] = 0;
     }
 }
 
@@ -217,6 +270,9 @@ KERNEL void prepareCenteredDrag(GLOBAL const real4* RESTRICT posq, GLOBAL const 
 #ifdef HAS_FLOAT_FORCE_BUFFERS
         , GLOBAL const real4* RESTRICT floatForces, int numFloatForces
 #endif
+#ifdef DOMAIN_DECOMPOSITION
+        , GLOBAL mixed* RESTRICT particleForce
+#endif
         ) {
     const mixed h = 0.5f;
     const mixed fixedPointScale = 1/(mixed) 0x100000000;
@@ -225,7 +281,15 @@ KERNEL void prepareCenteredDrag(GLOBAL const real4* RESTRICT posq, GLOBAL const 
         if (i < 0)
             continue;
         mixed4 pos = loadPosition(posq, posqCorrection, j);
-        int node = nearestNode(pos);
+        int node = storedNode(nearestNode(pos));
+#ifdef DOMAIN_DECOMPOSITION
+        if (node == NUM_STORED) {
+            // Another rank owns the node and solves the drag: the force is zero here.
+            particleForce[i] = 0;
+            particleForce[NUM_COUPLED+i] = 0;
+            particleForce[2*NUM_COUPLED+i] = 0;
+        }
+#endif
         mixed fx = longForces[j]*fixedPointScale;
         mixed fy = longForces[j+PADDED_NUM_ATOMS]*fixedPointScale;
         mixed fz = longForces[j+2*PADDED_NUM_ATOMS]*fixedPointScale;
@@ -285,6 +349,10 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
         int node = (int) (sortKeys[k]/NUM_COUPLED);
         if (k > 0 && (int) (sortKeys[k-1]/NUM_COUPLED) == node)
             continue;
+#ifdef DOMAIN_DECOMPOSITION
+        if (node == NUM_STORED)
+            continue;
+#endif
         int end = k;
         mixed mass = 0, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0;
         for (; end < NUM_COUPLED && (int) (sortKeys[end]/NUM_COUPLED) == node; end++) {
@@ -302,8 +370,8 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
         mixed ux = 0, uy = 0, uz = 0, sx, sy, sz;
         if (rho > 0) {
             mixed kx = (momentum[node] + h*(rho*gx))*(1/rho);
-            mixed ky = (momentum[NUM_NODES+node] + h*(rho*gy))*(1/rho);
-            mixed kz = (momentum[2*NUM_NODES+node] + h*(rho*gz))*(1/rho);
+            mixed ky = (momentum[NUM_STORED+node] + h*(rho*gy))*(1/rho);
+            mixed kz = (momentum[2*NUM_STORED+node] + h*(rho*gz))*(1/rho);
             mixed scale = 1/(1 + a + a*mass/rho);
             sx = ((px - kx*mass)*(-gamma) + rx)*scale;
             sy = ((py - ky*mass)*(-gamma) + ry)*scale;
@@ -328,8 +396,8 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
         }
         if (isStep) {
             cellReaction[node] = -sx;
-            cellReaction[NUM_NODES+node] = -sy;
-            cellReaction[2*NUM_NODES+node] = -sz;
+            cellReaction[NUM_STORED+node] = -sy;
+            cellReaction[2*NUM_STORED+node] = -sz;
 #ifdef HAS_SOLID_NODES
             if (rho == 0) {
                 int i = (int) (sortKeys[k] - ((mm_long) node)*NUM_COUPLED);

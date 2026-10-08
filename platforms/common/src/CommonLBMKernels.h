@@ -44,7 +44,16 @@ class CommonCalcLBMForceKernel : public CalcLBMForceKernel {
 public:
     CommonCalcLBMForceKernel(std::string name, const OpenMM::Platform& platform, OpenMM::ComputeContext& cc, const OpenMM::System& system) :
             CalcLBMForceKernel(name, platform), cc(cc), system(system), stepPending(false), stepIndex(0), machWarningPrinted(false),
-            hasAdvanced(false), stepForcesCurrent(false), noiseDrawn(false), numFloatForceBuffers(-1) {
+            hasAdvanced(false), stepForcesCurrent(false), noiseDrawn(false), numFloatForceBuffers(-1), deterministicForces(true),
+            replicasChecked(false) {
+    }
+    /**
+     * Whether the platform computes the forces of OpenMM in a deterministic way (the property DeterministicForces of the
+     * CUDA and HIP platforms), set by the kernel factory before initialize().  With the domain decomposition and coupled
+     * particles every rank must compute the same forces on its copies of the particles.
+     */
+    void setDeterministicForces(bool deterministic) {
+        deterministicForces = deterministic;
     }
     void initialize(const OpenMM::System& system, const LBMForce& force, const LBMLatticeParameters& lattice);
     void beginStep(OpenMM::ContextImpl& context);
@@ -76,6 +85,13 @@ private:
     double computeMachNumber();
     void removeFluidMomentum();
     void collideAndStream();
+    /** With the domain decomposition: sum the coupling forces over the ranks, and check that the copies of the
+        particles are the same on every rank (collective). */
+    void sumParticleForces();
+    void checkReplicas(OpenMM::ContextImpl& context);
+    /** With the domain decomposition and the exchange of the halo: send the fields of the nodes of the block to the
+        ranks whose halo contains them, and receive those of the halo of the rank (collective). */
+    void exchangeHalo();
     /** The global index of node n of the block, and its storage index (kernels/lbmFluid.cc). */
     int globalNode(int n) const;
     int storageIndex(int n) const;
@@ -92,6 +108,8 @@ private:
     /** The number of entries of solidNodes (the solid nodes, with the decomposition those linked to fluid nodes of the
         block), and of the fluid nodes of the frame and of the interior of the block. */
     int numSolidEntries, numFrameNodes, numInteriorNodes;
+    /** See setDeterministicForces(); true once the copies of the particles have been compared (checkReplicas()). */
+    bool deterministicForces, replicasChecked;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;
     /** Step count of the Context: set by beginStep() at the start of a lattice step, incremented at its end. */
@@ -131,12 +149,22 @@ private:
         (3 components of numSolidNodes each); with bounce-back walls, the fluid nodes next to the solid nodes and the
         bits 1 << q of their directions q towards solid nodes (LBMBoundaries::findWallLinks()). */
     OpenMM::ComputeArray isFluid, solidNodes, solidLinks, wallExchange, wallNodes, wallLinks;
+    /** With the domain decomposition and coupled particles, the mask of the fluid nodes of the whole lattice, for the
+        reflection of the particles at the walls (every rank reflects all of them). */
+    OpenMM::ComputeArray globalIsFluid;
     /** With the domain decomposition: the fluid nodes of the frame and of the interior of the block; the slots of the
         populations to send (in the halo) and to receive (in the block), rank after rank; the buffers of the device; and
         the number of slots for each rank and the buffers of the host. */
     OpenMM::ComputeArray frameNodes, interiorNodes, sendSlots, receiveSlots, sendBuffer, receiveBuffer;
     std::vector<int> sendCounts, receiveCounts;
     std::vector<std::vector<double> > sendBuffers, receiveBuffers;
+    /** The halo of the rank (setDensityHaloExchange(), setVelocityHaloExchange()), as on the Reference platform: for each
+        rank r, the nodes of the block in the halo of r and the nodes of r in the halo of the block, in index order; the
+        storage indices of the first, rank after rank, and the buffer of their moments; and the fields of the halo in
+        the units of getFluidFields() over the whole lattice, NaN outside the halo, empty when not exchanged. */
+    std::vector<std::vector<int> > haloSendNodes, haloReceiveNodes;
+    OpenMM::ComputeArray haloSendStorage, haloBuffer;
+    std::vector<double> haloDensity, haloVelocity;
     /** Boundary nodes (regularized walls and open faces, internal/LBMBoundaries.h): the nodes, the bits of their
         unknown and solid directions, kind + 4*(face + 1), the momentum given to the wall by each node in the last
         step (deviations f - w, 3 components of numBoundaryNodes each), and the velocity and density minus 1 of the
@@ -160,7 +188,7 @@ private:
     OpenMM::ComputeKernel computeMomentsKernel, sumMomentumKernel, centerVelocityKernel, removeMomentumKernel;
     OpenMM::ComputeKernel collideKernel, bounceBackKernel, wallExchangeKernel, applyBoundariesKernel, maxSpeedKernel;
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
-    OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel;
+    OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel, packFieldsKernel;
 };
 
 } // namespace LBMPlugin
