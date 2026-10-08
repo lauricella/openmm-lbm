@@ -50,6 +50,20 @@ int isNumpyAvailable() {
 %pythoncode %{
 import openmm as mm
 import openmm.unit as unit
+
+
+def _lbmInputValue(value, expected, method):
+    # A plain number is taken in the unit of the method; a Quantity is converted to that unit.  A Quantity whose
+    # unit cannot be converted to it is an error: OpenMM's typemaps would otherwise strip it in the MD unit system
+    # without a check, and a density in g/cm^3, for example, would become 1e-21 Da/nm^3.
+    if not unit.is_quantity(value):
+        return value
+    if not value.unit.is_compatible(expected):
+        hint = ''
+        if value.unit.is_compatible(unit.gram/unit.centimeter**3):
+            hint = '; a density in g/cm^3 must be multiplied by unit.AVOGADRO_CONSTANT_NA'
+        raise TypeError('LBMForce.%s(): the unit %s cannot be converted to %s%s' % (method, value.unit, expected, hint))
+    return value.value_in_unit(expected)
 %}
 
 /*
@@ -140,6 +154,34 @@ import openmm.unit as unit
 %}
 %pythonappend LBMPlugin::LBMForce::getFluidFields(OpenMM::Context& context) %{
     val = (unit.Quantity(val[0], unit.dalton/unit.nanometer**3), unit.Quantity(val[1], unit.nanometer/unit.picosecond))
+%}
+
+/*
+ * Check the units of the inputs (_lbmInputValue above).
+ */
+%pythonprepend LBMPlugin::LBMForce::setFluidDensity(double density) %{
+    density = _lbmInputValue(density, unit.dalton/unit.nanometer**3, 'setFluidDensity')
+%}
+%pythonprepend LBMPlugin::LBMForce::setKinematicViscosity(double viscosity) %{
+    viscosity = _lbmInputValue(viscosity, unit.nanometer**2/unit.picosecond, 'setKinematicViscosity')
+%}
+%pythonprepend LBMPlugin::LBMForce::setFriction(double friction) %{
+    friction = _lbmInputValue(friction, unit.picosecond**-1, 'setFriction')
+%}
+%pythonprepend LBMPlugin::LBMForce::setTemperature(double temperature) %{
+    temperature = _lbmInputValue(temperature, unit.kelvin, 'setTemperature')
+%}
+%pythonprepend LBMPlugin::LBMForce::setBodyAcceleration(const OpenMM::Vec3& acceleration) %{
+    acceleration = _lbmInputValue(acceleration, unit.nanometer/unit.picosecond**2, 'setBodyAcceleration')
+%}
+%pythonprepend LBMPlugin::LBMForce::setInitialFluidVelocity(const OpenMM::Vec3& velocity) %{
+    velocity = _lbmInputValue(velocity, unit.nanometer/unit.picosecond, 'setInitialFluidVelocity')
+%}
+%pythonprepend LBMPlugin::LBMForce::setFaceVelocity(Face face, const OpenMM::Vec3& velocity) %{
+    velocity = _lbmInputValue(velocity, unit.nanometer/unit.picosecond, 'setFaceVelocity')
+%}
+%pythonprepend LBMPlugin::LBMForce::setFaceDensity(Face face, double density) %{
+    density = _lbmInputValue(density, unit.dalton/unit.nanometer**3, 'setFaceDensity')
 %}
 
 /*

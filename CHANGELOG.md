@@ -73,6 +73,11 @@ versions the API may still change.
   `OPENMM_DIR`. CMake warns if the linker flags contain a folder with another OpenMM library, which the
   programs could load at run time. `make PythonInstall` builds the plugin library first. Section 12 of
   `docs/user_guide/installation.md` documents what CMake checks, the build options and their messages.
+- Python: the setters with units (`setFluidDensity()`, `setKinematicViscosity()`, `setFriction()`,
+  `setTemperature()`, `setBodyAcceleration()`, `setInitialFluidVelocity()`, `setFaceVelocity()`,
+  `setFaceDensity()`) convert a `Quantity` to the unit of the method and raise `TypeError` if its unit does not
+  convert. Before, OpenMM's typemaps stripped it in the MD unit system without a check, and a density in g/cm^3
+  became 1e-21 Da/nm^3 without an error.
 - The halfway bounce-back (`BounceBack` walls) is done by the fluid nodes next to the walls: after the streaming
   each of them takes back, in the opposite direction, the population that it built for a direction towards a
   solid node from its own moments, force and random part, instead of a pass over the solid nodes that wrote into

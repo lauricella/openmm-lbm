@@ -130,9 +130,12 @@ print(force.getKinematicViscosity(), force.getBodyAcceleration())
 
 Getters return `Quantity` objects, as the methods of OpenMM forces do.
 
+A `Quantity` in a unit that cannot be converted, for example a friction in nm, raises `TypeError` with the
+method and the two units, instead of being turned into a wrong number.
+
 **Densities are per mole.** In OpenMM a mass is a molar mass: the dalton is 1 g/mol. A density in
-g/cm^3 must therefore be multiplied by the Avogadro constant, otherwise it is off by a factor of
-6.022e23:
+g/cm^3 must therefore be multiplied by the Avogadro constant; without it `setFluidDensity()` and
+`setFaceDensity()` raise `TypeError` (OpenMM itself would read 1 g/cm^3 as 1e-21 Da/nm^3):
 
 ```python
 import openmm.unit as unit

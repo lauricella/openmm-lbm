@@ -5,8 +5,9 @@ added to the System with `System.addForce()`, and used with a `VerletIntegrator`
 `context` act on the fluid of that Context.
 
 Values are in OpenMM units (nm, ps, Da, K). Setters accept plain numbers in these units or `Quantity`
-objects (see [units](getting_started.md#units)); getters return `Quantity` objects where the quantity
-has units.
+objects in units that convert to them (see [units](getting_started.md#units)); a `Quantity` in a unit that
+does not convert, such as a density in g/cm^3 without the Avogadro constant, raises `TypeError`. Getters
+return `Quantity` objects where the quantity has units.
 
 - [Summary](#summary)
 - [Lattice](#lattice)
@@ -75,7 +76,7 @@ See [the lattice](lattice.md#geometry) for the geometry and the numbering of the
 Mass density of the fluid at rest, in Da/nm^3. The default 602.214 Da/nm^3 is water (1 g/cm^3). The
 density must be positive. It sets the mass of a lattice cell, m_c = density dx^3, and scales the
 densities returned by `getFluidFields()`. A density in g/cm^3 must be multiplied by
-`unit.AVOGADRO_CONSTANT_NA` (see [units](getting_started.md#units)).
+`unit.AVOGADRO_CONSTANT_NA` (see [units](getting_started.md#units)); without it the method raises `TypeError`.
 
 ### `setKinematicViscosity(viscosity)`, `getKinematicViscosity()`
 

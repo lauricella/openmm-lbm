@@ -223,6 +223,32 @@ def test_wall_scheme_and_faces():
     assert np.allclose(ux, 0.5*(np.arange(10)[:, None] + 1)/11, rtol=0, atol=1e-10)
 
 
+def test_input_units_are_checked():
+    # A Quantity is converted to the unit of the setter; one whose unit does not convert is an error instead of a
+    # wrong number (OpenMM would read 1 g/cm^3 as 1e-21 Da/nm^3).
+    force = LBMForce()
+    force.setFluidDensity(1.0*unit.gram/unit.centimeter**3*unit.AVOGADRO_CONSTANT_NA)
+    assert abs(force.getFluidDensity().value_in_unit(unit.dalton/unit.nanometer**3) - 602.214076) < 1e-9
+    force.setKinematicViscosity(1.0035e-6*unit.meter**2/unit.second)
+    assert abs(force.getKinematicViscosity().value_in_unit(unit.nanometer**2/unit.picosecond) - 1.0035) < 1e-12
+    force.setFriction(5e12/unit.second)
+    assert abs(force.getFriction().value_in_unit(unit.picosecond**-1) - 5.0) < 1e-12
+    force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0, 100, 0)*unit.meter/unit.second)
+    assert abs(force.getFaceVelocity(LBMForce.XMin).value_in_unit(unit.nanometer/unit.picosecond)[1] - 0.1) < 1e-12
+    force.setFriction(2.0)
+    assert force.getFriction() == 2.0/unit.picosecond
+    with pytest.raises(TypeError, match='AVOGADRO_CONSTANT_NA'):
+        force.setFluidDensity(1.0*unit.gram/unit.centimeter**3)
+    with pytest.raises(TypeError, match='AVOGADRO_CONSTANT_NA'):
+        force.setFaceDensity(LBMForce.XMax, 1.0*unit.gram/unit.centimeter**3)
+    with pytest.raises(TypeError, match='setFriction'):
+        force.setFriction(5.0*unit.nanometer)
+    with pytest.raises(TypeError, match='setBodyAcceleration'):
+        force.setBodyAcceleration(mm.Vec3(1, 0, 0)*unit.nanometer/unit.picosecond)
+    with pytest.raises(TypeError, match='setTemperature'):
+        force.setTemperature(300.0*unit.kilojoule_per_mole)
+
+
 def test_open_faces_need_no_momentum_removal():
     # With open faces the momentum of the fluid cannot be removed: the default removal frequency (1) is an error.
     system, force, positions = create_system(num_particles=1)
