@@ -82,7 +82,7 @@ POSITIONS = [(1.70, 0.40, 0.30), (1.70, 2.00, 1.30), (0.05, 2.90, 2.95), (3.20, 
 VELOCITIES = [(1.5, 0.3, -2.0), (-1.0, 0.5, 0.2), (-0.8, 1.0, 0.6), (0.4, -0.6, 0.9), (0.0, 0.0, -1.5),
               (0.3, 0.2, -0.4), (-0.2, -0.3, 0.5)]
 
-def run_particles(case, decomposition, steps=60, platform='Reference', thermostat=False, perturb=False):
+def run_particles(case, decomposition, steps=60, platform='Reference', thermostat=False, perturb=False, check=True):
     system = mm.System()
     system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 3, 0), mm.Vec3(0, 0, 3))
     field = mm.CustomExternalForce('-3*x+2*y-z')
@@ -123,6 +123,7 @@ def run_particles(case, decomposition, steps=60, platform='Reference', thermosta
         force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.5, 0.1, 0.0))
         force.setFaceDensity(LBMForce.XMax, 605.0)
     force.setDomainDecomposition(*decomposition)
+    force.setParticleCopiesCheck(check)
     system.addForce(force)
     integrator = mm.VerletIntegrator(0.01)
     context = mm.Context(system, integrator, mm.Platform.getPlatformByName(platform))
@@ -190,6 +191,13 @@ print('rank %d/%d %s thermal      runs; hash of the particles %s'
       % (rank, size, (px, py, pz), hashlib.md5(particles.tobytes()).hexdigest()[:16]), flush=True)
 
 expect_error('copies', 'differ between the MPI ranks', perturb=True)
+# With the check off (setParticleCopiesCheck(False)) the same copies run without an error.
+try:
+    run_particles('explicit', (px, py, pz), steps=5, perturb=True, check=False)
+    message = 'not checked, runs'
+except Exception as e:
+    message = 'unexpected error: %s  FAILED' % e
+print('rank %d/%d %s %-12s %s' % (rank, size, (px, py, pz), 'unchecked', message), flush=True)
 expect_error('andersen', 'AndersenThermostat', thermostat=True)
 if other_platform is not None:
     expect_error('platforms', 'same platform and precision', platform='Reference' if rank == 0 else other_platform)

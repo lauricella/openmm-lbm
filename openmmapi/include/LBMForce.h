@@ -180,6 +180,28 @@ public:
     static int getMPISize();
     static int getMPILocalRank();
     /**
+     * Abort every MPI rank (MPI_Abort) with the error code, if MPI is running with more than one rank; otherwise do
+     * nothing.  The Python module calls it after printing an uncaught exception, so that an error on one rank does not
+     * leave the others waiting in the next communication.
+     */
+    static void abortMPI(int errorCode);
+    /**
+     * Get whether, with the domain decomposition, the copies of the particles are compared over the MPI ranks
+     * (setParticleCopiesCheck()).
+     */
+    bool getParticleCopiesCheck() const;
+    /**
+     * Set whether, with the domain decomposition, the copies of the particles are compared over the MPI ranks.  Every
+     * rank integrates all the particles, and the copies must stay identical (docs/theory.md, Domain decomposition).
+     * With the check on, the default, a hash of the positions and velocities of all the particles is compared over
+     * the ranks at the first lattice step and then every getMachCheckFrequency() steps, and every rank stops with an
+     * error if they differ.  A check costs about 7 ns per particle and one MPI_Allreduce of two numbers; turning it
+     * off saves that, for example in timings.  Without the decomposition it does nothing.
+     *
+     * @param check    true to compare the copies
+     */
+    void setParticleCopiesCheck(bool check);
+    /**
      * Get the mass density of the fluid at rest, measured in Da/nm^3.
      */
     double getFluidDensity() const;
@@ -507,6 +529,7 @@ protected:
 private:
     int nx, ny, nz, randomNumberSeed, momentumRemovalFrequency, machCheckFrequency;
     int decomposition[3];
+    bool particleCopiesCheck;
     double density, viscosity, friction, temperature, machNumberLimit;
     CouplingScheme couplingScheme;
     DragScheme dragScheme;

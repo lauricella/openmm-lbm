@@ -1122,6 +1122,8 @@ domain, nothing changes.
   `setVelocitiesToTemperature(T, seed)`. Copies that differ would give wrong results without any sign, so the
   plugin compares a hash of the bits of all positions and velocities over the ranks at the first lattice step and
   then with the period of the Mach number check (`setMachCheckFrequency()`), and stops with an error if they differ.
+  The check costs about 7 ns per particle and one `MPI_Allreduce` of two numbers; `setParticleCopiesCheck(False)`
+  turns it off, for timings.
 - The coupling forces of the next step, which OpenMM evaluates between steps when a script asks for the forces
   (`getState(getForces=True)`), are summed over the ranks too: like `getWallForce()`, such a call is collective.
 - **Errors.** An error found by one rank only would leave the others waiting forever in the next communication.
@@ -1129,7 +1131,10 @@ domain, nothing changes.
   precision (the replicated particles would drift apart otherwise), which is checked when the Context is created;
   if a rank differs, every rank stops with the same error. The Mach number check uses the largest value over the
   ranks, and the comparison of the particles a hash compared over the ranks, so every rank stops at the same step.
-  The other checks depend only on the System, the same on every rank.
+  The other checks depend only on the System, the same on every rank. An exception in the script on one rank only
+  (an error of the script, for example) cannot be made collective: the Python module `openmmlbm` then prints it and
+  aborts every rank with `MPI_Abort` (`LBMForce.abortMPI()`, installed as `sys.excepthook`), as `python -m mpi4py`
+  does, instead of leaving the others waiting.
 - The MD part is not divided: every rank computes all the other forces of the System. This suits coarse-grained
   systems, in which the fluid dominates the cost.
 - For now `getFluidState()` and `getFluidFields()` return the whole lattice on every rank, valid only on the nodes

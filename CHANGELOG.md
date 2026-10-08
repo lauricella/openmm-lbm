@@ -20,8 +20,10 @@ versions the API may still change.
   T = 0, with both drag schemes. Checks that stop every rank together: the same platform and precision on every rank,
   identical copies of the particles (a hash of positions and velocities, at the first step and then with the period
   of the Mach number check); an `AndersenThermostat` or a Monte Carlo barostat is refused with more than one domain. With more than one
-  domain the warnings of the Context are printed by rank 0 only. Not yet: checkpoints, local
-  `getFluidState()`/`getFluidFields()`, GPU platforms.
+  domain the warnings of the Context are printed by rank 0 only. `setParticleCopiesCheck()` turns the comparison of
+  the copies off (on by default; serialized in version 8). With more than one MPI rank the Python module aborts every
+  rank (`LBMForce.abortMPI()`, `MPI_Abort`) after printing an uncaught exception, so that an error on one rank does not
+  leave the others waiting. Not yet: checkpoints, local `getFluidState()`/`getFluidFields()`, GPU platforms.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations

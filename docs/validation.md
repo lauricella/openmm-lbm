@@ -593,15 +593,15 @@ borders of the blocks, two on the same node, one crossing the periodic boundarie
 plane $`k = 0`$, where they are reflected; friction 10 ps⁻¹, 60 steps. Cases: explicit drag with bounce-back walls,
 centred drag with regularized walls, centred drag with regularized walls and open faces along x. On every rank the
 script compares the fluid nodes of the rank and the positions and velocities of all the particles. Decompositions
-$`2 	imes 1 	imes 1`$, $`1 	imes 2 	imes 1`$, $`1 	imes 1 	imes 2`$, $`2 	imes 2 	imes 1`$,
-$`1 	imes 2 	imes 2`$ and $`2 	imes 2 	imes 2`$ (22 ranks in all):
+$`2 \times 1 \times 1`$, $`1 \times 2 \times 1`$, $`1 \times 1 \times 2`$, $`2 \times 2 \times 1`$,
+$`1 \times 2 \times 2`$ and $`2 \times 2 \times 2`$ (22 ranks in all):
 
 | Case | Fluid nodes and particles | Force on the walls |
 |---|---|---|
 | explicit drag, centred drag, open faces | identical bit for bit on every rank and decomposition (66 of 66) | absolute difference at most $`2.9 \cdot 10^{-9}`$ kJ/mol/nm |
 
 Without a body force the force on the walls, 58 to $`2.5 \cdot 10^{4}`$ kJ/mol/nm here, is a small difference between
-the pressure forces on the two sides of the solid plane, each about $`ho c_s^2`$ times its area,
+the pressure forces on the two sides of the solid plane, each about $`\rho c_s^2`$ times its area,
 $`6.0 \cdot 10^{6}`$ kJ/mol/nm: the difference is $`5 \cdot 10^{-16}`$ of that, the rounding of the sums added in another
 order. Relative to the net force it reaches $`3 \cdot 10^{-11}`$, which is why the script compares it with the
 pressure force.
@@ -611,8 +611,14 @@ is not compared with one domain; the copies of the particles stay identical on e
 every 10 steps, and the hash of positions and velocities printed by every rank is the same). The checks that must stop
 every rank together all do, without any rank waiting: copies of the particles that differ by $`10^{-12}`$ in the
 velocities of one rank (stopped at the first step), an `AndersenThermostat` (refused when the Context is created) and,
-with $`2 	imes 1 	imes 1`$ and $`2 	imes 2 	imes 1`$, rank 0 on the Reference platform and the others on OpenCL
-(50 of 50).
+with $`2 \times 1 \times 1`$ and $`2 \times 2 \times 1`$, rank 0 on the Reference platform and the others on OpenCL
+(50 of 50). With the check of the copies off (`setParticleCopiesCheck(False)`) the same differing copies run without an
+error.
+
+An exception in the script on one rank only cannot be made collective: `python/tests/mpi_abort.py` raises one on rank 1
+while rank 0 waits in the check made when the Context is created. With the `excepthook` of `openmmlbm` the job stops
+after 3 s with exit code 1 (`MPI_Abort`); with the default one of Python it hangs, and was killed by a timeout after
+60 s.
 
 ## Equivalence with the reference implementation: coupled particles (E0)
 

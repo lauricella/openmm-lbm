@@ -36,6 +36,8 @@ public:
     bool isDecomposed() const {
         return procs[0]*procs[1]*procs[2] > 1;
     }
+    /** With the decomposition, whether the copies of the particles are compared over the ranks. */
+    bool particleCopiesCheck;
     /** Lattice spacing (nm) and lattice time step (ps). */
     double dx, dt;
     /** Mass density of the fluid at rest (Da/nm^3): the lattice density 1 corresponds to it. */

@@ -92,6 +92,7 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     if (force.getMachNumberLimit() <= 0)
         throw OpenMMException("LBMForce: the Mach number limit must be positive");
     lattice.machCheckFrequency = force.getMachCheckFrequency();
+    lattice.particleCopiesCheck = force.getParticleCopiesCheck();
     lattice.machNumberLimit = force.getMachNumberLimit();
 
     // Solid nodes (walls).

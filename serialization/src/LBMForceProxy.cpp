@@ -34,6 +34,7 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     node.setIntProperty("domainsX", px);
     node.setIntProperty("domainsY", py);
     node.setIntProperty("domainsZ", pz);
+    node.setBoolProperty("particleCopiesCheck", force.getParticleCopiesCheck());
     node.setDoubleProperty("density", force.getFluidDensity());
     node.setDoubleProperty("viscosity", force.getKinematicViscosity());
     node.setDoubleProperty("friction", force.getFriction());
@@ -95,9 +96,11 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
         if (version >= 5)
             force->setFluidFluctuations(node.getBoolProperty("fluidFluctuations"));
         // Versions 1 to 7 were written before the domain decomposition existed, with one domain.
-        if (version >= 8)
+        if (version >= 8) {
             force->setDomainDecomposition(node.getIntProperty("domainsX"), node.getIntProperty("domainsY"),
                     node.getIntProperty("domainsZ"));
+            force->setParticleCopiesCheck(node.getBoolProperty("particleCopiesCheck", true));
+        }
         // Versions 1 to 5 were written before the wall schemes existed, with bounce-back.
         if (version >= 6)
             force->setWallScheme((LBMForce::WallScheme) node.getIntProperty("wallScheme"));

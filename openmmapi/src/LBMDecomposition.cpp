@@ -82,6 +82,20 @@ int LBMDecomposition::getLocalRank() {
 #endif
 }
 
+void LBMDecomposition::abortIfParallel(int errorCode) {
+#ifdef OPENMM_LBM_MPI
+    int initialized, finalized;
+    MPI_Initialized(&initialized);
+    MPI_Finalized(&finalized);
+    if (initialized && !finalized) {
+        int size;
+        MPI_Comm_size(MPI_COMM_WORLD, &size);
+        if (size > 1)
+            MPI_Abort(MPI_COMM_WORLD, errorCode);
+    }
+#endif
+}
+
 void LBMDecomposition::resolve(int nx, int ny, int nz, const int requested[3], int procs[3]) {
     for (int a = 0; a < 3; a++) {
         if (requested[a] < 0)

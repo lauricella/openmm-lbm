@@ -32,6 +32,8 @@ public:
     static int getWorldRank();
     static int getWorldSize();
     static int getLocalRank();
+    /** MPI_Abort on MPI_COMM_WORLD with the error code if MPI is running with more than one rank; otherwise nothing. */
+    static void abortIfParallel(int errorCode);
     /**
      * Resolve a requested decomposition for a lattice of size nx, ny, nz: the zeros are chosen with MPI_Dims_create,
      * and the product must be the number of ranks.  1, 1, 1 needs no MPI.  Throws an OpenMMException otherwise.

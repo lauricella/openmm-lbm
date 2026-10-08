@@ -19,7 +19,7 @@ using namespace OpenMM;
 using namespace std;
 
 LBMForce::LBMForce() : nx(0), ny(0), nz(0), randomNumberSeed(0), momentumRemovalFrequency(1), machCheckFrequency(100),
-        density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0), machNumberLimit(0.3),
+        particleCopiesCheck(true), density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0), machNumberLimit(0.3),
         couplingScheme(EulerMaruyama), dragScheme(Explicit), wallScheme(BounceBack), fluidFluctuations(false), bodyAcceleration(0, 0, 0),
         initialVelocity(0, 0, 0) {
     for (int face = 0; face < 6; face++) {
@@ -138,6 +138,18 @@ int LBMForce::getMPISize() {
 
 int LBMForce::getMPILocalRank() {
     return LBMDecomposition::getLocalRank();
+}
+
+void LBMForce::abortMPI(int errorCode) {
+    LBMDecomposition::abortIfParallel(errorCode);
+}
+
+bool LBMForce::getParticleCopiesCheck() const {
+    return particleCopiesCheck;
+}
+
+void LBMForce::setParticleCopiesCheck(bool check) {
+    particleCopiesCheck = check;
 }
 
 double LBMForce::getFluidDensity() const {

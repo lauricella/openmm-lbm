@@ -218,7 +218,7 @@ void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
     // where OpenMM's AndersenThermostat also changes velocities, so that the coupling and the integrator see
     // the new values.  The wall receives the momentum 2 m v taken from the particle.  With the domain decomposition
     // every rank reflects its copy of the particles, and rank 0 alone counts the momentum of the wall.
-    if (decomposition.isDecomposed() && (!replicasChecked ||
+    if (decomposition.isDecomposed() && lattice.particleCopiesCheck && (!replicasChecked ||
             (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)))
         checkReplicas(context);
     wallMomentum = Vec3();

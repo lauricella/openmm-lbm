@@ -248,6 +248,9 @@ public:
     static int getMPIRank();
     static int getMPISize();
     static int getMPILocalRank();
+    static void abortMPI(int errorCode);
+    bool getParticleCopiesCheck() const;
+    void setParticleCopiesCheck(bool check);
 
     double getFluidDensity() const;
     void setFluidDensity(double density);
@@ -374,6 +377,7 @@ public:
 %pythoncode %{
 import os as _os
 import struct as _struct
+import sys as _sys
 
 _CHECKPOINT_TAG = b'OPENMMLBM-CHECKPOINT-1\n'
 
@@ -391,6 +395,22 @@ def mpiSize():
 def mpiLocalRank():
     """The rank among the processes on the same node (0 without MPI), to choose the GPU: LBMForce.getMPILocalRank()."""
     return LBMForce.getMPILocalRank()
+
+
+def _abortMPIOnException(excType, value, traceback, _previous=_sys.excepthook):
+    # With several MPI ranks an exception that stops one rank would leave the others waiting in the next
+    # communication, and the exit of this process would wait for them in MPI_Finalize: the job would hang.  Print the
+    # exception, then abort every rank (MPI_Abort), as python -m mpi4py does.  With one process, or without MPI,
+    # abortMPI() does nothing.
+    _previous(excType, value, traceback)
+    try:
+        _sys.stderr.flush()
+    except Exception:
+        pass
+    LBMForce.abortMPI(1)
+
+
+_sys.excepthook = _abortMPIOnException
 
 
 def saveCheckpoint(file, context, force):

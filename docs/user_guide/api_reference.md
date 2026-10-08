@@ -85,7 +85,8 @@ with more than one domain refuses checkpoints, the CUDA, OpenCL and HIP platform
 The particles are replicated: every rank builds the same System and integrates all the particles, and the copies must
 stay identical. Set positions and velocities in the same way on every rank (velocities drawn at random need a fixed
 seed, `setVelocitiesToTemperature(T, seed)`); the plugin compares the copies at the first step and then with the
-period of the Mach number check (`setMachCheckFrequency()`), and stops with an error if they differ. With more than one domain the System cannot contain an
+period of the Mach number check (`setMachCheckFrequency()`), and stops with an error if they differ
+(`setParticleCopiesCheck()`, below). With more than one domain the System cannot contain an
 `AndersenThermostat` or a Monte Carlo barostat, and every rank must use the same platform and precision.
 
 `LBMForce.isMPIAvailable()` says whether the plugin was built with MPI. `openmmlbm.mpiRank()`, `openmmlbm.mpiSize()`
@@ -93,11 +94,25 @@ and `openmmlbm.mpiLocalRank()` (also `LBMForce.getMPIRank()`, `getMPISize()`, `g
 the process, the number of ranks and the rank among the processes on the same node, to print from one rank or to
 choose the GPU; without MPI they return 0, 1 and 0. The first call initializes MPI if the program has not done it.
 
+An exception that stops the script on one rank only would leave the other ranks waiting forever in the next
+communication. When MPI runs with more than one rank, the `openmmlbm` module therefore prints an uncaught exception
+and then aborts every rank (`LBMForce.abortMPI()`, which calls `MPI_Abort`), as `python -m mpi4py` does; it installs
+this as `sys.excepthook` when it is imported. With one process, or without MPI, nothing changes.
+
 ```python
 force.setDomainDecomposition(1, 1, 1)
 px, py, pz = force.getDomainDecomposition()
 print(LBMForce.getMPIRank(), LBMForce.getMPISize())   # 0 1 in one process
 ```
+
+### `setParticleCopiesCheck(check)`, `getParticleCopiesCheck()`
+
+**In development for version 0.4.0.** With more than one domain, whether the copies of the particles are compared over
+the MPI ranks; `True` by default. A check computes a hash of the positions and velocities of all the particles, about
+7 ns per particle (0.7 ms for $`10^5`$ particles on one core), and compares it over the ranks with one small
+`MPI_Allreduce`; at the default period of 100 steps it costs well under 1 % of a step. Turn it off only to time runs
+whose copies are known to be identical, since copies that differ give wrong results without any other sign. With one
+domain it does nothing. It is serialized with the force.
 
 ## Fluid properties
 
@@ -655,11 +670,12 @@ that the integrator evaluates; by default the integrator evaluates all groups.
 `openmm.XmlSerializer` saves and loads an `LBMForce`, alone or as part of a System, with all its
 parameters: grid, fluid properties, friction, temperature, random number seed, body acceleration, initial
 velocity, frequencies, Mach limit, coupling and drag schemes, fluid fluctuations, wall scheme, solid nodes, the
-type, velocity and density of each face, coupled particles, domain decomposition, force group and name. The fluid
+type, velocity and density of each face, coupled particles, domain decomposition and check of the copies of the
+particles, force group and name. The fluid
 of a Context is not part of it. The XML has version 8. Older XML still loads: versions 1 to 3 (written by version
 0.1.0) with the explicit drag, versions 1 to 4 (versions 0.1 and 0.2 of the plugin) without fluid fluctuations,
 versions 1 to 5 with the `BounceBack` wall scheme, versions 1 to 6 with periodic faces and versions 1 to 7 (version
-0.3 of the plugin) with one domain. Older versions of the plugin cannot
+0.3 of the plugin) with one domain and the check of the copies on. Older versions of the plugin cannot
 read newer XML. Import `openmmlbm` before
 deserializing. A force deserialized on its own is returned as a generic `openmm.Force`; obtain the
 `LBMForce` with `LBMForce.cast()` (see the [serialization example](examples.md#serialization)).

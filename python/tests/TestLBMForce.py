@@ -236,7 +236,12 @@ def test_domain_decomposition_api():
     assert copy.getDomainDecomposition() == [2, 0, 1]
     with pytest.raises(Exception):
         force.setDomainDecomposition(-1, 1, 1)
+    assert force.getParticleCopiesCheck()
+    force.setParticleCopiesCheck(False)
+    assert not LBMForce.cast(mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(force))).getParticleCopiesCheck()
+    force.setParticleCopiesCheck(True)
     assert (openmmlbm.mpiRank(), openmmlbm.mpiSize(), openmmlbm.mpiLocalRank()) == (0, 1, 0)
+    LBMForce.abortMPI(1)            # one process: nothing happens
     assert isinstance(LBMForce.isMPIAvailable(), bool)
     system = mm.System()
     system.setDefaultPeriodicBoxVectors(mm.Vec3(2, 0, 0), mm.Vec3(0, 2, 0), mm.Vec3(0, 0, 2))
