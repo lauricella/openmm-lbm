@@ -105,6 +105,45 @@ public:
             type[node] = (nodeKind == Wall ? 1 : 2);
         }
     }
+    /**
+     * The fluid nodes next to the walls with the halfway bounce-back (wall scheme BounceBack, docs/theory.md, section
+     * 1) and, for each of them, the bits 1 << q of the directions q whose node x + c_q is solid, without the links
+     * that cross an open face.  After the streaming each of these nodes takes back, along -c_q, the population that it
+     * built for the direction q and sent into the solid node.  isFluid is nonzero for the fluid nodes and zero for the
+     * solid ones; the lists are empty with regularized walls or without solid nodes.
+     */
+    template <class T>
+    static void findWallLinks(const LBMLatticeParameters& lattice, const std::vector<T>& isFluid,
+            std::vector<int>& wallNodes, std::vector<int>& wallLinks) {
+        wallNodes.clear();
+        wallLinks.clear();
+        if (lattice.solidNodes.empty() || lattice.wallScheme != LBMForce::BounceBack)
+            return;
+        int size[3] = {lattice.nx, lattice.ny, lattice.nz};
+        int nx = size[0], ny = size[1];
+        int numNodes = lattice.getNumNodes();
+        for (int node = 0; node < numNodes; node++) {
+            if (!isFluid[node])
+                continue;
+            int index[3] = {node%nx, (node/nx)%ny, node/(nx*ny)};
+            int links = 0;
+            for (int q = 1; q < D3Q19::numVelocities; q++) {
+                int c[3] = {D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q]}, target[3];
+                bool crossesFace = false;
+                for (int a = 0; a < 3; a++) {
+                    target[a] = index[a] + c[a];
+                    crossesFace = crossesFace || (lattice.isOpenAxis(a) && (target[a] < 0 || target[a] >= size[a]));
+                    target[a] = (target[a] + size[a])%size[a];
+                }
+                if (!crossesFace && !isFluid[target[0] + nx*(target[1] + ny*target[2])])
+                    links |= 1<<q;
+            }
+            if (links != 0) {
+                wallNodes.push_back(node);
+                wallLinks.push_back(links);
+            }
+        }
+    }
 };
 
 } // namespace LBMPlugin

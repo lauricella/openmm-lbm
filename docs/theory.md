@@ -66,14 +66,26 @@ halfway bounce-back (`BounceBack`, the default, described first) or the local re
 (`Regularized`, described below).
 - Solid nodes hold no fluid: their populations start at zero, they have no moments and no collision, and
   they do not enter the removal of the fluid momentum.
-- After streaming, a population that reached a solid node s from the fluid node s + c_q is sent back to
-  that node with the opposite velocity: f_q(s + c_q) = f_opp(q)(s). This halfway bounce-back places the
-  wall halfway between the fluid and the solid node and conserves the mass of the fluid. It is the scheme
-  of the reference implementation.
-- Only the links from a solid node to fluid nodes are processed. Nothing streams between two solid nodes,
-  and skipping those links makes the result independent of the order in which the solid nodes are
-  processed, so that the GPU platforms, which process them in parallel, give the same populations as the
-  Reference platform.
+- A population that the fluid node x sends towards a solid node x + c_q comes back to x with the opposite
+  velocity: f_opp(q)(x, t + 1) = f_q*(x, t), where f_q* = f_q^eq(rho, u*) + (1 - omega) f_q^neq,reg + S_q/2,
+  plus the random part xi_q with a fluctuating fluid (section 7), is the post-collision population of x. This
+  halfway bounce-back places the wall halfway between the fluid and the solid node and conserves the mass of
+  the fluid. It is the scheme of the reference implementation.
+- With the regularized collision f_q* depends only on the moments rho, j and Pi_neq of x, its force and its
+  random part, so the population that arrives from the wall is the population that x rebuilds from its own
+  moments for the direction towards the wall, put in the opposite direction. The code does exactly this at the
+  fluid nodes next to the walls: the collision and the streaming write f_q*(x) into the solid node x + c_q, then
+  each of these nodes copies it into its own population along -c_q. A node reads only the populations that it
+  wrote into the solid nodes and writes only its own populations that come from the wall, so on the parallel
+  platforms no two threads touch the same value. The copy left in the solid node gives the momentum exchanged
+  with the wall.
+- Only the links from fluid nodes to solid nodes that do not cross an open face are used (an open face is not a
+  wall: section 1, Open faces). Nothing streams between two solid nodes, and the momentum exchange is summed over
+  the solid nodes in the order of the list, so that the GPU platforms, which process the nodes in parallel, give
+  the same populations and wall force as the Reference platform.
+- Up to version 0.2.1 the copy was done by the solid nodes, one thread per solid node writing into its fluid
+  neighbours. The two forms move the same values, and they give the same results bit for bit on all platforms
+  and precisions (`docs/validation.md`, Walls).
 
 **Exact Poiseuille flow with bounce-back.** With the regularized collision, the odd non-hydrodynamic moments relax with
 frequency 1 (tau_odd = 1), so the scheme behaves at the walls as a two-relaxation-time scheme with
@@ -306,8 +318,8 @@ With the Euler-Maruyama scheme the budget gains the work of the random force; in
 power balances the dissipation of the drag.
 
 **Order in the lattice step.** Moments, removal of the fluid momentum, coupling, collision and
-streaming, bounce-back (with the `BounceBack` wall scheme), then the rebuild of the boundary nodes of
-regularized walls and open faces (section 1). The coupling therefore sees the fluid
+streaming, the bounce-back at the fluid nodes next to the solid nodes (with the `BounceBack` wall scheme), then
+the rebuild of the boundary nodes of regularized walls and open faces (section 1). The coupling therefore sees the fluid
 momentum after the removal.
 
 **Time levels.** OpenMM's Verlet integrator is a leapfrog: during the force evaluation of step t

@@ -106,8 +106,9 @@ private:
     OpenMM::ComputeArray partialSums, partialMax, centerVelocity;
     /** 1 for fluid nodes, 0 for solid nodes, 2 for the nodes of regularized walls and 3 for the nodes of open faces;
         the list of the solid nodes; the momentum given to each solid node by the deviations f - w in the last step
-        (3 components of numSolidNodes each). */
-    OpenMM::ComputeArray isFluid, solidNodes, wallExchange;
+        (3 components of numSolidNodes each); with bounce-back walls, the fluid nodes next to the solid nodes and the
+        bits 1 << q of their directions q towards solid nodes (LBMBoundaries::findWallLinks()). */
+    OpenMM::ComputeArray isFluid, solidNodes, wallExchange, wallNodes, wallLinks;
     /** Boundary nodes (regularized walls and open faces, internal/LBMBoundaries.h): the nodes, the bits of their
         unknown and solid directions, kind + 4*(face + 1), the momentum given to the wall by each node in the last
         step (deviations f - w, 3 components of numBoundaryNodes each), and the velocity and density minus 1 of the
@@ -129,7 +130,7 @@ private:
     OpenMM::ComputeArray fluctuationBasis;
     OpenMM::ComputeSort sort;
     OpenMM::ComputeKernel computeMomentsKernel, sumMomentumKernel, centerVelocityKernel, removeMomentumKernel;
-    OpenMM::ComputeKernel collideKernel, bounceBackKernel, applyBoundariesKernel, maxSpeedKernel;
+    OpenMM::ComputeKernel collideKernel, bounceBackKernel, wallExchangeKernel, applyBoundariesKernel, maxSpeedKernel;
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel;
 };

@@ -67,6 +67,7 @@ private:
     double getGaussianRandom();
     void collideAndStream();
     void bounceBack();
+    void computeWallMomentum();
     void applyBoundaries();
     void checkMachNumber();
     double computeMachNumber() const;
@@ -82,6 +83,9 @@ private:
     std::vector<double> rho, momentum, piNeq, forceDensity;
     /** 1 for fluid nodes, 0 for solid nodes; empty if there are no solid nodes. */
     std::vector<char> isFluid;
+    /** With bounce-back walls, the fluid nodes next to the solid nodes and, for each of them, the bits 1 << q of the
+        directions q whose node x + c_q is solid (LBMBoundaries::findWallLinks()); empty otherwise. */
+    std::vector<int> wallNodes, wallLinks;
     /** The boundary nodes (internal/LBMBoundaries.h): with regularized walls the fluid nodes next to the solid
         nodes, which lie on the walls, and the fluid nodes on the open faces.  For each of them: the bits 1 << q of
         the directions q whose populations are unknown after the streaming (unknownDirections) and of those among

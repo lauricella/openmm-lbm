@@ -11,7 +11,7 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `openmmapi/include/LBMKernels.h` | `CalcLBMForceKernel`, the interface every platform implements, and `LBMLatticeParameters` |
 | `openmmapi/include/internal/LBMForceImpl.h`, `openmmapi/src/LBMForceImpl.cpp` | checks the setup, computes the lattice parameters for all platforms (Invariants, below), prints the warnings, writes and checks the header of the checkpoints |
 | `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium and its deviation from the rest equilibrium, Hermite polynomial H2, regularized non-equilibrium part, Guo forcing, orthogonal basis of Lulli et al. and random part of the fluctuating fluid (host code) |
-| `openmmapi/include/internal/LBMBoundaries.h` | `LBMBoundaries`: finds the boundary nodes of regularized walls and open faces, with the bits of their unknown and solid directions, what each one imposes and the face that gives it (host code, used by every platform) |
+| `openmmapi/include/internal/LBMBoundaries.h` | `LBMBoundaries`: finds the boundary nodes of regularized walls and open faces, with the bits of their unknown and solid directions, what each one imposes and the face that gives it, and the links of the bounce-back walls from the fluid nodes to the solid nodes (host code, used by every platform) |
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform (on OpenCL its subclass `OpenCLCalcLBMForceKernel`, step 3 below), and the tests |
@@ -50,7 +50,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `LBMForceImpl::calcForcesAndEnergy()` checks that the step size has not changed and calls the
    kernel's `execute()`. The first `execute()` after `beginStep()` advances the fluid by one lattice
    step (moments, momentum removal, coupling of the particles, collision, with the random part of a
-   fluctuating fluid, and streaming, bounce-back at solid nodes with the `BounceBack` wall scheme, then the rebuild
+   fluctuating fluid, and streaming, the bounce-back at the fluid nodes next to the solid nodes with the
+   `BounceBack` wall scheme, then the rebuild
    of the boundary nodes of regularized walls and open faces; see `docs/theory.md` sections 1, 2 and 7) and
    adds the coupling forces of the step to the particles. The other force evaluations (`getState()`, for example) do not advance the fluid: they add the
    coupling forces of the next step, computed on the current fluid without its reaction, as OpenMM does for
@@ -92,7 +93,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    | `solveCenteredDrag` (centred drag) | one per key | sorted keys, v~, random forces, moments of the node, body acceleration | the forces of the particles of each node, written by its first key; in a lattice step also the reaction -S of the node, and at a solid node or at a node of a regularized wall -S as wall momentum |
    | `collideAndStream` | one per node (solid nodes do nothing) | moments and reaction of the node (none at the boundary nodes); with a fluctuating fluid, four float4 of OpenMM's random numbers per node, drawn after those of the particles, and the coefficients of the basis | the 19 populations it sends to the neighbours |
    | `clearCellReactions` | one per key | sorted keys | zero reaction at the nodes of the step |
-   | `bounceBack` (with solid nodes and the `BounceBack` wall scheme) | one per solid node | populations of the solid node | the populations it returns to the fluid neighbours, except across an open face, and its momentum exchange |
+   | `bounceBack` (with solid nodes and the `BounceBack` wall scheme) | one per fluid node next to a solid node | the populations that the node sent into its solid neighbours, except across an open face (`wallNodes`, `wallLinks`) | the same populations, as its own populations in the opposite directions |
+   | `computeWallExchange` (with solid nodes and the `BounceBack` wall scheme) | one per solid node | populations that the fluid neighbours sent into the solid node, except across an open face | its momentum exchange |
    | `applyBoundaries` (with regularized walls or open faces) | one per boundary node | populations of the node and the solid slots it wrote in the streaming, its moments at the start of the step, velocities and densities of the faces, body acceleration | the 19 rebuilt populations of the node and, on regularized walls, its momentum exchange |
    | `computeMaxFluidSpeed` (when the Mach check is due) | work groups of 64 | populations | one maximum per group, reduced on the host |
    | `applyCouplingForces` (with coupled particles, in every force evaluation that includes forces) | one per atom | coupling forces | OpenMM's fixed point force buffer |
@@ -102,7 +104,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    are compiled with `HAS_SOLID_NODES` and read a mask of the fluid nodes; without them they do not read it.
    With boundary nodes they are also compiled with `HAS_BOUNDARY_NODES`, and the mask is 2 at the nodes of
    regularized walls and 3 at the nodes of open faces; `OPEN_X`, `OPEN_Y` and `OPEN_Z` mark the axes with
-   open faces, across which `bounceBack` returns nothing.
+   open faces, across which the bounce-back returns nothing; with the `BounceBack` wall scheme they are compiled
+   with `BOUNCE_BACK_WALLS`.
    `getWallForce()` sums the momentum exchange of the last step on the host, of the solid nodes with
    bounce-back or of the nodes of regularized walls, and adds the static part of the weights w, computed
    once in `initialize()`, so a step costs no transfer. The atoms are addressed through OpenMM's atom index array, since OpenMM may reorder

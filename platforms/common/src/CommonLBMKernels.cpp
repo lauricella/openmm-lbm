@@ -112,7 +112,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     // Solid nodes hold no fluid: their populations start at zero, that is at the deviation -w_q.  With bounce-back
     // the part w of the populations gives the walls the same momentum in every step (the static pressure): it is
     // computed here once, in double precision, with the links from the solid nodes to the fluid nodes that do not
-    // cross an open face.
+    // cross an open face.  The same links, seen from the fluid nodes next to the walls (wallNodes), are the bits of
+    // wallLinks: along them the bounce-back returns the populations to the fluid.
 
     int numSolidNodes = lattice.solidNodes.size();
     int size[3] = {lattice.nx, lattice.ny, lattice.nz};
@@ -183,6 +184,15 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     populations.upload(f, true);
     isFluid.initialize<int>(cc, numNodes, "lbmIsFluid");
     isFluid.upload(isFluidHost);
+    vector<int> wallNodesHost, wallLinksHost;
+    LBMBoundaries::findWallLinks(lattice, isFluidHost, wallNodesHost, wallLinksHost);
+    int numWallNodes = wallNodesHost.size();
+    if (numWallNodes > 0) {
+        wallNodes.initialize<int>(cc, numWallNodes, "lbmWallNodes");
+        wallNodes.upload(wallNodesHost);
+        wallLinks.initialize<int>(cc, numWallNodes, "lbmWallLinks");
+        wallLinks.upload(wallLinksHost);
+    }
     solidNodes.initialize<int>(cc, max(1, numSolidNodes), "lbmSolidNodes");
     wallExchange.initialize(cc, 3*max(1, numSolidNodes), elementSize, "lbmWallExchange");
     if (numSolidNodes > 0)
@@ -262,6 +272,10 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         defines["HAS_COUPLED_PARTICLES"] = "1";
     if (lattice.fluidFluctuations)
         defines["FLUID_FLUCTUATIONS"] = "1";
+    if (numWallNodes > 0) {
+        defines["BOUNCE_BACK_WALLS"] = "1";
+        defines["NUM_WALL_NODES"] = cc.intToString(numWallNodes);
+    }
     if (numBoundaryNodes > 0) {
         defines["HAS_BOUNDARY_NODES"] = "1";
         defines["NUM_BOUNDARY_NODES"] = cc.intToString(numBoundaryNodes);
@@ -306,12 +320,16 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         collideKernel->addArg();        // mu = kT/cs^2, set by setFluidParameters()
         collideKernel->addArg(0);       // index of the random numbers, set in every step
     }
-    if (numSolidNodes > 0 && lattice.wallScheme == LBMForce::BounceBack) {
+    if (numWallNodes > 0) {
         bounceBackKernel = program->createKernel("bounceBack");
         bounceBackKernel->addArg(populations);
-        bounceBackKernel->addArg(isFluid);
-        bounceBackKernel->addArg(solidNodes);
-        bounceBackKernel->addArg(wallExchange);
+        bounceBackKernel->addArg(wallNodes);
+        bounceBackKernel->addArg(wallLinks);
+        wallExchangeKernel = program->createKernel("computeWallExchange");
+        wallExchangeKernel->addArg(populations);
+        wallExchangeKernel->addArg(isFluid);
+        wallExchangeKernel->addArg(solidNodes);
+        wallExchangeKernel->addArg(wallExchange);
     }
     if (numBoundaryNodes > 0) {
         applyBoundariesKernel = program->createKernel("applyBoundaries");
@@ -553,8 +571,10 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     collideKernel->execute(numNodes);
     if (numCoupled > 0)
         clearReactionsKernel->execute(numCoupled);
-    if (bounceBackKernel)
-        bounceBackKernel->execute(lattice.solidNodes.size());
+    if (bounceBackKernel) {
+        bounceBackKernel->execute(wallNodes.getSize());
+        wallExchangeKernel->execute(lattice.solidNodes.size());
+    }
     if (applyBoundariesKernel)
         applyBoundariesKernel->execute(boundaryNodes.getSize());
     hasAdvanced = true;

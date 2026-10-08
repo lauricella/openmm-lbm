@@ -293,21 +293,40 @@ KERNEL void computeMaxFluidSpeed(GLOBAL const mixed* RESTRICT f, GLOBAL const in
         partialMax[GROUP_ID] = maxima[0];
 }
 
-#ifdef HAS_SOLID_NODES
+#ifdef BOUNCE_BACK_WALLS
 /**
- * Halfway bounce-back (wall scheme BounceBack), one thread per solid node: the population that streamed from the
- * fluid node s + c_q into the solid node s, moving along -c_q, returns to s + c_q moving along c_q.  Only links to
- * fluid nodes that do not cross an open face are processed, so a thread reads populations of its own solid node and writes populations of fluid nodes, which
- * no other thread touches.  The deviations f - w are copied as they are, since opposite directions have the
- * same weight.
- *
- * Momentum exchange (Ladd 1994): the wall at rest receives -2 f c_q on each link, with the full population
- * f = (f - w) + w.  Each thread writes the part of f - w, -2 sum c_q (f - w), to wallExchange[k*NUM_SOLID_NODES + i];
- * the host sums it over the solid nodes in the order of the list and adds the part of w, the static pressure,
- * which depends only on the geometry and is computed once in double precision.  Kept apart, the static
- * pressure does not hide the hydrodynamic part in single precision.
+ * Halfway bounce-back (wall scheme BounceBack), one thread per fluid node next to the walls, after collideAndStream.
+ * For a direction q whose node x + c_q is solid (bit q of wallLinks), the population that x built in its collision
+ * for q from its own moments rho, j and Pi_neq, force and random part streamed into the solid node; x takes it back
+ * as its population along -c_q, the one that arrives from the wall.  A thread reads the solid slots that its node
+ * wrote in the streaming and writes populations of its own node whose source is solid, which no other thread
+ * touches.  The deviations f - w are copied as they are, since opposite directions have the same weight.
  */
-KERNEL void bounceBack(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT isFluid, GLOBAL const int* RESTRICT solidNodes,
+KERNEL void bounceBack(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT wallNodes, GLOBAL const int* RESTRICT wallLinks) {
+    DECLARE_D3Q19_VELOCITIES
+    for (int b = GLOBAL_ID; b < NUM_WALL_NODES; b += GLOBAL_SIZE) {
+        int node = wallNodes[b], links = wallLinks[b];
+        int x = node%NX, y = (node/NX)%NY, z = node/(NX*NY);
+        for (int q = 1; q < 19; q++) {
+            if (!(links & (1<<q)))
+                continue;
+            int solid = (x+cx[q]+NX)%NX + NX*((y+cy[q]+NY)%NY + NY*((z+cz[q]+NZ)%NZ));
+            f[(q%2 == 1 ? q+1 : q-1)*NUM_NODES+node] = f[q*NUM_NODES+solid];
+        }
+    }
+}
+
+/**
+ * Momentum exchange of the halfway bounce-back (Ladd 1994), one thread per solid node: the population that streamed
+ * from the fluid node s + c_q into the solid node s, moving along -c_q, went back to s + c_q moving along c_q, so the
+ * wall at rest receives -2 f c_q on each link, with the full population f = (f - w) + w.  Only links to fluid nodes
+ * that do not cross an open face count, and a thread reads only populations of its own solid node.  Each thread
+ * writes the part of f - w, -2 sum c_q (f - w), to wallExchange[k*NUM_SOLID_NODES + i]; the host sums it over the
+ * solid nodes in the order of the list and adds the part of w, the static pressure, which depends only on the
+ * geometry and is computed once in double precision.  Kept apart, the static pressure does not hide the
+ * hydrodynamic part in single precision.
+ */
+KERNEL void computeWallExchange(GLOBAL const mixed* RESTRICT f, GLOBAL const int* RESTRICT isFluid, GLOBAL const int* RESTRICT solidNodes,
         GLOBAL mixed* RESTRICT wallExchange) {
     DECLARE_D3Q19_VELOCITIES
     for (int i = GLOBAL_ID; i < NUM_SOLID_NODES; i += GLOBAL_SIZE) {
@@ -332,7 +351,6 @@ KERNEL void bounceBack(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT isFl
                 continue;
             int opposite = (q%2 == 1 ? q+1 : q-1);
             mixed df = f[opposite*NUM_NODES+node];
-            f[q*NUM_NODES+target] = df;
             px += cx[q]*df;
             py += cy[q]*df;
             pz += cz[q]*df;

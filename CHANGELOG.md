@@ -57,6 +57,11 @@ versions the API may still change.
   `OPENMM_DIR`. CMake warns if the linker flags contain a folder with another OpenMM library, which the
   programs could load at run time. `make PythonInstall` builds the plugin library first. Section 12 of
   `docs/user_guide/installation.md` documents what CMake checks, the build options and their messages.
+- The halfway bounce-back (`BounceBack` walls) is done by the fluid nodes next to the walls: after the streaming
+  each of them takes back, in the opposite direction, the population that it built for a direction towards a
+  solid node from its own moments, force and random part, instead of a pass over the solid nodes that wrote into
+  their fluid neighbours. The results are identical bit for bit on all platforms and precisions
+  (`docs/theory.md`, section 1; `docs/validation.md`, Walls).
 
 ## 0.2.1 (2026-10-07)
 

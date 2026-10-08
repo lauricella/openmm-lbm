@@ -66,6 +66,7 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
                 populations[q*numNodes+node] = -D3Q19::w[q];
         }
     }
+    LBMBoundaries::findWallLinks(lattice, isFluid, wallNodes, wallLinks);
 
     // Boundary nodes (docs/theory.md, section 1): with regularized walls the fluid nodes next to the solid nodes, which
     // lie on the walls, and the fluid nodes on the open faces of the box.  For each of them, the directions q whose
@@ -170,8 +171,10 @@ void ReferenceCalcLBMForceKernel::advanceFluid(ContextImpl& context) {
     if (!lattice.particles.empty())
         couple(context, true);
     collideAndStream();
-    if (!isFluid.empty() && lattice.wallScheme == LBMForce::BounceBack)
+    if (!wallNodes.empty()) {
         bounceBack();
+        computeWallMomentum();
+    }
     if (!boundaryNodes.empty())
         applyBoundaries();
     stepForcesCurrent = true;
@@ -543,14 +546,32 @@ void ReferenceCalcLBMForceKernel::collideAndStream() {
 }
 
 void ReferenceCalcLBMForceKernel::bounceBack() {
-    // Halfway bounce-back: the population that streamed from the fluid node s + c_q into the solid node s,
-    // moving along -c_q, returns to s + c_q moving along c_q.  The wall lies halfway between the two nodes.
-    // Momentum exchange (Ladd 1994): on each such link the wall at rest receives the momentum f (-c_q) - f c_q.
-    // The stored deviations f - w are copied as they are, since opposite directions have the same weight; the
-    // momentum exchange uses the full population f = (f - w) + w, whose part w carries the static pressure.
-    // Only links to fluid nodes are processed: between two solid nodes nothing streams, and skipping those
-    // links makes the result independent of the order of the solid nodes, as on the GPU platforms, where
-    // the solid nodes are processed in parallel.
+    // Halfway bounce-back (wall scheme BounceBack), done by the fluid nodes next to the walls after the streaming.  For
+    // a direction q whose node x + c_q is solid, the population that x built in its collision for q from its own
+    // moments rho, j and Pi_neq, force and random part streamed into the solid node; x takes it back as its population
+    // along -c_q, the one that arrives from the wall.  The wall lies halfway between the two nodes.  The stored
+    // deviations f - w are copied as they are, since opposite directions have the same weight.
+    int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
+    int numNodes = lattice.getNumNodes();
+    for (int b = 0; b < (int) wallNodes.size(); b++) {
+        int node = wallNodes[b];
+        int i = node%nx, j = (node/nx)%ny, k = node/(nx*ny);
+        for (int q = 1; q < D3Q19::numVelocities; q++) {
+            if (!(wallLinks[b] & (1<<q)))
+                continue;
+            int solid = (i + D3Q19::cx[q] + nx)%nx + nx*((j + D3Q19::cy[q] + ny)%ny + ny*((k + D3Q19::cz[q] + nz)%nz));
+            populations[D3Q19::opposite[q]*numNodes + node] = populations[q*numNodes + solid];
+        }
+    }
+}
+
+void ReferenceCalcLBMForceKernel::computeWallMomentum() {
+    // Momentum exchange of the halfway bounce-back (Ladd 1994): the population that streamed from the fluid node
+    // s + c_q into the solid node s, moving along -c_q, went back to s + c_q moving along c_q, so on each such link
+    // the wall at rest receives the momentum f (-c_q) - f c_q.  It uses the full population f = (f - w) + w, whose
+    // part w carries the static pressure.  Only links to fluid nodes that do not cross an open face count: between two
+    // solid nodes nothing streams.  The sum runs over the solid nodes in the order of the list, as on the GPU
+    // platforms.
     int nx = lattice.nx, ny = lattice.ny, nz = lattice.nz;
     int numNodes = lattice.getNumNodes();
     Vec3 exchanged;
@@ -568,7 +589,6 @@ void ReferenceCalcLBMForceKernel::bounceBack() {
             if (!isFluid[target])
                 continue;
             double df = populations[D3Q19::opposite[q]*numNodes + node];
-            populations[q*numNodes + target] = df;
             exchanged -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*(df + D3Q19::w[q]));
         }
     }

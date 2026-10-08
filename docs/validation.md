@@ -61,6 +61,26 @@ width H = 23:
 |---|---|---|---|---|---|---|---|---|---|---|
 | wall shift (lattice units) | +0.00942 | +0.00797 | +0.00507 | +0.00217 | 0.00000 | -0.00072 | -0.00362 | -0.00942 | -0.01810 | -0.03256 |
 
+**Bounce-back at the fluid nodes.** Since version 0.3.0 the halfway bounce-back is done by the fluid nodes next
+to the walls, which take back the populations that they built for the directions towards solid nodes
+(`docs/theory.md`, section 1), instead of a pass over the solid nodes that wrote into their fluid neighbours.
+The two forms were compared on seven cases, each run for 300 steps from a perturbed fluid on a 6x5x4 lattice
+with a body force: a channel, a slab one node thick with a 2x2x2 block (edges and corners), the same with six
+coupled particles, with a fluctuating fluid and the explicit or the centred drag, with a `Velocity` and a
+`Density` face, and with faces, fluctuations and particles together. Populations, density and velocity of the
+fluid, positions and velocities of the particles and wall force are identical bit for bit in all 98 runs: the
+Reference platform, CUDA and OpenCL in single, mixed and double precision, OpenMM 8.6.1 and 8.3.1, NVIDIA A100.
+The cost per step does not change (CUDA, mixed precision: 88.6 against 86.3 us in a 64x34x64 channel, 170.7
+against 171.0 us in a 64^3 lattice with 13 % solid nodes in spheres).
+
+A first version wrote the returned population inside the collision kernel, without a separate pass. It is the
+same arithmetic, and it was 3 % faster in a channel and 8 % faster in a porous medium, but the compiler then
+rounded the collision differently in some variants of the kernel: with CUDA in single precision the results
+differed in the last bit of a float, and with CUDA in double and mixed precision a fluid with fluctuations at
+zero temperature and coupled particles was no longer identical bit for bit to a fluid without fluctuations
+(`testFluctuationsAtZeroTemperature`). The separate pass copies stored values and does not depend on the
+rounding of the compiler, so it was kept.
+
 ## Coupling of particles and fluid (`tests/TestLBMCoupling.h`, all platforms)
 
 Particles of 100 Da in a fluid of 8x8x8 nodes (dx = 0.5 nm, dt = 0.01 ps, tau = 0.8), without removal of
