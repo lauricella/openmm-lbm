@@ -631,7 +631,8 @@ bounce-back or rebuilt on a boundary node is written by one thread, so two runs 
 
 The Python test `test_coupling_agrees_with_reference` runs four coupled particles at T = 0 (friction
 10/ps, 60 steps; two particles share a node, one crosses the periodic boundary), without and with the solid
-plane j = 0, which reflects two of them, on the Reference platform and in double precision on each GPU
+plane j = 0, which reflects two of them, and with open faces along x (a `Velocity` face `XMin` and a `Density`
+face `XMax`, on whose nodes one particle stays), on the Reference platform and in double precision on each GPU
 platform, with each drag scheme. A constant field and a soft pair force act on the particles, so that the
 centred drag sees other forces. Positions, velocities, fluid state and force on the walls must agree to
 1e-10. Largest differences relative to max(1, largest value), with the walls, measured on an NVIDIA A100

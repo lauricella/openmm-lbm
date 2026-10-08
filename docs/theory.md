@@ -234,7 +234,12 @@ faces have independent velocities and densities.
   faces lost its mass as next to the walls (the mean density fell to 0.40 in 10000 steps); with the balance it
   stays within 2e-4.
 - On a `Density` face rho_b is the density of the face, the velocity along the face is that of x, and the
-  velocity across it is filtered in time (below).
+  velocity across it is filtered in time (below). The velocity of x is (j + rho g/2)/rho, the one of
+  `getFluidFields()`: it leaves out the reaction of the coupled particles whose nearest node is x, since the
+  rebuilt populations are those of a node beyond the face, on which the particles do not act (their reaction
+  acts on x through its own collision), and the Guo term of the rebuilt populations has the body force only.
+  Up to version 0.3.0 the Reference platform included that reaction, unlike the other platforms; the two
+  agree since then (`test_coupling_agrees_with_reference`, case `faces`).
 - **Staggered mode.** For any lattice whose velocities have components -1, 0 and 1, the staggered
   momentum sum_y (-1)^(y+t) j_y is conserved exactly by the bulk (the collision keeps the momentum of each
   node, the streaming moves a population by one node in one step). In a periodic box it stays zero; open
@@ -286,7 +291,7 @@ the mean of v_ZH, the velocity that gives the node the density of the face from 
 (the unknown ones replaced by the bounce-back of their opposite directions: rho_face = rho_0 + 2 rho_out + rho_face
 v_n, with v_n the component of the velocity that points into the box, rho_0 the sum of the populations along the
 face and rho_out that of those that leave through it; Zou and He [23], note 5.1 of Latt [20]), and of v_x, the
-velocity of the node at the start of the step, from its moments. v_x is the outcome of the previous step, so the
+velocity of the node at the start of the step, from its moments and the body force (above). v_x is the outcome of the previous step, so the
 filter acts as a first-order recursive low-pass filter (an exponential moving average with weight 1/2) on the
 velocity of the face:
 - in a steady state v_ZH = v_x, so steady flows are those without the filter;

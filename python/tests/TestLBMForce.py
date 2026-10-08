@@ -366,15 +366,17 @@ def test_fluid_agrees_with_reference(name, precision, walls):
     assert abs(wallForces[1] - wallForces[0]).max() <= 1e-10*max(1.0, abs(wallForces[0]).max())
 
 
-@pytest.mark.parametrize('name,walls,drag', [(name, walls, drag) for name in ('CUDA', 'OpenCL', 'HIP') for walls in (False, True)
-                                              for drag in ('Explicit', 'Centered')],
+@pytest.mark.parametrize('name,walls,drag', [(name, walls, drag) for name in ('CUDA', 'OpenCL', 'HIP')
+                                              for walls in (False, True, 'faces') for drag in ('Explicit', 'Centered')],
                          ids=lambda value: {False: 'periodic', True: 'walls'}.get(value, value))
 def test_coupling_agrees_with_reference(name, walls, drag):
     # At T = 0 the coupling is deterministic: in double precision the particles and the fluid of the GPU platforms
     # follow those of the Reference platform to rounding, also with particles that share a node, cross the
     # periodic boundary or are reflected by a wall (the plane j = 0 of the 8^3 grid), with both drag schemes.
     # With the centred drag the other forces enter the drag: a constant field and a soft pair force act on the
-    # particles, added to the System before the LBMForce.
+    # particles, added to the System before the LBMForce.  With open faces along x (a Velocity face XMin and a
+    # Density face XMax) one particle stays on the nodes of the Density face, whose rebuilt populations take the
+    # velocity of the node without the reaction of the particles.
     import numpy as np
     try:
         platform = mm.Platform.getPlatformByName(name)
@@ -402,7 +404,12 @@ def test_coupling_agrees_with_reference(name, walls, drag):
         force.setFriction(10.0)
         force.setTemperature(0.0)
         force.setFluidMomentumRemovalFrequency(0)
-        if walls:
+        if walls == 'faces':
+            force.setFaceBoundary(LBMForce.XMin, LBMForce.Velocity)
+            force.setFaceBoundary(LBMForce.XMax, LBMForce.Density)
+            force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.2, 0.0, 0.0))
+            force.setFaceDensity(LBMForce.XMax, 603.0)
+        elif walls:
             force.setSolidNodes([i + 64*k for k in range(8) for i in range(8)])
         integrator = mm.VerletIntegrator(0.01)
         try:
@@ -410,7 +417,7 @@ def test_coupling_agrees_with_reference(name, walls, drag):
         except Exception as e:
             pytest.skip('no Context on the %s platform: %s' % (name, e))
         context.setPositions([mm.Vec3(1.02, 2.01, 0.98), mm.Vec3(0.97, 1.99, 1.03), mm.Vec3(3.98, 0.52, 3.96),
-                              mm.Vec3(2.3, 0.6, 0.6)])
+                              mm.Vec3(3.55 if walls == 'faces' else 2.3, 0.6, 0.6)])
         context.setVelocities([mm.Vec3(0.5, -0.2, 0.3), mm.Vec3(-0.4, 0.1, 0.2), mm.Vec3(2.0, -1.5, 1.0),
                                mm.Vec3(0.0, -2.0, -0.6)])
         integrator.step(60)

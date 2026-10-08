@@ -5,6 +5,15 @@ versions the API may still change.
 
 ## Unreleased
 
+### Fixed
+- Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations
+  (along the face, and in the time filter across it) included the reaction of the coupled particles whose nearest
+  node is a face node, while the CUDA, OpenCL and HIP platforms use (j + rho g/2)/rho, the velocity of
+  `getFluidFields()`. The Reference platform now uses the same velocity: the rebuilt populations are those of a node
+  beyond the face, on which the particles do not act. Runs without coupled particles on the nodes of `Density` faces
+  are unchanged, bit for bit. `test_coupling_agrees_with_reference` has a case with open faces and a particle on a
+  `Density` face.
+
 ### Documentation
 - The regularized walls and the open faces are the thread-safe boundary condition of M. Lauricella et al.,
   Phys. Fluids 37, 072111 (2025), appendix (introduced by A. Montessori et al., Phys. Fluids 36, 035171, 2024), a

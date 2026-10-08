@@ -581,11 +581,11 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
     // of x are not changed, and the boundary lies on the nodes x - c_q.
     //  - Next to solid nodes (walls, which prevail over the faces): u_b = 0 and rho_b from the mass balance (below).
     //  - Velocity face: u_b the velocity of the face, rho_b from the mass balance with the inflow (below).
-    //  - Density face: rho_b the density of the face; the velocity along the face is that of x, and the velocity
-    //    across it the mean of the velocity that gives x the density of the face, from the populations that have
-    //    arrived (the unknown ones replaced by the bounce-back of their opposites), and the velocity of x at the start
-    //    of the step: a filter in time, without memory, that damps the staggered mode and does not change steady
-    //    flows.
+    //  - Density face: rho_b the density of the face; the velocity along the face is that of x, (j + rho g/2)/rho
+    //    without the reaction of the coupled particles of x, and the velocity across it the mean of the velocity that
+    //    gives x the density of the face, from the populations that have arrived (the unknown ones replaced by the
+    //    bounce-back of their opposites), and that velocity of x at the start of the step: a filter in time, without
+    //    memory, that damps the staggered mode and does not change steady flows.
     //  - Nodes shared by several Density faces (and no Velocity face): rho_b of the first face and u_b = 0.
     // On walls the solid nodes receive the momentum of the populations that x sent into them and give that of the
     // rebuilt populations.  Each node reads only its own populations and moments and the solid slots that it wrote
@@ -604,9 +604,12 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
         int node = boundaryNodes[b], unknown = unknownDirections[b], solid = solidDirections[b];
         int kind = boundaryKind[b], face = boundaryFace[b];
         int i = node%nx, j = (node/nx)%ny, k = node/(nx*ny);
-        const double* F = &forceDensity[3*node];
+        // The velocity of x with the body force only, (j + rho g/2)/rho, the one of getFluidFields(): the rebuilt
+        // populations are those of a node beyond the boundary, on which the coupled particles of x do not act (their
+        // reaction acts on x through its own collision).
         double rb = rho[node], dr = densityDeviation[node];
-        Vec3 ub((momentum[3*node] + 0.5*F[0])/rb, (momentum[3*node+1] + 0.5*F[1])/rb, (momentum[3*node+2] + 0.5*F[2])/rb);
+        Vec3 ub((momentum[3*node] + 0.5*(rb*g[0]))/rb, (momentum[3*node+1] + 0.5*(rb*g[1]))/rb,
+                (momentum[3*node+2] + 0.5*(rb*g[2]))/rb);
         if (kind == LBMBoundaries::Wall || kind == LBMBoundaries::DensityAtRest)
             ub = Vec3();
         if (kind == LBMBoundaries::Velocity)

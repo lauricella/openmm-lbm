@@ -227,7 +227,8 @@ The theory is in
    - `LBMForce.Density`: the fluid beyond the face has the density of `setFaceDensity(face, density)`. The
      density is the pressure: p = c_s^2 rho with c_s^2 = dx^2/(3 dt^2). The default, 0, means the density of
      the fluid at rest (`setFluidDensity()`). The velocity across the face is filtered in time, half the value
-     that the arriving fluid gives and half that of the face node at the start of the step: this damps a
+     that the arriving fluid gives and half that of the face node at the start of the step (the velocity of
+     `getFluidFields()`): this damps a
      spurious oscillation from one node to the next and from one step to the next, and does not change steady
      flows ([theory, Time filter of the Density faces](../theory.md#open-faces)).
 3. **Switch off the removal of the fluid momentum**: `setFluidMomentumRemovalFrequency(0)`. With open faces

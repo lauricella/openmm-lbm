@@ -235,8 +235,8 @@ public:
      * combination).  The nodes on an open face (i = 0 for XMin, i = nx - 1 for XMax, and so on) rebuild at every step
      * the populations that come from beyond the face as those of fluid with the stress of the node and the velocity of
      * a Velocity face (with the density from the mass balance) or the density of a Density face (with the velocity
-     * of the node, filtered in time across the face), which therefore holds one node beyond the face (docs/theory.md, section 1).  On the
-     * nodes shared by several open faces the first Velocity face in the order
+     * of the node, filtered in time across the face), which therefore holds one node beyond the face (docs/theory.md,
+     * section 1).  On the nodes shared by several open faces the first Velocity face in the order
      * XMin, XMax, YMin, YMax, ZMin, ZMax gives the velocity; if they are all Density faces, the first one gives the
      * density and the velocity is zero.  A node next to a solid node with the Regularized wall scheme is a wall.
      * With open faces the removal of the fluid momentum must be switched off (setFluidMomentumRemovalFrequency(0)).

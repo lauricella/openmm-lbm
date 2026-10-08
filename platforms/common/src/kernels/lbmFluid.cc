@@ -362,9 +362,11 @@ KERNEL void computeWallExchange(GLOBAL const mixed* RESTRICT f, GLOBAL const int
  *    from the mass balance of the rebuilt links: the mass that x sent into the solid nodes in this streaming (in the
  *    solid node x - c_q, direction opposite to q) and, across a face, the population that arrived at x moving out of
  *    the face plus the inflow 6 w_q rho_b c_q.u_b; links whose opposite is unknown too do not count.
- *  - Density faces (kind 2): rho_b of the face; the velocity along the face is that of x, and the velocity across it
- *    the mean of the velocity that gives x the density of the face, from the populations that have arrived (the
- *    unknown ones replaced by the bounce-back of their opposites), and the velocity of x at the start of the step.
+ *  - Density faces (kind 2): rho_b of the face; the velocity along the face is that of x, (j + rho g/2)/rho, without
+ *    the reaction of the coupled particles of x (the rebuilt populations are those of a node beyond the face), and
+ *    the velocity across it the mean of the velocity that gives x the density of the face, from the populations that
+ *    have arrived (the unknown ones replaced by the bounce-back of their opposites), and that velocity of x at the
+ *    start of the step.
  *  - Nodes shared by several Density faces (kind 3): rho_b of the first face and u_b = 0.
  * On walls the node writes the momentum given to the solid nodes by the deviations f - w (the populations that it
  * sent into them minus those that come back) to boundaryExchange[k*NUM_BOUNDARY_NODES + b]; the host adds the part of
