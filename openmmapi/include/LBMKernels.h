@@ -132,11 +132,15 @@ public:
      */
     virtual void copyParametersToContext(OpenMM::ContextImpl& context, const LBMLatticeParameters& lattice) = 0;
     /**
-     * Get the density (Da/nm^3) and velocity (nm/ps) of the fluid at every node.  With the domain decomposition the
-     * vectors cover the whole lattice and hold the values of the nodes of the rank and, for the fields whose halo
-     * is exchanged, of the nodes of its halo; the other nodes hold NaN.
+     * Get the density (Da/nm^3) and velocity (nm/ps) of the fluid at the nodes of the domain of the rank (the whole
+     * lattice with one domain, LBMDecomposition::getLocalDomain()), in the order of the domain, i fastest: with one
+     * domain the order of the node index.  With halo the domain is extended by one node on every side, and the
+     * extension holds the fields of the neighbouring nodes, across the periodic boundaries too, for the fields whose
+     * halo is exchanged (setDensityHaloExchange(), setVelocityHaloExchange(); with one domain they come from the
+     * lattice itself), and NaN for the others and beyond the open faces.  Solid nodes have zero density and velocity.
      */
-    virtual void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity) = 0;
+    virtual void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity,
+            bool halo) = 0;
     /**
      * Get the largest Mach number of the fluid, max |j/rho|/c_s over the nodes, in lattice units.
      */
@@ -147,13 +151,13 @@ public:
      */
     virtual OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context) = 0;
     /**
-     * Get the populations of all nodes, in lattice units.  With the domain decomposition only those of the nodes of
-     * the rank are valid.
+     * Get the populations of the nodes of the domain of the rank, in lattice units, as [q*numLocal + l] with l the
+     * index of the node in the domain (i fastest): with one domain [q*numNodes + node].
      */
     virtual void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state) = 0;
     /**
-     * Set the populations of all nodes, in lattice units.  With the domain decomposition only those of the nodes of
-     * the rank are used, and the call is collective (it exchanges the halo).
+     * Set the populations of the nodes of the domain of the rank, in the layout of getFluidState().  With the domain
+     * decomposition the call is collective (it exchanges the halo).
      */
     virtual void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state) = 0;
     /**

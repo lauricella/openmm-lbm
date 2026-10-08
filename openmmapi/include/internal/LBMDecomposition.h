@@ -73,6 +73,13 @@ public:
     /** The same for rank r. */
     void getDomainOfRank(int r, int start[3], int count[3]) const;
     /**
+     * The nodes of the domain of this rank extended by pad nodes on every side, in the order of the domain (i
+     * fastest): node[l] is the index of the node of the lattice at position l, across the periodic boundaries, or -1
+     * beyond an open face (open[a] is true for the axes with open faces), and inside[l] is 1 for the nodes of the
+     * domain itself.
+     */
+    void getDomainNodes(int pad, const bool open[3], std::vector<int>& node, std::vector<char>& inside) const;
+    /**
      * Gather on rank 0 the values of the nodes of every rank: local holds valuesPerNode values for each node of this
      * rank, in the order of the block (i fastest); on rank 0, global receives valuesPerNode values for each node of
      * the lattice, in the order of the node index i + nx*(j + ny*k).  Collective; global is left empty on the other

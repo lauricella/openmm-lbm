@@ -87,6 +87,12 @@ int CommonCalcLBMForceKernel::globalNode(int n) const {
     return (localStart[0]+i) + lattice.nx*((localStart[1]+j) + lattice.ny*(localStart[2]+k));
 }
 
+int CommonCalcLBMForceKernel::localNode(int node) const {
+    int i = node%lattice.nx - localStart[0], j = (node/lattice.nx)%lattice.ny - localStart[1];
+    int k = node/(lattice.nx*lattice.ny) - localStart[2];
+    return i + localCount[0]*(j + localCount[1]*k);
+}
+
 int CommonCalcLBMForceKernel::storageIndex(int n) const {
     int i = n%localCount[0], j = (n/localCount[0])%localCount[1], k = n/(localCount[0]*localCount[1]);
     return (i+pad[0]) + (localCount[0]+2*pad[0])*((j+pad[1]) + (localCount[1]+2*pad[1])*(k+pad[2]));
@@ -416,11 +422,17 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             haloBuffer.initialize(cc, 4*max<int>(1, storage.size()), elementSize, "lbmHaloBuffer");
             if (!storage.empty())
                 haloSendStorage.upload(storage);
+            haloIndex.clear();
+            for (int r = 0; r < numRanks; r++)
+                for (int node : haloReceiveNodes[r]) {
+                    int h = haloIndex.size();
+                    haloIndex[node] = h;
+                }
             double nan = numeric_limits<double>::quiet_NaN();
             if (lattice.densityHaloExchange)
-                haloDensity.assign(numNodes, nan);
+                haloDensity.assign(haloIndex.size(), nan);
             if (lattice.velocityHaloExchange)
-                haloVelocity.assign(3*numNodes, nan);
+                haloVelocity.assign(3*haloIndex.size(), nan);
         }
     }
 
@@ -1083,42 +1095,52 @@ void CommonCalcLBMForceKernel::copyParametersToContext(ContextImpl& context, con
     setFluidParameters();
 }
 
-void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<double>& density, vector<Vec3>& velocity) {
+void CommonCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<double>& density, vector<Vec3>& velocity, bool halo) {
     // The velocity of the forced fluid is u = (j + F/2)/rho, with F = rho*g from the body acceleration.  The
-    // moments are recomputed from the populations; the next step computes them again before using them.  With the
-    // domain decomposition the nodes of other ranks are NaN (LBMForceImpl keeps the block of the rank).
+    // moments are recomputed from the populations; the next step computes them again before using them.  The nodes of
+    // the domain of the rank, and with halo those around it (CalcLBMForceKernel::getFluidFields()): a node of the halo
+    // of another rank takes the fields exchanged at the end of the last step, one of the rank (across a periodic
+    // boundary, or with one domain) its own fields, if the halo of the field is exchanged.
     ContextSelector selector(cc);
-    int numNodes = lattice.getNumNodes();
     computeMomentsKernel->execute(numLocal);
     vector<double> dr, j;
     downloadAsDouble(densityDeviation, dr);
     downloadAsDouble(momentum, j);
     double velocityScale = lattice.getVelocityScale();
     double nan = numeric_limits<double>::quiet_NaN();
-    density.assign(numNodes, nan);
-    velocity.assign(numNodes, Vec3(nan, nan, nan));
-    for (int n = 0; n < numLocal; n++) {
-        int node = globalNode(n), s = storageIndex(n);
-        if (!isFluidHost[node]) {
-            density[node] = 0;
-            velocity[node] = Vec3();
+    bool open[3] = {lattice.isOpenAxis(0), lattice.isOpenAxis(1), lattice.isOpenAxis(2)};
+    vector<int> nodes;
+    vector<char> inside;
+    decomposition.getDomainNodes(halo ? 1 : 0, open, nodes, inside);
+    density.assign(nodes.size(), nan);
+    velocity.assign(nodes.size(), Vec3(nan, nan, nan));
+    for (size_t l = 0; l < nodes.size(); l++) {
+        int node = nodes[l];
+        bool densityValid = node >= 0 && (inside[l] || lattice.densityHaloExchange);
+        bool velocityValid = node >= 0 && (inside[l] || lattice.velocityHaloExchange);
+        if (!densityValid && !velocityValid)
+            continue;
+        if (!decomposition.owns(node)) {
+            int h = haloIndex.at(node);
+            if (densityValid)
+                density[l] = haloDensity[h];
+            if (velocityValid)
+                velocity[l] = Vec3(haloVelocity[3*h], haloVelocity[3*h+1], haloVelocity[3*h+2]);
             continue;
         }
-        double r = 1.0 + dr[s];
-        density[node] = r*lattice.density;
-        velocity[node] = (Vec3(j[s], j[numStored+s], j[2*numStored+s])*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
-    }
-
-    // The nodes of the halo, exchanged at the end of the last step (decomposition only).
-    if (!haloDensity.empty() || !haloVelocity.empty())
-        for (int node = 0; node < numNodes; node++) {
-            if (decomposition.owns(node))
-                continue;
-            if (!haloDensity.empty())
-                density[node] = haloDensity[node];
-            if (!haloVelocity.empty())
-                velocity[node] = Vec3(haloVelocity[3*node], haloVelocity[3*node+1], haloVelocity[3*node+2]);
+        double rho = 0;
+        Vec3 u;
+        if (isFluidHost[node]) {
+            int s = storageIndex(localNode(node));
+            double r = 1.0 + dr[s];
+            rho = r*lattice.density;
+            u = (Vec3(j[s], j[numStored+s], j[2*numStored+s])*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
         }
+        if (densityValid)
+            density[l] = rho;
+        if (velocityValid)
+            velocity[l] = u;
+    }
 }
 
 void CommonCalcLBMForceKernel::exchangeHalo() {
@@ -1161,11 +1183,12 @@ void CommonCalcLBMForceKernel::exchangeHalo() {
     for (int r = 0; r < numRanks; r++) {
         int i = 0;
         for (int node : haloReceiveNodes[r]) {
+            int h = haloIndex[node];
             if (exchangeDensity)
-                haloDensity[node] = receive[r][i++];
+                haloDensity[h] = receive[r][i++];
             if (exchangeVelocity)
                 for (int a = 0; a < 3; a++)
-                    haloVelocity[3*node+a] = receive[r][i++];
+                    haloVelocity[3*h+a] = receive[r][i++];
         }
     }
 }
@@ -1214,8 +1237,7 @@ double CommonCalcLBMForceKernel::getFluidMachNumber(ContextImpl& context) {
 }
 
 void CommonCalcLBMForceKernel::getFluidState(ContextImpl& context, vector<double>& state) {
-    // With the domain decomposition the state of the whole lattice, valid at the nodes of the block of the rank and NaN
-    // elsewhere (LBMForceImpl keeps the block).
+    // The populations of the domain of the rank, [q*numLocal + n] (with one domain the stored array itself).
     ContextSelector selector(cc);
     if (!decomposition.isDecomposed()) {
         downloadAsDouble(populations, state);
@@ -1223,20 +1245,18 @@ void CommonCalcLBMForceKernel::getFluidState(ContextImpl& context, vector<double
     }
     vector<double> stored;
     downloadAsDouble(populations, stored);
-    int numNodes = lattice.getNumNodes();
-    state.assign(D3Q19::numVelocities*numNodes, numeric_limits<double>::quiet_NaN());
+    state.resize(D3Q19::numVelocities*numLocal);
     for (int n = 0; n < numLocal; n++) {
-        int node = globalNode(n), s = storageIndex(n);
+        int s = storageIndex(n);
         for (int q = 0; q < D3Q19::numVelocities; q++)
-            state[q*numNodes+node] = stored[q*numStored+s];
+            state[q*numLocal+n] = stored[q*numStored+s];
     }
 }
 
 void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<double>& state) {
-    // With the domain decomposition the state of the whole lattice, of which the rank takes the nodes of its block.
+    // The populations of the domain of the rank, in the layout of getFluidState().
     ContextSelector selector(cc);
-    int numNodes = lattice.getNumNodes();
-    if (state.size() != D3Q19::numVelocities*numNodes)
+    if (state.size() != D3Q19::numVelocities*numLocal)
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
     if (!decomposition.isDecomposed())
         populations.upload(state, true);
@@ -1244,9 +1264,9 @@ void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<
         vector<double> stored;
         downloadAsDouble(populations, stored);
         for (int n = 0; n < numLocal; n++) {
-            int node = globalNode(n), s = storageIndex(n);
+            int s = storageIndex(n);
             for (int q = 0; q < D3Q19::numVelocities; q++)
-                stored[q*numStored+s] = state[q*numNodes+node];
+                stored[q*numStored+s] = state[q*numLocal+n];
         }
         populations.upload(stored, true);
     }

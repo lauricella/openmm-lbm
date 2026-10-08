@@ -158,6 +158,29 @@ void LBMDecomposition::getLocalDomain(int start[3], int count[3]) const {
     }
 }
 
+void LBMDecomposition::getDomainNodes(int pad, const bool open[3], vector<int>& node, vector<char>& inside) const {
+    int start[3], count[3];
+    getLocalDomain(start, count);
+    node.clear();
+    inside.clear();
+    for (int k = -pad; k < count[2] + pad; k++)
+        for (int j = -pad; j < count[1] + pad; j++)
+            for (int i = -pad; i < count[0] + pad; i++) {
+                int local[3] = {i, j, k}, global[3];
+                bool isInside = true, beyondFace = false;
+                for (int a = 0; a < 3; a++) {
+                    isInside = isInside && local[a] >= 0 && local[a] < count[a];
+                    global[a] = start[a] + local[a];
+                    if (global[a] < 0 || global[a] >= n[a]) {
+                        beyondFace = beyondFace || open[a];
+                        global[a] = (global[a] + n[a])%n[a];
+                    }
+                }
+                node.push_back(beyondFace ? -1 : global[0] + n[0]*(global[1] + n[1]*global[2]));
+                inside.push_back(isInside ? 1 : 0);
+            }
+}
+
 void LBMDecomposition::getDomainOfRank(int r, int start[3], int count[3]) const {
     int c[3] = {r%procs[0], (r/procs[0])%procs[1], r/(procs[0]*procs[1])};
     for (int a = 0; a < 3; a++) {

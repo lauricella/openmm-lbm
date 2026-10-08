@@ -321,98 +321,42 @@ void LBMForceImpl::getLocalDomain(int start[3], int count[3]) const {
 }
 
 void LBMForceImpl::getFluidFields(ContextImpl& context, vector<double>& density, vector<Vec3>& velocity, bool gather, bool halo) {
-    // The kernels give the fields of the whole lattice, valid on the nodes of the rank and on those of its halo whose
-    // fields are exchanged.  Here they are cut to the domain of the rank, extended by one node on every side with
-    // halo, or gathered on rank 0.  The extension holds the values of the neighbouring nodes, across the periodic
-    // boundaries too, for the fields whose halo is exchanged (setDensityHaloExchange(), setVelocityHaloExchange()),
-    // and NaN for the others and beyond the open faces.  With one domain nothing is exchanged: the halo comes from the
-    // fields of the whole lattice, which are those the exchange would give.
+    // The kernels give the fields of the domain of the rank, extended by the halo on request (CalcLBMForceKernel); here
+    // they are gathered on rank 0 with gather.  With one domain the domain is the lattice.
     if (gather && halo)
         throw OpenMMException("LBMForce: getFluidFields() cannot gather the fields and add the halo in the same call");
-    vector<double> allDensity;
-    vector<Vec3> allVelocity;
-    kernel.getAs<CalcLBMForceKernel>().getFluidFields(context, allDensity, allVelocity);
-    if (!decomposition.isDecomposed() && !halo) {
-        density.swap(allDensity);
-        velocity.swap(allVelocity);
+    kernel.getAs<CalcLBMForceKernel>().getFluidFields(context, density, velocity, halo);
+    if (!gather || !decomposition.isDecomposed())
         return;
+    vector<double> local, all;
+    local.reserve(4*density.size());
+    for (size_t l = 0; l < density.size(); l++) {
+        local.push_back(density[l]);
+        for (int a = 0; a < 3; a++)
+            local.push_back(velocity[l][a]);
     }
-    int start[3], count[3], n[3] = {lattice.nx, lattice.ny, lattice.nz};
-    decomposition.getLocalDomain(start, count);
-    if (gather) {
-        vector<double> local, all;
-        local.reserve(4*count[0]*count[1]*count[2]);
-        for (int k = 0; k < count[2]; k++)
-            for (int j = 0; j < count[1]; j++)
-                for (int i = 0; i < count[0]; i++) {
-                    int node = (start[0] + i) + n[0]*((start[1] + j) + n[1]*(start[2] + k));
-                    local.push_back(allDensity[node]);
-                    for (int a = 0; a < 3; a++)
-                        local.push_back(allVelocity[node][a]);
-                }
-        decomposition.gatherBlocks(local, 4, all);
-        density.clear();
-        velocity.clear();
-        for (size_t node = 0; 4*node < all.size(); node++) {
-            density.push_back(all[4*node]);
-            velocity.push_back(Vec3(all[4*node+1], all[4*node+2], all[4*node+3]));
-        }
-        return;
+    decomposition.gatherBlocks(local, 4, all);
+    density.clear();
+    velocity.clear();
+    for (size_t node = 0; 4*node < all.size(); node++) {
+        density.push_back(all[4*node]);
+        velocity.push_back(Vec3(all[4*node+1], all[4*node+2], all[4*node+3]));
     }
-    int pad = (halo ? 1 : 0), size[3];
-    for (int a = 0; a < 3; a++)
-        size[a] = count[a] + 2*pad;
-    double nan = numeric_limits<double>::quiet_NaN();
-    density.resize(size[0]*size[1]*size[2]);
-    velocity.resize(size[0]*size[1]*size[2]);
-    for (int k = -pad; k < count[2] + pad; k++)
-        for (int j = -pad; j < count[1] + pad; j++)
-            for (int i = -pad; i < count[0] + pad; i++) {
-                int local[3] = {i, j, k}, global[3];
-                bool inside = true, beyondFace = false;
-                for (int a = 0; a < 3; a++) {
-                    inside = inside && local[a] >= 0 && local[a] < count[a];
-                    global[a] = start[a] + local[a];
-                    if (global[a] < 0 || global[a] >= n[a]) {
-                        beyondFace = beyondFace || lattice.isOpenAxis(a);
-                        global[a] = (global[a] + n[a])%n[a];
-                    }
-                }
-                int l = (i + pad) + size[0]*((j + pad) + size[1]*(k + pad));
-                int node = global[0] + n[0]*(global[1] + n[1]*global[2]);
-                bool densityValid = !beyondFace && (inside || lattice.densityHaloExchange);
-                bool velocityValid = !beyondFace && (inside || lattice.velocityHaloExchange);
-                density[l] = (densityValid ? allDensity[node] : nan);
-                velocity[l] = (velocityValid ? allVelocity[node] : Vec3(nan, nan, nan));
-            }
 }
 
 void LBMForceImpl::getFluidState(ContextImpl& context, vector<double>& state, bool gather) {
-    // The state of the domain of the rank, [q*numLocal + l] with l the index of the node in the domain, or with gather
-    // that of the whole lattice, [q*numNodes + node], on rank 0.  With one domain both are the state of the kernel.
-    vector<double> all;
-    kernel.getAs<CalcLBMForceKernel>().getFluidState(context, all);
-    if (!decomposition.isDecomposed()) {
-        state.swap(all);
+    // The state of the domain of the rank, [q*numLocal + l] with l the index of the node in the domain (the state of
+    // the kernel), or with gather that of the whole lattice, [q*numNodes + node], on rank 0.  With one domain both are
+    // the state of the kernel.
+    kernel.getAs<CalcLBMForceKernel>().getFluidState(context, state);
+    if (!gather || !decomposition.isDecomposed())
         return;
-    }
     const int Q = 19;
-    int start[3], count[3], n[3] = {lattice.nx, lattice.ny, lattice.nz};
-    decomposition.getLocalDomain(start, count);
-    size_t numNodes = lattice.getNumNodes(), numLocal = count[0]*count[1]*count[2];
+    size_t numNodes = lattice.getNumNodes(), numLocal = state.size()/Q;
     vector<double> local(Q*numLocal);
-    size_t l = 0;
-    for (int k = 0; k < count[2]; k++)
-        for (int j = 0; j < count[1]; j++)
-            for (int i = 0; i < count[0]; i++, l++) {
-                size_t node = (start[0] + i) + n[0]*((start[1] + j) + (size_t) n[1]*(start[2] + k));
-                for (int q = 0; q < Q; q++)
-                    local[gather ? Q*l + q : q*numLocal + l] = all[q*numNodes + node];
-            }
-    if (!gather) {
-        state.swap(local);
-        return;
-    }
+    for (size_t l = 0; l < numLocal; l++)
+        for (int q = 0; q < Q; q++)
+            local[Q*l + q] = state[q*numLocal + l];
     vector<double> global;
     decomposition.gatherBlocks(local, Q, global);
     state.clear();
@@ -432,34 +376,28 @@ void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& sta
         return;
     }
     const int Q = 19;
-    int start[3], count[3], n[3] = {lattice.nx, lattice.ny, lattice.nz};
+    int start[3], count[3];
     decomposition.getLocalDomain(start, count);
     size_t numNodes = lattice.getNumNodes(), numLocal = count[0]*count[1]*count[2];
     bool wrongSize = (scatter ? decomposition.getRank() == 0 && state.size() != Q*numNodes : state.size() != Q*numLocal);
     decomposition.throwIfAnyError(wrongSize ? "LBMForce: setFluidState() was called with a state of the wrong size (19 "
             "values per node of the lattice with scatter, of the domain of the rank otherwise)" : "");
-    vector<double> local;
-    if (scatter) {
-        vector<double> global;
-        if (decomposition.getRank() == 0) {
-            global.resize(Q*numNodes);
-            for (size_t node = 0; node < numNodes; node++)
-                for (int q = 0; q < Q; q++)
-                    global[Q*node + q] = state[q*numNodes + node];
-        }
-        decomposition.scatterBlocks(global, Q, local);
+    if (!scatter) {
+        kernel.getAs<CalcLBMForceKernel>().setFluidState(context, state);
+        return;
     }
-    vector<double> all;
-    kernel.getAs<CalcLBMForceKernel>().getFluidState(context, all);
-    size_t l = 0;
-    for (int k = 0; k < count[2]; k++)
-        for (int j = 0; j < count[1]; j++)
-            for (int i = 0; i < count[0]; i++, l++) {
-                size_t node = (start[0] + i) + n[0]*((start[1] + j) + (size_t) n[1]*(start[2] + k));
-                for (int q = 0; q < Q; q++)
-                    all[q*numNodes + node] = (scatter ? local[Q*l + q] : state[q*numLocal + l]);
-            }
-    kernel.getAs<CalcLBMForceKernel>().setFluidState(context, all);
+    vector<double> global, local, blockState(Q*numLocal);
+    if (decomposition.getRank() == 0) {
+        global.resize(Q*numNodes);
+        for (size_t node = 0; node < numNodes; node++)
+            for (int q = 0; q < Q; q++)
+                global[Q*node + q] = state[q*numNodes + node];
+    }
+    decomposition.scatterBlocks(global, Q, local);
+    for (size_t l = 0; l < numLocal; l++)
+        for (int q = 0; q < Q; q++)
+            blockState[q*numLocal + l] = local[Q*l + q];
+    kernel.getAs<CalcLBMForceKernel>().setFluidState(context, blockState);
 }
 
 /**

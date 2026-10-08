@@ -15,6 +15,7 @@
 #include "openmm/common/ComputeArray.h"
 #include "openmm/common/ComputeContext.h"
 #include "openmm/common/ComputeKernel.h"
+#include <map>
 
 namespace LBMPlugin {
 
@@ -59,7 +60,7 @@ public:
     void beginStep(OpenMM::ContextImpl& context);
     double execute(OpenMM::ContextImpl& context, bool includeForces, bool includeEnergy);
     void copyParametersToContext(OpenMM::ContextImpl& context, const LBMLatticeParameters& lattice);
-    void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity);
+    void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity, bool halo);
     double getFluidMachNumber(OpenMM::ContextImpl& context);
     OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context);
     void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
@@ -92,9 +93,11 @@ private:
     /** With the domain decomposition and the exchange of the halo: send the fields of the nodes of the block to the
         ranks whose halo contains them, and receive those of the halo of the rank (collective). */
     void exchangeHalo();
-    /** The global index of node n of the block, and its storage index (kernels/lbmFluid.cc). */
+    /** The global index of node n of the block, its storage index (kernels/lbmFluid.cc), and the index in the block of
+        a node of the lattice that belongs to the block. */
     int globalNode(int n) const;
     int storageIndex(int n) const;
+    int localNode(int node) const;
     OpenMM::ComputeContext& cc;
     const OpenMM::System& system;
     LBMLatticeParameters lattice;
@@ -160,10 +163,12 @@ private:
     std::vector<std::vector<double> > sendBuffers, receiveBuffers;
     /** The halo of the rank (setDensityHaloExchange(), setVelocityHaloExchange()), as on the Reference platform: for each
         rank r, the nodes of the block in the halo of r and the nodes of r in the halo of the block, in index order; the
-        storage indices of the first, rank after rank, and the buffer of their moments; and the fields of the halo in
-        the units of getFluidFields() over the whole lattice, NaN outside the halo, empty when not exchanged. */
+        storage indices of the first, rank after rank, and the buffer of their moments; and the fields of the nodes of
+        the halo in the units of getFluidFields() (density, and velocity with 3 values per node), at the index that
+        haloIndex gives each node, empty when not exchanged. */
     std::vector<std::vector<int> > haloSendNodes, haloReceiveNodes;
     OpenMM::ComputeArray haloSendStorage, haloBuffer;
+    std::map<int, int> haloIndex;
     std::vector<double> haloDensity, haloVelocity;
     /** Boundary nodes (regularized walls and open faces, internal/LBMBoundaries.h): the nodes, the bits of their
         unknown and solid directions, kind + 4*(face + 1), the momentum given to the wall by each node in the last

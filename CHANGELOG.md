@@ -40,7 +40,9 @@ versions the API may still change.
   the forces are summed over the ranks, and the CUDA and HIP platforms need the property `DeterministicForces`; the
   copies of the particles are compared over the ranks as on the Reference platform. The exchange of the halo of the
   density and the velocity: the device copies the moments of the nodes to send, and the host computes their fields as
-  `getFluidFields()` does and sends them, so that the copies are identical bit for bit.
+  `getFluidFields()` does and sends them, so that the copies are identical bit for bit. The kernels of every platform
+  give the fields and the state of the domain of the rank only (with its halo on request), so a rank holds those of
+  the whole lattice only when they are gathered on it.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations

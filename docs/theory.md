@@ -1137,9 +1137,7 @@ domain, nothing changes.
   moments of the populations and copies $`\rho - 1`$ and $`\mathbf j`$ of the nodes of the block that are in the halo of
   other ranks into a buffer; the host computes their fields as `getFluidFields()` does and sends them, so the copies
   are identical bit for bit to what the owner returns. It costs one more pass over the populations per step, and the
-  transfer of the halo through the host. For now the host keeps the fields of the halo, and the kernels give the
-  fields and the state, over the whole lattice (NaN outside the block and its halo): memory of the host, not of the
-  GPU, that grows with the lattice.
+  transfer of the halo through the host, which keeps the fields of the nodes of the halo only.
 - With the same platform and precision, the fluid nodes and the particles are identical bit for bit to those of one
   domain without the removal of the fluid momentum (`docs/validation.md`, Domain decomposition).
 
@@ -1181,8 +1179,10 @@ domain, nothing changes.
   them would move the whole lattice to one rank (320 MB of populations for $`128^3`$ nodes, 20 GB for $`512^3`$). The
   whole lattice is gathered on rank 0, or set from it, only on request (`gather=True`, `scatter=True`, with
   `MPI_Gatherv` and `MPI_Scatterv`), for tests and small lattices. With one domain the domain is the whole lattice
-  and nothing changes. The kernels give the fields and the state of the whole lattice; `LBMForceImpl` cuts the domain
-  out, so the same code serves every platform.
+  and nothing changes. The kernels give the fields and the state of the domain of the rank only, with its halo on
+  request, following the same rules on every platform (`CalcLBMForceKernel` in `openmmapi/include/LBMKernels.h`, the
+  nodes of the extended domain from `LBMDecomposition::getDomainNodes()`); `LBMForceImpl` gathers or scatters them,
+  so no rank holds the fields or the state of the whole lattice unless they are gathered on it.
 - **Halo of the density and the velocity.** Observables that need the neighbours of a node, such as the gradient of
   the density or the vorticity, need on each rank the fields of the layer one node thick around its domain (the
   halo, 26 neighbours with edges and corners). Two switches, off by default, exchange them at the end of every step,

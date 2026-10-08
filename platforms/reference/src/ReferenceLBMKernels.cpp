@@ -1023,26 +1023,38 @@ void ReferenceCalcLBMForceKernel::exchangeHalo() {
     }
 }
 
-void ReferenceCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<double>& density, vector<Vec3>& velocity) {
-    // With the domain decomposition the nodes of other ranks take the fields of the halo, exchanged at the end of the
-    // last step (NaN if the field is not exchanged or the node is not in the halo).
-    int numNodes = lattice.getNumNodes();
+void ReferenceCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<double>& density, vector<Vec3>& velocity, bool halo) {
+    // The nodes of the domain of the rank, and with halo those around it (CalcLBMForceKernel::getFluidFields()): a node
+    // of the halo of another rank takes the fields exchanged at the end of the last step, one of the rank (across a
+    // periodic boundary, or with one domain) its own fields, if the halo of the field is exchanged.
     double velocityScale = lattice.getVelocityScale();
     double nan = numeric_limits<double>::quiet_NaN();
-    density.resize(numNodes);
-    velocity.resize(numNodes);
-    for (int node = 0; node < numNodes; node++) {
+    bool open[3] = {lattice.isOpenAxis(0), lattice.isOpenAxis(1), lattice.isOpenAxis(2)};
+    vector<int> nodes;
+    vector<char> inside;
+    decomposition.getDomainNodes(halo ? 1 : 0, open, nodes, inside);
+    density.assign(nodes.size(), nan);
+    velocity.assign(nodes.size(), Vec3(nan, nan, nan));
+    for (size_t l = 0; l < nodes.size(); l++) {
+        int node = nodes[l];
+        bool densityValid = node >= 0 && (inside[l] || lattice.densityHaloExchange);
+        bool velocityValid = node >= 0 && (inside[l] || lattice.velocityHaloExchange);
+        if (!densityValid && !velocityValid)
+            continue;
         if (!isOwned(node)) {
-            density[node] = (haloDensity.empty() ? nan : haloDensity[node]*lattice.density);
-            velocity[node] = (haloVelocity.empty() ? Vec3(nan, nan, nan) :
-                    Vec3(haloVelocity[3*node], haloVelocity[3*node+1], haloVelocity[3*node+2])*velocityScale);
+            if (densityValid)
+                density[l] = haloDensity[node]*lattice.density;
+            if (velocityValid)
+                velocity[l] = Vec3(haloVelocity[3*node], haloVelocity[3*node+1], haloVelocity[3*node+2])*velocityScale;
             continue;
         }
         double r;
         Vec3 u;
         nodeFields(node, r, u);
-        density[node] = r*lattice.density;
-        velocity[node] = u*velocityScale;
+        if (densityValid)
+            density[l] = r*lattice.density;
+        if (velocityValid)
+            velocity[l] = u*velocityScale;
     }
 }
 
@@ -1079,14 +1091,37 @@ double ReferenceCalcLBMForceKernel::computeMachNumber() const {
 }
 
 void ReferenceCalcLBMForceKernel::getFluidState(ContextImpl& context, vector<double>& state) {
-    // The state is the stored deviations f_q - w_q: saving and restoring them is exact.
-    state = populations;
+    // The state is the stored deviations f_q - w_q: saving and restoring them is exact.  With the domain decomposition
+    // those of the nodes of the domain of the rank, [q*numLocal + l].
+    if (!decomposition.isDecomposed()) {
+        state = populations;
+        return;
+    }
+    bool open[3] = {false, false, false};
+    vector<int> nodes;
+    vector<char> inside;
+    decomposition.getDomainNodes(0, open, nodes, inside);
+    size_t numNodes = lattice.getNumNodes(), numLocal = nodes.size();
+    state.resize(D3Q19::numVelocities*numLocal);
+    for (size_t l = 0; l < numLocal; l++)
+        for (int q = 0; q < D3Q19::numVelocities; q++)
+            state[q*numLocal + l] = populations[q*numNodes + nodes[l]];
 }
 
 void ReferenceCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<double>& state) {
-    if (state.size() != populations.size())
+    bool open[3] = {false, false, false};
+    vector<int> nodes;
+    vector<char> inside;
+    decomposition.getDomainNodes(0, open, nodes, inside);
+    size_t numNodes = lattice.getNumNodes(), numLocal = nodes.size();
+    if (state.size() != D3Q19::numVelocities*numLocal)
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
-    populations = state;
+    if (!decomposition.isDecomposed())
+        populations = state;
+    else
+        for (size_t l = 0; l < numLocal; l++)
+            for (int q = 0; q < D3Q19::numVelocities; q++)
+                populations[q*numNodes + nodes[l]] = state[q*numLocal + l];
     stepForcesCurrent = false;
     if (!haloSendNodes.empty())
         exchangeHalo();
