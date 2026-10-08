@@ -399,6 +399,9 @@ of one report have the step in their name, written with 10 digits (for example `
 | `<prefix>_particles_<step>.vtp` | the particles (VTK XML PolyData): positions in nm, `velocity` in nm/ps (the velocities of the State, at the half step), `mass` in Da, `index` in the System, and `coupled`, 1 for the particles coupled to the fluid and 0 for the others |
 | `<prefix>.pvd` | the list of the files written, with their times in ps: open it in ParaView to load the whole series |
 
+Each file records its units: a comment at the top of the file and, in the field data, the string array `units`,
+one line per array (for example `density: Da/nm^3`), which ParaView shows in its Information panel.
+
 Optional arguments: `fluid=False` or `particles=False` to leave one of the two out; `double=True` to write in
 double precision (the default is single precision, which halves the size); `wrap=False` to keep the positions as
 they are, instead of wrapping each molecule into the periodic box (as `getState(enforcePeriodicBox=True)` does) so

@@ -540,8 +540,8 @@ of them coupled, one outside the box:
 
 | Test | Checks | Tolerance |
 |---|---|---|
-| Fluid | the `.vti` file has the extent of the lattice, spacing dx and origin 0; its density and velocity equal those of `getFluidFields()`; the solid nodes are flagged | 1e-6 relative in single precision, exact in double |
-| Particles | the `.vtp` file has the positions of the State wrapped into the box, its velocities, the masses, the indices, the coupled flags and one vertex per particle; with `wrap=False` the position outside the box stays outside | as above |
+| Fluid | the `.vti` file has the extent of the lattice, spacing dx and origin 0; its density and velocity equal those of `getFluidFields()`; the solid nodes are flagged; the field data array `units` lists the unit of each array | 1e-6 relative in single precision, exact in double |
+| Particles | the `.vtp` file has the positions of the State wrapped into the box, its velocities, the masses, the indices, the coupled flags and one vertex per particle, and the array `units`; with `wrap=False` the position outside the box stays outside | as above |
 | Series | the `.pvd` file lists the fluid and particle files of each report with the time in ps; with `append=True` a new reporter keeps the files already listed | exact |
 | Parts | `fluid=False` and `particles=False` write only the other part | exact |
 | No effect on the run | a run with the reporter equals, bit for bit, the run without it | bitwise |
@@ -549,7 +549,7 @@ of them coupled, one outside the box:
 **Measured** (OpenMM 8.6.1): all pass. The files written by the test were also read with the VTK readers of
 ParaView 5.13 (`vtkXMLImageDataReader`, `vtkXMLPolyDataReader`, the `.pvd` reader): dimensions, spacing, the
 coordinates of the nodes, the fields and the times agree, within 5e-8 relative in single precision and exactly in
-double precision.
+double precision, and the readers return the strings of the `units` array of the field data.
 
 ## Equivalence with the reference implementation: coupled particles (E0)
 

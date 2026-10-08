@@ -513,6 +513,18 @@ class LBMTemperatureReporter(object):
         self._out.flush()
 
 
+def _vtkUnits(units):
+    """The field data of a VTK XML dataset with the string array "units", one line "array: unit" per array, which
+    ParaView shows in its Information panel.  VTK writes the strings of an ASCII array as the codes of their
+    characters, each string ended by 0."""
+    codes = ' '.join(' '.join(str(ord(c)) for c in line) + ' 0' for line in units)
+    return ('    <FieldData>\n'
+            '      <DataArray type="String" Name="units" NumberOfTuples="%d" format="ascii">\n'
+            '        %s\n'
+            '      </DataArray>\n'
+            '    </FieldData>\n' % (len(units), codes))
+
+
 def _writeVTKFile(path, kind, opening, closing, arrays):
     """Write a VTK XML file whose data arrays are appended in binary (raw, little endian, UInt64 sizes).
 
@@ -526,8 +538,9 @@ def _writeVTKFile(path, kind, opening, closing, arrays):
         offsets['offset%d' % i] = offset
         blocks.append(data)
         offset += 8 + len(data)
-    header = ('<?xml version="1.0"?>\n<VTKFile type="%s" version="1.0" byte_order="LittleEndian" '
-              'header_type="UInt64">\n' % kind) + opening.format(**offsets) + closing + '  <AppendedData encoding="raw">\n_'
+    header = ('<?xml version="1.0"?>\n<!-- openmmlbm.LBMVTKReporter, in OpenMM units: see the field data array "units" -->\n'
+              '<VTKFile type="%s" version="1.0" byte_order="LittleEndian" header_type="UInt64">\n' % kind) + \
+             opening.format(**offsets) + closing + '  <AppendedData encoding="raw">\n_'
     with open(path, 'wb') as out:
         out.write(header.encode('ascii'))
         for data in blocks:
@@ -611,12 +624,16 @@ class LBMVTKReporter(object):
                       np.asarray(velocity.value_in_unit(unit.nanometer/unit.picosecond), dtype=real).reshape(-1)]
             solid = list(self._force.getSolidNodes())
             extent = '0 %d 0 %d 0 %d' % (nx - 1, ny - 1, nz - 1)
-            opening = ('  <ImageData WholeExtent="%s" Origin="0 0 0" Spacing="%.17g %.17g %.17g">\n'
+            units = ['Origin, Spacing: nm', 'density: Da/nm^3', 'velocity: nm/ps']
+            if solid:
+                units.append('solid: 1 for a solid node, 0 for a fluid node')
+            opening = ('  <ImageData WholeExtent="%s" Origin="0 0 0" Spacing="%.17g %.17g %.17g">\n' % (extent, dx, dx, dx) +
+                       _vtkUnits(units) +
                        '    <Piece Extent="%s">\n'
                        '      <PointData Scalars="density" Vectors="velocity">\n'
                        '        <DataArray type="%s" Name="density" format="appended" offset="{offset0}"/>\n'
                        '        <DataArray type="%s" Name="velocity" NumberOfComponents="3" format="appended" '
-                       'offset="{offset1}"/>\n' % (extent, dx, dx, dx, extent, name, name))
+                       'offset="{offset1}"/>\n' % (extent, name, name))
             if solid:
                 flags = np.zeros(nx*ny*nz, dtype=np.uint8)
                 flags[solid] = 1
@@ -637,7 +654,9 @@ class LBMVTKReporter(object):
             arrays = [np.asarray(positions, dtype=real).reshape(-1), np.asarray(velocities, dtype=real).reshape(-1),
                       np.asarray(masses, dtype=real), np.arange(n, dtype=np.int32), coupled,
                       np.arange(n, dtype=np.int64), np.arange(1, n + 1, dtype=np.int64)]
-            opening = ('  <PolyData>\n'
+            units = ['Points: nm', 'velocity: nm/ps, at the half step of the leapfrog', 'mass: Da',
+                     'index: index of the particle in the System', 'coupled: 1 for a particle coupled to the fluid']
+            opening = ('  <PolyData>\n' + _vtkUnits(units) +
                        '    <Piece NumberOfPoints="%d" NumberOfVerts="%d" NumberOfLines="0" NumberOfStrips="0" '
                        'NumberOfPolys="0">\n'
                        '      <Points>\n'

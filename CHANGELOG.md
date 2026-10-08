@@ -30,7 +30,8 @@ versions the API may still change.
 - `openmmlbm.LBMVTKReporter`, a reporter for `openmm.app.Simulation` that writes the fluid (density and
   velocity, solid nodes) and the particles (positions, velocities, masses, coupled or not) in VTK files for
   ParaView, in OpenMM units (nm, Da/nm^3, nm/ps), with a `.pvd` file for the series; `--vtk N` in
-  `examples/cocomo/diffusion.py`.
+  `examples/cocomo/diffusion.py`. Each file records its units, in a comment at the top and in the field data
+  array `units` ("density: Da/nm^3", ...), which ParaView shows in its Information panel.
 - Regularized walls, `setWallScheme(LBMForce.Regularized)`, on all platforms (the default stays the
   bounce-back of version 0.2). The fluid nodes next to the solid nodes rebuild the populations that come from the
   solid nodes as those of fluid at rest on the solid node, feq(rho_b, 0) + (1 - omega) fneq(Pi of the node) + the

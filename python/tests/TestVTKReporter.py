@@ -22,7 +22,7 @@ TYPES = {'Float32': '<f4', 'Float64': '<f8', 'Int32': '<i4', 'Int64': '<i8', 'UI
 
 def read_vtk(path):
     """The XML element of the dataset and the arrays {Name: array} of a VTK XML file with raw appended data (the points
-    of a PolyData under the name 'Points')."""
+    of a PolyData under the name 'Points'; the ASCII string array of the field data, 'units', as a list of strings)."""
     data = open(path, 'rb').read()
     marker = b'<AppendedData encoding="raw">'
     head, rest = data.split(marker)
@@ -32,6 +32,18 @@ def read_vtk(path):
     arrays = {}
     for parent in root.iter():
         for child in parent.findall('DataArray'):
+            if child.get('format') == 'ascii' and child.get('type') == 'String':
+                codes = [int(c) for c in child.text.split()]
+                strings, current = [], ''
+                for c in codes:
+                    if c == 0:
+                        strings.append(current)
+                        current = ''
+                    else:
+                        current += chr(c)
+                assert len(strings) == int(child.get('NumberOfTuples'))
+                arrays[child.get('Name')] = strings
+                continue
             offset = start + int(child.get('offset'))
             size = struct.unpack_from('<Q', rest, offset)[0]
             values = np.frombuffer(rest[offset+8:offset+8+size], dtype=TYPES[child.get('type')])
@@ -95,6 +107,9 @@ def test_vtk_reporter(tmp_path, double):
     assert np.allclose(arrays['velocity'], velocity, rtol=tolerance, atol=tolerance*np.abs(velocity).max())
     assert np.abs(velocity).max() > 0
     assert list(np.nonzero(arrays['solid'])[0]) == [0, 7]
+    assert arrays['units'] == ['Origin, Spacing: nm', 'density: Da/nm^3', 'velocity: nm/ps',
+                               'solid: 1 for a solid node, 0 for a fluid node']
+    assert b'OpenMM units' in open('%s_fluid_%010d.vti' % (prefix, 10), 'rb').read(200)
     # particles at step 10: positions wrapped into the box, velocities of the State, masses, indices, coupling
     root, arrays = read_vtk('%s_particles_%010d.vtp' % (prefix, 10))
     state = simulation.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=True)
@@ -107,6 +122,7 @@ def test_vtk_reporter(tmp_path, double):
     assert list(arrays['index']) == [0, 1, 2, 3]
     assert list(arrays['coupled']) == [1, 1, 0, 1]
     assert list(arrays['connectivity']) == [0, 1, 2, 3] and list(arrays['offsets']) == [1, 2, 3, 4]
+    assert arrays['units'][:3] == ['Points: nm', 'velocity: nm/ps, at the half step of the leapfrog', 'mass: Da']
     # the series: two reports, fluid and particles each, at 0.05 and 0.1 ps
     collection = ET.parse(prefix + '.pvd').getroot()
     datasets = [(float(d.get('timestep')), d.get('file')) for d in collection.iter('DataSet')]
