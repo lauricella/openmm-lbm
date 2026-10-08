@@ -919,10 +919,20 @@ particles, the EM scheme, T > 0 and a friction that is not zero, a warning on st
 heaviest coupled particle.
 
 **Walls.** The halfway bounce-back of the solid nodes (section 1) is a permutation of populations: it neither
-dissipates nor needs noise, and it is unchanged. The regularized walls of section 1
-rebuild their nodes without noise, and next to them the fluctuations are below equilibrium (section 1, Which
-wall to choose). Walls that also exchange thermal fluctuations with the fluid (walls at the temperature of the
-bath, with a thermal accommodation coefficient) are a planned extension.
+dissipates nor needs noise, and it is unchanged. A population comes back from the wall with the random part that
+the fluid node drew for it in its collision, so the wall returns the fluctuations it receives and adds none of
+its own: in the language of kinetic theory its thermal accommodation coefficient is zero (alpha = 0), while the
+velocity stays no-slip. Such a wall has no temperature of its own and exchanges no thermal energy with the
+fluid, and since the permutation keeps the equilibrium distribution of the populations, the fluctuations next to
+it are those of the bulk at every distance (`docs/validation.md`, Walls and open faces, Fluctuations next to the
+walls). A wall that forgot what arrives and emitted new fluctuations at a temperature of its own (alpha = 1, as
+the diffuse re-emission of Maxwell, or a partial accommodation 0 < alpha < 1) would give the same equilibrium
+with the single temperature of the force. It would differ only in the correlations of the populations over the
+step from the fluid node to the wall and back, since the ghost modes relax with rate 1 in every collision, and
+it would matter only for walls at a temperature different from that of the fluid, which the force does not
+have. The plugin therefore has no accommodation parameter: its bounce-back walls are those with alpha = 0. The
+regularized walls of section 1 rebuild their nodes without noise, and next to them the fluctuations are below
+equilibrium (section 1, Which wall to choose).
 
 **Tests** (`tests/TestLBMFluctuations.h`, all platforms and precisions).
 - A lattice of a single node, which streams every population back to itself: mass and momentum stay those of the

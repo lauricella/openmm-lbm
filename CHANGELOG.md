@@ -20,7 +20,9 @@ versions the API may still change.
   too hot, by about friction x dt x m/(2 m_c), so the documentation recommends the centred drag with the
   fluctuating fluid, and a warning on stderr gives this estimate when a Context is created with fluid fluctuations,
   the explicit drag, a friction and coupled particles with the `EulerMaruyama` scheme at T > 0. Close to tau = 1/2 the fluctuating fluid is unstable (tau <= 0.501 at kT = 1/3000 in lattice
-  units).
+  units). The bounce-back walls are in exact thermal equilibrium with the fluctuating fluid: they return the
+  fluctuations they receive (thermal accommodation coefficient zero), and there is no accommodation parameter
+  (`docs/theory.md`, section 7, Walls).
 - `examples/cocomo/diffusion.py --fluid-fluctuations`.
 - A test of the spectrum of the velocity fluctuations on all platforms (`testVelocitySpectrum`): the velocity of
   `getFluidFields()`, minus the mean velocity of each sample, is Fourier transformed and its longitudinal and

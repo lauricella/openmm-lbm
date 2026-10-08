@@ -160,7 +160,7 @@ give no-slip walls, accurate to second order in the lattice spacing, and conserv
 | where the wall is | halfway between the solid node and the first fluid node | on the first fluid node next to the solid nodes |
 | channel between the solid planes j = 0 and j = ny - 1 | walls at y = dx/2 and (ny - 3/2) dx | walls at y = dx and (ny - 2) dx |
 | most accurate for | tau < 15/16 (water: tau about 0.6) | tau > 15/16 |
-| with fluid fluctuations | exact thermal equilibrium next to the wall | fluctuations 3 to 9 % low on the first node next to the wall |
+| with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | fluctuations 3 to 9 % low on the first node next to the wall |
 | platforms | all | all |
 
 If you do not know which one to use, keep the default. The theory and the exact solutions are in
