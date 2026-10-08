@@ -23,7 +23,14 @@ versions the API may still change.
   domain the warnings of the Context are printed by rank 0 only. `setParticleCopiesCheck()` turns the comparison of
   the copies off (on by default; serialized in version 8). With more than one MPI rank the Python module aborts every
   rank (`LBMForce.abortMPI()`, `MPI_Abort`) after printing an uncaught exception, so that an error on one rank does not
-  leave the others waiting. Not yet: checkpoints, local `getFluidState()`/`getFluidFields()`, GPU platforms.
+  leave the others waiting.
+- Fields and state of the fluid with more than one domain: `getLocalDomain()`; `getFluidFields()`, `getFluidState()`
+  and `setFluidState()` work on the domain of the rank, and gather the whole lattice on rank 0 or set it from rank 0
+  only on request (`gather=True`, `scatter=True`); `getFluidFields(halo=True)` adds a layer one node thick around the
+  domain, filled for the fields whose halo is exchanged at the end of every step (`setDensityHaloExchange()`,
+  `setVelocityHaloExchange()`, off by default, serialized in version 8) and NaN otherwise. With one domain the new
+  arguments change nothing, and the halo comes from the lattice across the periodic boundaries. Not yet: checkpoints
+  and `LBMVTKReporter` with more than one domain, GPU platforms.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations

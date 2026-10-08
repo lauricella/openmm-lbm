@@ -35,6 +35,8 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     node.setIntProperty("domainsY", py);
     node.setIntProperty("domainsZ", pz);
     node.setBoolProperty("particleCopiesCheck", force.getParticleCopiesCheck());
+    node.setBoolProperty("densityHaloExchange", force.getDensityHaloExchange());
+    node.setBoolProperty("velocityHaloExchange", force.getVelocityHaloExchange());
     node.setDoubleProperty("density", force.getFluidDensity());
     node.setDoubleProperty("viscosity", force.getKinematicViscosity());
     node.setDoubleProperty("friction", force.getFriction());
@@ -100,6 +102,8 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
             force->setDomainDecomposition(node.getIntProperty("domainsX"), node.getIntProperty("domainsY"),
                     node.getIntProperty("domainsZ"));
             force->setParticleCopiesCheck(node.getBoolProperty("particleCopiesCheck", true));
+            force->setDensityHaloExchange(node.getBoolProperty("densityHaloExchange", false));
+            force->setVelocityHaloExchange(node.getBoolProperty("velocityHaloExchange", false));
         }
         // Versions 1 to 5 were written before the wall schemes existed, with bounce-back.
         if (version >= 6)

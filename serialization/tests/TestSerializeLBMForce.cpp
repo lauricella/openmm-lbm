@@ -29,6 +29,8 @@ void testSerialization() {
     force.setGridSize(10, 12, 14);
     force.setDomainDecomposition(2, 0, 3);
     force.setParticleCopiesCheck(false);
+    force.setDensityHaloExchange(true);
+    force.setVelocityHaloExchange(true);
     force.setFluidDensity(500.0);
     force.setKinematicViscosity(2.5);
     force.setFriction(5.0);
@@ -76,6 +78,8 @@ void testSerialization() {
     ASSERT_EQUAL(py, py2);
     ASSERT_EQUAL(pz, pz2);
     ASSERT_EQUAL(force.getParticleCopiesCheck(), force2.getParticleCopiesCheck());
+    ASSERT_EQUAL(force.getDensityHaloExchange(), force2.getDensityHaloExchange());
+    ASSERT_EQUAL(force.getVelocityHaloExchange(), force2.getVelocityHaloExchange());
     ASSERT_EQUAL(force.getFluidDensity(), force2.getFluidDensity());
     ASSERT_EQUAL(force.getKinematicViscosity(), force2.getKinematicViscosity());
     ASSERT_EQUAL(force.getFriction(), force2.getFriction());
@@ -109,8 +113,8 @@ void testSerialization() {
     // schemes existed (version 5) has bounce-back walls, one written before the fluid fluctuations existed (version
     // 4) has none, and one written before the drag scheme existed (version 3) has the explicit drag.
 
-    // A force written before the domain decomposition existed (version 7) has one domain, and the check of the copies
-    // of the particles on.
+    // A force written before the domain decomposition existed (version 7) has one domain, the check of the copies of
+    // the particles on and no exchange of the halo.
 
     string xml = buffer.str();
     size_t version = xml.find("version=\"8\"");
@@ -123,6 +127,8 @@ void testSerialization() {
     ASSERT_EQUAL(1, py2);
     ASSERT_EQUAL(1, pz2);
     ASSERT(copy7->getParticleCopiesCheck());
+    ASSERT(!copy7->getDensityHaloExchange());
+    ASSERT(!copy7->getVelocityHaloExchange());
     delete copy7;
     version = xml.find("version=\"7\"");
     ASSERT(version != string::npos);

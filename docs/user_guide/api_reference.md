@@ -78,9 +78,11 @@ More than one domain needs the plugin built with MPI (`-DOPENMM_LBM_MPI=ON`, [in
 the product must be the number of MPI ranks; otherwise creating the Context raises an error. It is fixed when the
 Context is created. In this version the Reference platform decomposes the fluid, the walls, the open faces and the
 coupling of the particles ([theory](../theory.md#8-domain-decomposition-in-development-for-version-040)); a Context
-with more than one domain refuses checkpoints, the CUDA, OpenCL and HIP platforms refuse more than one domain, and
-`getFluidState()` and `getFluidFields()` return the whole lattice on every rank, valid only on the nodes of the rank.
-`getWallForce()`, `getFluidMachNumber()` and `getState(getForces=True)` must then be called by every rank.
+with more than one domain refuses checkpoints, and the CUDA, OpenCL and HIP platforms refuse more than one domain.
+`getFluidFields()`, `getFluidState()` and `setFluidState()` work on the domain of each rank, or gather the whole
+lattice on rank 0 ([reading and writing the fluid](#reading-and-writing-the-fluid-of-a-context)).
+`getWallForce()`, `getFluidMachNumber()`, `getState(getForces=True)`, `setFluidState()` and the calls with `gather`
+must then be called by every rank.
 
 The particles are replicated: every rank builds the same System and integrates all the particles, and the copies must
 stay identical. Set positions and velocities in the same way on every rank (velocities drawn at random need a fixed
@@ -113,6 +115,17 @@ the MPI ranks; `True` by default. A check computes a hash of the positions and v
 `MPI_Allreduce`; at the default period of 100 steps it costs well under 1 % of a step. Turn it off only to time runs
 whose copies are known to be identical, since copies that differ give wrong results without any other sign. With one
 domain it does nothing. It is serialized with the force.
+
+### `setDensityHaloExchange(exchange)`, `setVelocityHaloExchange(exchange)`
+
+**In development for version 0.4.0.** Whether the density, and the velocity, of the halo of each domain is exchanged:
+the layer one node thick around the domain, edges and corners included, whose nodes belong to the neighbouring ranks.
+When it is on, every rank receives at the end of every step the fields of its halo from their owners, so that
+`getFluidFields(context, halo=True)` returns them, for example to compute gradients on the domain of the rank without
+other communication. Both are off by default: each costs one message to every neighbouring rank per step. With one
+domain nothing is exchanged, and the halo comes from the nodes of the lattice across the periodic boundaries. They are
+fixed when the Context is created (`getDensityHaloExchange()`, `getVelocityHaloExchange()`) and serialized with the
+force.
 
 ## Fluid properties
 
@@ -440,7 +453,7 @@ of one report have the step in their name, written with 10 digits (for example `
 
 | File | Content |
 |---|---|
-| `<prefix>_fluid_<step>.vti` | the lattice (VTK XML ImageData): point $`(i, j, k)`$ is the node at $`(i\Delta x, j\Delta x, k\Delta x)`$, in nm; `density` in Da/nm³ and `velocity` in nm/ps, as [`getFluidFields()`](#getfluidfieldscontext) returns them; with solid nodes also `solid`, 1 for a solid node and 0 for a fluid one |
+| `<prefix>_fluid_<step>.vti` | the lattice (VTK XML ImageData): point $`(i, j, k)`$ is the node at $`(i\Delta x, j\Delta x, k\Delta x)`$, in nm; `density` in Da/nm³ and `velocity` in nm/ps, as [`getFluidFields()`](#getfluidfieldscontext-gatherfalse-halofalse) returns them; with solid nodes also `solid`, 1 for a solid node and 0 for a fluid one |
 | `<prefix>_particles_<step>.vtp` | the particles (VTK XML PolyData): positions in nm, `velocity` in nm/ps (the velocities of the State, at the half step), `mass` in Da, `index` in the System, and `coupled`, 1 for the particles coupled to the fluid and 0 for the others |
 | `<prefix>.pvd` | the list of the files written, with their times in ps: open it in ParaView to load the whole series |
 
@@ -453,7 +466,10 @@ they are, instead of wrapping each molecule into the periodic box (as `getState(
 that the particles overlay the lattice; `append=True`, for a run continued from a checkpoint, to keep the files
 already listed in `<prefix>.pvd`. The numbers are binary (raw appended data, little endian). Writing the files
 neither advances the fluid nor draws random numbers, so it does not change the run. A file of the fluid holds
-16 bytes per node in single precision (4 MB for $`64^3`$ nodes).
+16 bytes per node in single precision (4 MB for $`64^3`$ nodes). With more than one domain
+([decomposition](#setdomaindecompositionpx-py-pz-getdomaindecomposition)) the fluid cannot be written yet: the
+reporter raises an error. To write the particles, attach a reporter with `fluid=False` on rank 0 only
+(`openmmlbm.mpiRank() == 0`): it asks the State for positions and velocities only, which needs no communication.
 
 ```python
 from openmmlbm import LBMVTKReporter
@@ -518,9 +534,20 @@ set equal. On a restart the seed does not matter: OpenMM checkpoints contain Ope
 
 None of these methods advances the fluid.
 
-### `getFluidFields(context)`
+### `getLocalDomain(context)`
 
-Returns the tuple `(density, velocity)` with the fluid at every lattice node, in node order:
+Returns `((i0, j0, k0), (ni, nj, nk))`: the first node and the number of nodes along each axis of the domain of this
+MPI rank ([domain decomposition](#setdomaindecompositionpx-py-pz-getdomaindecomposition)). With one domain it is
+`((0, 0, 0), (nx, ny, nz))`.
+
+```python
+(i0, j0, k0), (ni, nj, nk) = force.getLocalDomain(context)
+```
+
+### `getFluidFields(context, gather=False, halo=False)`
+
+Returns the tuple `(density, velocity)` with the fluid at every lattice node of the domain of this MPI rank, the whole
+lattice with one domain, in node order: node $`(i_0 + i, j_0 + j, k_0 + k)`$ has index $`i + n_i(j + n_j k)`$.
 
 - `density`: a list of densities in Da/nm³, as a `Quantity`;
 - `velocity`: a list of `Vec3` velocities in nm/ps, as a `Quantity`. It is the velocity of the forced fluid,
@@ -535,10 +562,33 @@ rho = np.array(density.value_in_unit(unit.dalton/unit.nanometer**3))   # shape (
 u = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))   # shape (numNodes, 3)
 ```
 
-### `getFluidState(context)`, `setFluidState(context, state)`
+- `gather=True`: rank 0 receives the fields of the whole lattice, node $`(i, j, k)`$ at index $`i + n_x(j + n_y k)`$,
+  and the other ranks empty lists. Every rank must call it, and it moves the whole lattice to rank 0: 32 bytes per
+  node, 67 MB for $`128^3`$ nodes and 4.3 GB for $`512^3`$. Use it for tests and small lattices.
+- `halo=True`: the fields of the domain with a layer one node thick around it, as an array of
+  $`(n_i + 2)(n_j + 2)(n_k + 2)`$ nodes: node $`(i_0 + i, j_0 + j, k_0 + k)`$, with $`i`$ from $`-1`$ to $`n_i`$ and so
+  on, has index $`(i + 1) + (n_i + 2)\,[(j + 1) + (n_j + 2)(k + 1)]`$. The layer holds the values of the neighbouring
+  nodes, across the periodic boundaries too, for the fields whose halo is exchanged (`setDensityHaloExchange()`,
+  `setVelocityHaloExchange()`), and NaN for the other fields and beyond the open faces. It needs no communication.
+
+`gather` and `halo` cannot be both `True`. With one domain, `gather=True` returns the same as the default.
+
+```python
+(i0, j0, k0), (ni, nj, nk) = force.getLocalDomain(context)
+density, velocity = force.getFluidFields(context, halo=True)
+rho = np.array(density.value_in_unit(unit.dalton/unit.nanometer**3)).reshape(nk + 2, nj + 2, ni + 2)
+# Without setDensityHaloExchange(True) the layer rho[0, :, :], rho[:, 0, :], ... holds NaN.
+```
+
+### `getFluidState(context, gather=False)`, `setFluidState(context, state, scatter=False)`
 
 `getFluidState()` returns the complete state of the fluid as a list of 19 × numNodes numbers.
 `setFluidState()` sets it in a Context with the same grid size; it accepts a list or a NumPy array.
+With the domain decomposition they work on the domain of the rank, 19 numbers per node of the domain in the order of
+`getFluidFields()`, and every rank must call `setFluidState()`. With `gather=True` rank 0 receives the state of the
+whole lattice and the other ranks an empty list; with `scatter=True` rank 0 passes the state of the whole lattice and
+the state passed by the other ranks (for example `None`) is ignored. Both are collective, and with one domain they do
+what the calls without them do. The whole state of $`128^3`$ nodes takes 320 MB, of $`512^3`$ nodes 20 GB.
 Together they save and restore the fluid, which is not part of OpenMM checkpoints. To save and continue a
 whole run use the [checkpoints](#checkpoints) instead: they also keep the random numbers. Unlike checkpoints,
 the fluid state does not depend on the platform: it can move a fluid from one platform to another

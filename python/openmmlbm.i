@@ -152,9 +152,17 @@ def _lbmInputValue(value, expected, method):
 %pythonappend LBMPlugin::LBMForce::getWallForce(OpenMM::Context& context) const %{
     val = unit.Quantity(val, unit.kilojoule_per_mole/unit.nanometer)
 %}
-%pythonappend LBMPlugin::LBMForce::getFluidFields(OpenMM::Context& context) %{
-    val = (unit.Quantity(val[0], unit.dalton/unit.nanometer**3), unit.Quantity(val[1], unit.nanometer/unit.picosecond))
+%pythonappend LBMPlugin::LBMForce::getLocalDomain(const OpenMM::Context& context, int& i0, int& j0, int& k0, int& ni, int& nj, int& nk) const %{
+    val = (tuple(val[:3]), tuple(val[3:]))
 %}
+
+/*
+ * getFluidFields(), getFluidState() and setFluidState() take the optional arguments gather, halo and scatter: the C++
+ * methods are wrapped as _getFluidFields() and the like, with explicit arguments, and the Python methods with the
+ * defaults are added to LBMForce in the Python code at the end of this file.
+ */
+%rename(_getFluidState) LBMPlugin::LBMForce::getFluidState;
+%rename(_setFluidState) LBMPlugin::LBMForce::setFluidState;
 
 /*
  * Check the units of the inputs (_lbmInputValue above).
@@ -251,6 +259,10 @@ public:
     static void abortMPI(int errorCode);
     bool getParticleCopiesCheck() const;
     void setParticleCopiesCheck(bool check);
+    bool getDensityHaloExchange() const;
+    void setDensityHaloExchange(bool exchange);
+    bool getVelocityHaloExchange() const;
+    void setVelocityHaloExchange(bool exchange);
 
     double getFluidDensity() const;
     void setFluidDensity(double density);
@@ -297,10 +309,23 @@ public:
     void setParticle(int index, int particle);
 
 
+    %apply int& OUTPUT {int& i0};
+    %apply int& OUTPUT {int& j0};
+    %apply int& OUTPUT {int& k0};
+    %apply int& OUTPUT {int& ni};
+    %apply int& OUTPUT {int& nj};
+    %apply int& OUTPUT {int& nk};
+    void getLocalDomain(const OpenMM::Context& context, int& i0, int& j0, int& k0, int& ni, int& nj, int& nk) const;
+    %clear int& i0;
+    %clear int& j0;
+    %clear int& k0;
+    %clear int& ni;
+    %clear int& nj;
+    %clear int& nk;
     %apply std::vector<double>& OUTPUT {std::vector<double>& state};
-    void getFluidState(OpenMM::Context& context, std::vector<double>& state) const;
+    void getFluidState(OpenMM::Context& context, std::vector<double>& state, bool gather) const;
     %clear std::vector<double>& state;
-    void setFluidState(OpenMM::Context& context, const std::vector<double>& state);
+    void setFluidState(OpenMM::Context& context, const std::vector<double>& state, bool scatter);
     double getFluidMachNumber(OpenMM::Context& context) const;
     OpenMM::Vec3 getWallForce(OpenMM::Context& context) const;
 
@@ -320,13 +345,13 @@ public:
      */
     %extend {
         /*
-         * Get the density and velocity of the fluid at every lattice node, as the tuple
-         * (density, velocity) of two lists.
+         * The density and velocity of the fluid, as the tuple (density, velocity) of two lists (LBMForce.getFluidFields()
+         * adds the units and the defaults of gather and halo).
          */
-        PyObject* getFluidFields(OpenMM::Context& context) {
+        PyObject* _getFluidFields(OpenMM::Context& context, bool gather, bool halo) {
             std::vector<double> density;
             std::vector<OpenMM::Vec3> velocity;
-            self->getFluidFields(context, density, velocity);
+            self->getFluidFields(context, density, velocity, gather, halo);
             PyObject* densityList = PyList_New(density.size());
             for (int i = 0; i < (int) density.size(); i++)
                 PyList_SET_ITEM(densityList, i, PyFloat_FromDouble(density[i]));
@@ -395,6 +420,39 @@ def mpiSize():
 def mpiLocalRank():
     """The rank among the processes on the same node (0 without MPI), to choose the GPU: LBMForce.getMPILocalRank()."""
     return LBMForce.getMPILocalRank()
+
+
+def _LBMForce_getFluidFields(self, context, gather=False, halo=False):
+    """Get the density (Da/nm^3) and velocity (nm/ps) of the fluid at the nodes of the domain of this MPI rank, the
+    whole lattice with one domain, as the tuple (density, velocity) of two Quantities: node (i0 + i, j0 + j, k0 + k)
+    of the domain ((i0, j0, k0), (ni, nj, nk)) = getLocalDomain(context) has index i + ni*(j + nj*k).
+
+    gather=True: rank 0 receives the fields of the whole lattice, node (i, j, k) at index i + nx*(j + ny*k), and the
+    other ranks empty lists; every rank must call it.  halo=True: the domain with a layer one node thick around it,
+    node (i0 + i, j0 + j, k0 + k) for i from -1 to ni and so on at index (i + 1) + (ni + 2)*((j + 1) + (nj + 2)*(k + 1));
+    the layer holds the values of the neighbouring nodes for the fields whose halo is exchanged
+    (setDensityHaloExchange(), setVelocityHaloExchange()), and NaN for the others and beyond the open faces."""
+    density, velocity = self._getFluidFields(context, gather, halo)
+    return (unit.Quantity(density, unit.dalton/unit.nanometer**3), unit.Quantity(velocity, unit.nanometer/unit.picosecond))
+
+
+def _LBMForce_getFluidState(self, context, gather=False):
+    """Get the complete state of the fluid of the domain of this MPI rank (the whole lattice with one domain), to
+    restore it with setFluidState().  gather=True: rank 0 receives the state of the whole lattice and the other ranks
+    an empty list; every rank must call it."""
+    return self._getFluidState(context, gather)
+
+
+def _LBMForce_setFluidState(self, context, state, scatter=False):
+    """Set the complete state of the fluid, as returned by getFluidState().  With the domain decomposition every rank
+    must call it, with the state of its domain or, with scatter=True, rank 0 with the state of the whole lattice (the
+    state passed by the other ranks, for example None, is ignored)."""
+    self._setFluidState(context, [] if state is None else state, scatter)
+
+
+LBMForce.getFluidFields = _LBMForce_getFluidFields
+LBMForce.getFluidState = _LBMForce_getFluidState
+LBMForce.setFluidState = _LBMForce_setFluidState
 
 
 def _abortMPIOnException(excType, value, traceback, _previous=_sys.excepthook):
@@ -665,6 +723,9 @@ class LBMVTKReporter(object):
         files = []
         if self._fluid:
             nx, ny, nz = self._force.getGridSize()
+            if self._force.getLocalDomain(simulation.context)[1] != (nx, ny, nz):
+                raise mm.OpenMMException('LBMVTKReporter: the fluid of a run with more than one domain '
+                                         '(setDomainDecomposition()) cannot be written yet')
             dx = self._force.getLatticeParametersInContext(simulation.context)[0]
             dx = dx.value_in_unit(unit.nanometer) if unit.is_quantity(dx) else dx
             density, velocity = self._force.getFluidFields(simulation.context)

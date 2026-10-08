@@ -202,6 +202,32 @@ public:
      */
     void setParticleCopiesCheck(bool check);
     /**
+     * Get whether the density of the nodes around the domain of each MPI rank is exchanged
+     * (setDensityHaloExchange()).
+     */
+    bool getDensityHaloExchange() const;
+    /**
+     * Set whether the density of the nodes around the domain of each MPI rank, a layer one node thick that includes
+     * edges and corners (the halo), is exchanged at the end of every step, so that getFluidFields() with halo = true
+     * returns it.  Off by default: it costs one message to each neighbouring rank per step.  With one domain nothing is
+     * exchanged, and the halo comes from the nodes of the lattice.  It is fixed when the Context is created.
+     *
+     * @param exchange    true to exchange the density of the halo
+     */
+    void setDensityHaloExchange(bool exchange);
+    /**
+     * Get whether the velocity of the nodes around the domain of each MPI rank is exchanged
+     * (setVelocityHaloExchange()).
+     */
+    bool getVelocityHaloExchange() const;
+    /**
+     * Set whether the velocity of the nodes of the halo is exchanged at the end of every step, as
+     * setDensityHaloExchange() does for the density.  Off by default.
+     *
+     * @param exchange    true to exchange the velocity of the halo
+     */
+    void setVelocityHaloExchange(bool exchange);
+    /**
      * Get the mass density of the fluid at rest, measured in Da/nm^3.
      */
     double getFluidDensity() const;
@@ -431,33 +457,58 @@ public:
      */
     void setParticle(int index, int particle);
     /**
-     * Get the density and velocity of the fluid at every lattice node.  Node (i, j, k) has index
-     * i + nx*(j + ny*k).
+     * Get the first node (i0, j0, k0) and the number of nodes (ni, nj, nk) along each axis of the domain of this MPI
+     * rank (setDomainDecomposition()): the whole lattice with one domain.
+     *
+     * @param context    the Context
+     */
+    void getLocalDomain(const OpenMM::Context& context, int& i0, int& j0, int& k0, int& ni, int& nj, int& nk) const;
+    /**
+     * Get the density and velocity of the fluid at the lattice nodes of the domain of this MPI rank
+     * (getLocalDomain()), the whole lattice with one domain: node (i0 + i, j0 + j, k0 + k) has index
+     * i + ni*(j + nj*k).
+     *
+     * With gather = true, rank 0 receives the fields of the whole lattice, node (i, j, k) at index i + nx*(j + ny*k),
+     * and the other ranks empty vectors; every rank must call it.  With halo = true the vectors also hold a layer one
+     * node thick around the domain: node (i0 + i, j0 + j, k0 + k), for i from -1 to ni and so on, has index
+     * (i + 1) + (ni + 2)*((j + 1) + (nj + 2)*(k + 1)).  The layer holds the values of the neighbouring nodes, across
+     * periodic boundaries too, for the fields whose halo is exchanged (setDensityHaloExchange(),
+     * setVelocityHaloExchange()), and NaN for the other fields and beyond the open faces.  gather and halo cannot be
+     * both true.
      *
      * @param context        the Context in which to get the fields
      * @param[out] density   the mass density at each node, measured in Da/nm^3
      * @param[out] velocity  the velocity at each node, measured in nm/ps
+     * @param gather         true to gather the whole lattice on rank 0
+     * @param halo           true to add the layer of nodes around the domain
      */
-    void getFluidFields(OpenMM::Context& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity) const;
+    void getFluidFields(OpenMM::Context& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity,
+            bool gather = false, bool halo = false) const;
     /**
      * Get the complete state of the fluid, so that it can be saved and restored with setFluidState().
      * The state of the fluid is not part of OpenMM checkpoints.  The content of the vector is internal
      * to the plugin and should be treated as opaque: it holds the deviations f_q - w_q of the lattice
      * populations from the rest equilibrium (lattice density 1, at rest), in lattice units, stored as
-     * [q*numNodes + node].  Saving and restoring them is exact.
+     * [q*numNodes + node].  Saving and restoring them is exact.  With the domain decomposition it is the state of the
+     * nodes of the domain of this MPI rank, [q*numLocal + l] with l = i + ni*(j + nj*k) (getLocalDomain()), and with
+     * gather = true rank 0 receives the state of the whole lattice and the other ranks an empty vector; every rank
+     * must call it then.
      *
      * @param context     the Context from which to get the state
      * @param[out] state  the state of the fluid
+     * @param gather      true to gather the whole lattice on rank 0
      */
-    void getFluidState(OpenMM::Context& context, std::vector<double>& state) const;
+    void getFluidState(OpenMM::Context& context, std::vector<double>& state, bool gather = false) const;
     /**
      * Set the complete state of the fluid, as returned by getFluidState() for a Context with the same
-     * grid size.
+     * grid size.  With the domain decomposition every MPI rank must call it, with the state of its domain or, with
+     * scatter = true, rank 0 with the state of the whole lattice (the state passed by the other ranks is ignored).
      *
      * @param context    the Context in which to set the state
      * @param state      the state of the fluid
+     * @param scatter    true to distribute the state of the whole lattice from rank 0
      */
-    void setFluidState(OpenMM::Context& context, const std::vector<double>& state);
+    void setFluidState(OpenMM::Context& context, const std::vector<double>& state, bool scatter = false);
     /**
      * Write a checkpoint of the part of the state of a Context that belongs to this force and that OpenMM
      * checkpoints (Context::createCheckpoint()) do not contain: the populations of the fluid, the random
@@ -529,7 +580,7 @@ protected:
 private:
     int nx, ny, nz, randomNumberSeed, momentumRemovalFrequency, machCheckFrequency;
     int decomposition[3];
-    bool particleCopiesCheck;
+    bool particleCopiesCheck, densityHaloExchange, velocityHaloExchange;
     double density, viscosity, friction, temperature, machNumberLimit;
     CouplingScheme couplingScheme;
     DragScheme dragScheme;

@@ -81,6 +81,11 @@ private:
         particles are the same on every rank (collective). */
     void sumParticleForces();
     void checkReplicas(OpenMM::ContextImpl& context);
+    /** The density and velocity of a node in lattice units, from its populations. */
+    void nodeFields(int node, double& density, OpenMM::Vec3& velocity) const;
+    /** With the domain decomposition and the exchange of the halo: send the fields of the nodes of the rank to the
+        ranks whose halo contains them, and receive those of the halo of the rank (collective). */
+    void exchangeHalo();
     /** Collision and streaming of one node; normal holds its 15 normal numbers with a fluctuating fluid. */
     void collideNode(int node, double mu, const double* normal);
     LBMLatticeParameters lattice;
@@ -99,6 +104,12 @@ private:
     std::vector<int> frameNodes, interiorNodes, normalIndex;
     std::vector<double> fluidNormals;
     std::vector<std::vector<double> > sendBuffers, receiveBuffers;
+    /** The halo of the rank (setDensityHaloExchange(), setVelocityHaloExchange()): for each rank r, the nodes of this
+        rank in the halo of r and the nodes of r in the halo of this rank, in index order; and the fields of the halo
+        in lattice units (density, and velocity with 3 values per node, over the whole lattice, NaN outside the
+        halo), empty when not exchanged. */
+    std::vector<std::vector<int> > haloSendNodes, haloReceiveNodes;
+    std::vector<double> haloDensity, haloVelocity;
     /** True once the copies of the particles have been compared (checkReplicas()). */
     bool replicasChecked;
     /** Deviations of the populations from the rest equilibrium at lattice density 1, f_q - w_q, stored as

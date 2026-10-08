@@ -158,6 +158,97 @@ void LBMDecomposition::getLocalDomain(int start[3], int count[3]) const {
     }
 }
 
+void LBMDecomposition::getDomainOfRank(int r, int start[3], int count[3]) const {
+    int c[3] = {r%procs[0], (r/procs[0])%procs[1], r/(procs[0]*procs[1])};
+    for (int a = 0; a < 3; a++) {
+        start[a] = (int) (((long long) n[a])*c[a]/procs[a]);
+        count[a] = (int) (((long long) n[a])*(c[a] + 1)/procs[a]) - start[a];
+    }
+}
+
+void LBMDecomposition::gatherBlocks(const vector<double>& local, int valuesPerNode, vector<double>& global) const {
+    if (size == 1) {
+        global = local;
+        return;
+    }
+#ifdef OPENMM_LBM_MPI
+    // One element of the messages is a node (valuesPerNode doubles), so that the counts stay within an int.
+    MPI_Datatype nodeType;
+    MPI_Type_contiguous(valuesPerNode, MPI_DOUBLE, &nodeType);
+    MPI_Type_commit(&nodeType);
+    vector<int> counts(size), displacements(size);
+    long long total = 0;
+    for (int r = 0; r < size; r++) {
+        int start[3], count[3];
+        getDomainOfRank(r, start, count);
+        counts[r] = count[0]*count[1]*count[2];
+        displacements[r] = (int) total;
+        total += counts[r];
+    }
+    vector<double> buffer(rank == 0 ? total*valuesPerNode : 0);
+    MPI_Gatherv(local.data(), counts[rank], nodeType, buffer.data(), counts.data(), displacements.data(), nodeType, 0,
+            MPI_COMM_WORLD);
+    MPI_Type_free(&nodeType);
+    global.clear();
+    if (rank != 0)
+        return;
+    global.resize(((size_t) n[0])*n[1]*n[2]*valuesPerNode);
+    for (int r = 0; r < size; r++) {
+        int start[3], count[3];
+        getDomainOfRank(r, start, count);
+        size_t l = displacements[r];
+        for (int k = 0; k < count[2]; k++)
+            for (int j = 0; j < count[1]; j++)
+                for (int i = 0; i < count[0]; i++, l++) {
+                    size_t node = (start[0] + i) + ((size_t) n[0])*((start[1] + j) + ((size_t) n[1])*(start[2] + k));
+                    for (int v = 0; v < valuesPerNode; v++)
+                        global[node*valuesPerNode + v] = buffer[l*valuesPerNode + v];
+                }
+    }
+#endif
+}
+
+void LBMDecomposition::scatterBlocks(const vector<double>& global, int valuesPerNode, vector<double>& local) const {
+    if (size == 1) {
+        local = global;
+        return;
+    }
+#ifdef OPENMM_LBM_MPI
+    MPI_Datatype nodeType;
+    MPI_Type_contiguous(valuesPerNode, MPI_DOUBLE, &nodeType);
+    MPI_Type_commit(&nodeType);
+    vector<int> counts(size), displacements(size);
+    long long total = 0;
+    for (int r = 0; r < size; r++) {
+        int start[3], count[3];
+        getDomainOfRank(r, start, count);
+        counts[r] = count[0]*count[1]*count[2];
+        displacements[r] = (int) total;
+        total += counts[r];
+    }
+    vector<double> buffer;
+    if (rank == 0) {
+        buffer.resize(total*valuesPerNode);
+        for (int r = 0; r < size; r++) {
+            int start[3], count[3];
+            getDomainOfRank(r, start, count);
+            size_t l = displacements[r];
+            for (int k = 0; k < count[2]; k++)
+                for (int j = 0; j < count[1]; j++)
+                    for (int i = 0; i < count[0]; i++, l++) {
+                        size_t node = (start[0] + i) + ((size_t) n[0])*((start[1] + j) + ((size_t) n[1])*(start[2] + k));
+                        for (int v = 0; v < valuesPerNode; v++)
+                            buffer[l*valuesPerNode + v] = global[node*valuesPerNode + v];
+                    }
+        }
+    }
+    local.resize(((size_t) counts[rank])*valuesPerNode);
+    MPI_Scatterv(buffer.data(), counts.data(), displacements.data(), nodeType, local.data(), counts[rank], nodeType, 0,
+            MPI_COMM_WORLD);
+    MPI_Type_free(&nodeType);
+#endif
+}
+
 void LBMDecomposition::sumInRankOrder(double* values, int count) const {
     if (size == 1)
         return;

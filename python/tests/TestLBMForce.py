@@ -253,6 +253,70 @@ def test_domain_decomposition_api():
         mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
 
 
+@pytest.mark.parametrize('faces', [False, True])
+def test_local_fields_halo_and_gather(faces):
+    # With one domain the domain of the rank is the whole lattice: getFluidFields() and getFluidState() with gather give
+    # what they give without, and setFluidState() with scatter does what it does without.  With halo the fields come
+    # with a layer one node thick around the lattice, which holds the periodic neighbours for the fields whose halo is
+    # exchanged and NaN for the others and beyond open faces (here along x).  The exchange of the halo is serialized
+    # and cannot be switched in a Context.
+    import numpy as np
+    nx, ny, nz = 8, 6, 5
+    for densityHalo, velocityHalo in ((False, False), (True, False), (False, True), (True, True)):
+        system = mm.System()
+        system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 3, 0), mm.Vec3(0, 0, 2.5))
+        system.addParticle(1.0)
+        force = LBMForce()
+        force.setGridSize(nx, ny, nz)
+        force.setBodyAcceleration(mm.Vec3(0.5, -0.2, 0.1))
+        force.setInitialFluidVelocity(mm.Vec3(0.5, 0.2, -0.3))
+        force.setFluidMomentumRemovalFrequency(0)
+        if faces:
+            force.setFaceBoundary(LBMForce.XMin, LBMForce.Velocity)
+            force.setFaceBoundary(LBMForce.XMax, LBMForce.Density)
+            force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.3, 0.0, 0.0))
+        force.setDensityHaloExchange(densityHalo)
+        force.setVelocityHaloExchange(velocityHalo)
+        copy = LBMForce.cast(mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(force)))
+        assert (copy.getDensityHaloExchange(), copy.getVelocityHaloExchange()) == (densityHalo, velocityHalo)
+        system.addForce(force)
+        integrator = mm.VerletIntegrator(0.01)
+        context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+        context.setPositions([mm.Vec3(0.1, 0.7, 0.3)])
+        integrator.step(5)
+        assert force.getLocalDomain(context) == ((0, 0, 0), (nx, ny, nz))
+        state = np.array(force.getFluidState(context))
+        assert np.array_equal(np.array(force.getFluidState(context, gather=True)), state)
+        force.setFluidState(context, state + 1e-4*np.cos(np.arange(len(state))), scatter=True)
+        assert np.array_equal(np.array(force.getFluidState(context)), state + 1e-4*np.cos(np.arange(len(state))))
+        density, velocity = force.getFluidFields(context)
+        density = np.array(density.value_in_unit(unit.dalton/unit.nanometer**3))
+        velocity = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))
+        gathered = force.getFluidFields(context, gather=True)
+        assert np.array_equal(np.array(gathered[0].value_in_unit(unit.dalton/unit.nanometer**3)), density)
+        density3 = np.pad(density.reshape(nz, ny, nx), 1, mode='wrap')
+        velocity3 = np.pad(velocity.reshape(nz, ny, nx, 3), ((1, 1), (1, 1), (1, 1), (0, 0)), mode='wrap')
+        halo = np.ones((nz + 2, ny + 2, nx + 2), dtype=bool)
+        halo[1:-1, 1:-1, 1:-1] = False
+        if faces:
+            density3[:, :, [0, -1]] = np.nan
+            velocity3[:, :, [0, -1]] = np.nan
+        if not densityHalo:
+            density3[halo] = np.nan
+        if not velocityHalo:
+            velocity3[halo] = np.nan
+        haloDensity, haloVelocity = force.getFluidFields(context, halo=True)
+        haloDensity = np.array(haloDensity.value_in_unit(unit.dalton/unit.nanometer**3)).reshape(nz + 2, ny + 2, nx + 2)
+        haloVelocity = np.array(haloVelocity.value_in_unit(unit.nanometer/unit.picosecond)).reshape(nz + 2, ny + 2, nx + 2, 3)
+        assert np.array_equal(haloDensity, density3, equal_nan=True)
+        assert np.array_equal(haloVelocity, velocity3, equal_nan=True)
+        with pytest.raises(Exception):
+            force.getFluidFields(context, gather=True, halo=True)
+        force.setDensityHaloExchange(not densityHalo)
+        with pytest.raises(Exception, match='halo'):
+            force.updateParametersInContext(context)
+
+
 def test_input_units_are_checked():
     # A Quantity is converted to the unit of the setter; one whose unit does not convert is an error instead of a
     # wrong number (OpenMM would read 1 g/cm^3 as 1e-21 Da/nm^3).

@@ -12,6 +12,7 @@
 
 #include "LBMForce.h"
 #include "LBMKernels.h"
+#include "internal/LBMDecomposition.h"
 #include "openmm/internal/ForceImpl.h"
 #include "openmm/Kernel.h"
 #include <map>
@@ -45,9 +46,13 @@ public:
     }
     std::vector<std::string> getKernelNames();
     void updateParametersInContext(OpenMM::ContextImpl& context);
-    void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity);
-    void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state);
-    void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state);
+    /** The fields and the state of the domain of this rank, or with gather of the whole lattice on rank 0 (see
+        LBMForce::getFluidFields()); the kernels give them for the whole lattice. */
+    void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity,
+            bool gather, bool halo);
+    void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state, bool gather);
+    void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state, bool scatter);
+    void getLocalDomain(int start[3], int count[3]) const;
     void createCheckpoint(OpenMM::ContextImpl& context, std::ostream& stream);
     void loadCheckpoint(OpenMM::ContextImpl& context, std::istream& stream);
     double getFluidMachNumber(OpenMM::ContextImpl& context);
@@ -62,6 +67,7 @@ private:
     const LBMForce& owner;
     OpenMM::Kernel kernel;
     LBMLatticeParameters lattice;
+    LBMDecomposition decomposition;
 };
 
 } // namespace LBMPlugin

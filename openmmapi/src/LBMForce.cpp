@@ -19,7 +19,7 @@ using namespace OpenMM;
 using namespace std;
 
 LBMForce::LBMForce() : nx(0), ny(0), nz(0), randomNumberSeed(0), momentumRemovalFrequency(1), machCheckFrequency(100),
-        particleCopiesCheck(true), density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0), machNumberLimit(0.3),
+        particleCopiesCheck(true), densityHaloExchange(false), velocityHaloExchange(false), density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0), machNumberLimit(0.3),
         couplingScheme(EulerMaruyama), dragScheme(Explicit), wallScheme(BounceBack), fluidFluctuations(false), bodyAcceleration(0, 0, 0),
         initialVelocity(0, 0, 0) {
     for (int face = 0; face < 6; face++) {
@@ -152,6 +152,22 @@ void LBMForce::setParticleCopiesCheck(bool check) {
     particleCopiesCheck = check;
 }
 
+bool LBMForce::getDensityHaloExchange() const {
+    return densityHaloExchange;
+}
+
+void LBMForce::setDensityHaloExchange(bool exchange) {
+    densityHaloExchange = exchange;
+}
+
+bool LBMForce::getVelocityHaloExchange() const {
+    return velocityHaloExchange;
+}
+
+void LBMForce::setVelocityHaloExchange(bool exchange) {
+    velocityHaloExchange = exchange;
+}
+
 double LBMForce::getFluidDensity() const {
     return density;
 }
@@ -255,16 +271,27 @@ void LBMForce::setParticle(int index, int particle) {
     particles[index] = particle;
 }
 
-void LBMForce::getFluidFields(Context& context, vector<double>& density, vector<Vec3>& velocity) const {
-    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).getFluidFields(getContextImpl(context), density, velocity);
+void LBMForce::getLocalDomain(const Context& context, int& i0, int& j0, int& k0, int& ni, int& nj, int& nk) const {
+    int start[3], count[3];
+    dynamic_cast<const LBMForceImpl&>(getImplInContext(context)).getLocalDomain(start, count);
+    i0 = start[0];
+    j0 = start[1];
+    k0 = start[2];
+    ni = count[0];
+    nj = count[1];
+    nk = count[2];
 }
 
-void LBMForce::getFluidState(Context& context, vector<double>& state) const {
-    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).getFluidState(getContextImpl(context), state);
+void LBMForce::getFluidFields(Context& context, vector<double>& density, vector<Vec3>& velocity, bool gather, bool halo) const {
+    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).getFluidFields(getContextImpl(context), density, velocity, gather, halo);
 }
 
-void LBMForce::setFluidState(Context& context, const vector<double>& state) {
-    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).setFluidState(getContextImpl(context), state);
+void LBMForce::getFluidState(Context& context, vector<double>& state, bool gather) const {
+    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).getFluidState(getContextImpl(context), state, gather);
+}
+
+void LBMForce::setFluidState(Context& context, const vector<double>& state, bool scatter) {
+    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).setFluidState(getContextImpl(context), state, scatter);
 }
 
 void LBMForce::createCheckpoint(Context& context, ostream& stream) const {

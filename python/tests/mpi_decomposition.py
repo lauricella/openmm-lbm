@@ -11,12 +11,14 @@ runs under MPI, so pytest does not collect it:
     mpirun -n 4 python mpi_decomposition.py 2 2 1 [OpenCL]
 
 Every rank runs each case twice in the same process, with one domain (no communication) and with px*py*pz domains,
-and compares the populations of the fluid nodes it owns (block c of an axis of n nodes holds [n c/p, n (c + 1)/p))
-and, with coupled particles at T = 0, the positions and velocities of all the particles.  Without the removal of the
-fluid momentum they must be identical bit for bit; with it they agree to rounding, because the sums of the ranks are
-added in another order.  Then the checks that must stop every rank together: copies of the particles that differ
-between the ranks, an AndersenThermostat, and (with the optional argument OpenCL) rank 0 on the Reference platform
-and the others on OpenCL.  A line with FAILED marks a failure."""
+and compares with the single domain: the state of the fluid nodes of its domain (getFluidState(), getLocalDomain()),
+the state of the whole lattice gathered on rank 0 (gather=True), the density and velocity of its domain with the halo
+(getFluidFields() with halo=True and the exchange of the halo on), those gathered on rank 0 and, with coupled
+particles at T = 0, the positions and velocities of all the particles.  The initial state is set from rank 0
+(scatter=True).  Without the removal of the fluid momentum they must be identical bit for bit; with it they agree to
+rounding, because the sums of the ranks are added in another order.  Then the checks that must stop every rank
+together: copies of the particles that differ between the ranks, an AndersenThermostat, and (with the optional
+argument OpenCL) rank 0 on the Reference platform and the others on OpenCL.  A line with FAILED marks a failure."""
 import hashlib
 import sys
 import numpy as np
@@ -30,16 +32,25 @@ other_platform = sys.argv[4] if len(sys.argv) > 4 else None
 rank, size = openmmlbm.mpiRank(), openmmlbm.mpiSize()
 N = (8, 6, 6)
 
-def owned_mask():
-    p = (px, py, pz)
-    coords = (rank%px, (rank//px)%py, rank//(px*py))
-    mask = np.zeros(N[::-1], dtype=bool)            # [k, j, i]
-    lo = [N[a]*coords[a]//p[a] for a in range(3)]
-    hi = [N[a]*(coords[a] + 1)//p[a] for a in range(3)]
-    mask[lo[2]:hi[2], lo[1]:hi[1], lo[0]:hi[0]] = True
-    return mask.reshape(-1)
+DENSITY, VELOCITY = unit.dalton/unit.nanometer**3, unit.nanometer/unit.picosecond
 
-def run(case, decomposition, steps=60):
+def block(domain, pad=0):
+    # The slices [k, j, i] of the domain of the rank in an array of the lattice, padded by pad nodes on every side.
+    (i0, j0, k0), (ni, nj, nk) = domain
+    return (slice(k0, k0 + nk + 2*pad), slice(j0, j0 + nj + 2*pad), slice(i0, i0 + ni + 2*pad))
+
+def fluid_of_block(solid, domain):
+    mask = np.ones(N[::-1], dtype=bool)
+    mask.reshape(-1)[solid] = False
+    return mask[block(domain)].reshape(-1)
+
+def state_of_block(state, domain):
+    return state.reshape((19,) + N[::-1])[(slice(None),) + block(domain)].reshape(19, -1)
+
+def arrays(fields):
+    return np.array(fields[0].value_in_unit(DENSITY)), np.array(fields[1].value_in_unit(VELOCITY)).reshape(-1, 3)
+
+def run(case, decomposition, steps=60, density_halo=True, velocity_halo=True):
     system = mm.System()
     system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 3, 0), mm.Vec3(0, 0, 3))
     system.addParticle(1.0)
@@ -63,16 +74,51 @@ def run(case, decomposition, steps=60):
         force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.5, 0.1, 0.0))
         force.setFaceDensity(LBMForce.XMax, 605.0)
     force.setDomainDecomposition(*decomposition)
+    force.setDensityHaloExchange(density_halo)
+    force.setVelocityHaloExchange(velocity_halo)
     system.addForce(force)
     integrator = mm.VerletIntegrator(0.01)
     context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
     context.setPositions([mm.Vec3(0.1, 0.7, 0.3)])
-    state = np.array(force.getFluidState(context))
-    state += 1e-3*np.sin(1.3*np.arange(len(state)))
-    force.setFluidState(context, state)
+    # Populations perturbed by up to 1e-3 as a function of the global index: rank 0 gathers the state of the lattice,
+    # changes it and scatters it (with one domain, gather and scatter change nothing).
+    state = np.array(force.getFluidState(context, gather=True))
+    if len(state) > 0:
+        state += 1e-3*np.sin(1.3*np.arange(len(state)))
+    force.setFluidState(context, state if len(state) > 0 else None, scatter=True)
     integrator.step(steps)
-    wall = np.array(force.getWallForce(context).value_in_unit(unit.kilojoule_per_mole/unit.nanometer))
-    return np.array(force.getFluidState(context)).reshape(19, -1), wall, solid
+    return dict(wall=np.array(force.getWallForce(context).value_in_unit(unit.kilojoule_per_mole/unit.nanometer)),
+                solid=solid, domain=force.getLocalDomain(context),
+                state=np.array(force.getFluidState(context)).reshape(19, -1),
+                gathered=np.array(force.getFluidState(context, gather=True)),
+                fields=arrays(force.getFluidFields(context, halo=True)),
+                gathered_fields=arrays(force.getFluidFields(context, gather=True)))
+
+def compare_halo(single, split, case, density_halo=True, velocity_halo=True):
+    # The fields of the domain with the halo, against those of one domain padded periodically, with NaN beyond the open
+    # faces and for the fields whose halo is not exchanged.
+    nx, ny, nz = N
+    density, velocity = single['gathered_fields']
+    density = np.pad(density.reshape(nz, ny, nx), 1, mode='wrap')
+    velocity = np.pad(velocity.reshape(nz, ny, nx, 3), ((1, 1), (1, 1), (1, 1), (0, 0)), mode='wrap')
+    if case == 'faces':
+        density[:, :, [0, -1]] = np.nan
+        velocity[:, :, [0, -1]] = np.nan
+    expected_density = density[block(split['domain'], 1)].copy()
+    expected_velocity = velocity[block(split['domain'], 1)].copy()
+    halo = np.ones(expected_density.shape, dtype=bool)
+    halo[1:-1, 1:-1, 1:-1] = False
+    if not density_halo:
+        expected_density[halo] = np.nan
+    if not velocity_halo:
+        expected_velocity[halo] = np.nan
+    got_density = split['fields'][0].reshape(expected_density.shape)
+    got_velocity = split['fields'][1].reshape(expected_velocity.shape)
+    if not (np.array_equal(np.isnan(got_density), np.isnan(expected_density)) and
+            np.array_equal(np.isnan(got_velocity), np.isnan(expected_velocity))):
+        return np.inf
+    return max(np.nan_to_num(np.abs(got_density - expected_density)).max()/602.214,
+               np.nan_to_num(np.abs(got_velocity - expected_velocity)).max())
 
 # Coupled particles of 50 Da: near the borders of the blocks, sharing a node (0 and 6), crossing the periodic
 # boundaries (2) and moving into the wall z = 0 (0 and 4).  A constant field and a soft pair force act on them, so
@@ -135,7 +181,7 @@ def run_particles(case, decomposition, steps=60, platform='Reference', thermosta
     particles = np.concatenate([state.getPositions(asNumpy=True).value_in_unit(unit.nanometer),
                                 state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)])
     wall = np.array(force.getWallForce(context).value_in_unit(unit.kilojoule_per_mole/unit.nanometer))
-    return np.array(force.getFluidState(context)).reshape(19, -1), wall, solid, particles
+    return np.array(force.getFluidState(context)).reshape(19, -1), wall, solid, particles, force.getLocalDomain(context)
 
 def expect_error(name, text, **options):
     # Every rank must stop with the same error, and none may hang in a communication.
@@ -151,28 +197,39 @@ def expect_error(name, text, **options):
 # another order, so it agrees to the rounding of those.
 PRESSURE_FORCE = 602.214*(0.5/0.01)**2/3*4*3
 
-mask = owned_mask()
-for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal'):
-    single, wall1, solid = run(case, (1, 1, 1))
-    split, wall2, _ = run(case, (px, py, pz))
+def verdict(diff):
+    return 'bitwise identical' if diff == 0 else 'max difference %.1e' % diff
+
+for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal', 'velocityhalo'):
+    halos = dict(density_halo=(case != 'velocityhalo'))
+    single = run('periodic' if case == 'velocityhalo' else case, (1, 1, 1))
+    split = run('periodic' if case == 'velocityhalo' else case, (px, py, pz), **halos)
     # The slots of solid nodes only hold what the fluid nodes pushed into them in the last streaming, on the rank of
     # each fluid node: they are not part of the state of the fluid.
-    fluid = mask.copy()
-    fluid[solid] = False
-    diff = np.abs(split[:, fluid] - single[:, fluid]).max()
-    walldiff = np.abs(wall2 - wall1).max()/max(1.0, np.abs(wall1).max())
-    verdict = 'bitwise identical' if diff == 0 else 'max difference %.1e' % diff
-    ok = (diff == 0 if case != 'removal' else diff < 1e-15) and walldiff < 1e-11
-    verdict += '' if ok else '  FAILED'
-    print('rank %d/%d %s %-12s %s (%d nodes); wall force relative difference %.1e'
-          % (rank, size, (px, py, pz), case, verdict, fluid.sum(), walldiff), flush=True)
+    fluid = fluid_of_block(single['solid'], split['domain'])
+    diff = np.abs(split['state'][:, fluid] - state_of_block(single['state'], split['domain'])[:, fluid]).max()
+    if rank == 0:
+        everywhere = np.ones(np.prod(N), dtype=bool)
+        everywhere[single['solid']] = False
+        gathered = np.abs(split['gathered'].reshape(19, -1)[:, everywhere] - single['state'][:, everywhere]).max()
+        gathered_fields = max(np.abs(split['gathered_fields'][0] - single['gathered_fields'][0]).max()/602.214,
+                              np.abs(split['gathered_fields'][1] - single['gathered_fields'][1]).max())
+    else:
+        gathered = 0 if len(split['gathered']) == 0 else np.inf
+        gathered_fields = 0 if len(split['gathered_fields'][0]) == 0 else np.inf
+    halo = compare_halo(single, split, case, **halos)
+    walldiff = np.abs(split['wall'] - single['wall']).max()/max(1.0, np.abs(single['wall']).max())
+    tolerance = 1e-15 if case == 'removal' else 0
+    ok = max(diff, gathered, gathered_fields, halo) <= tolerance and walldiff < 1e-11
+    print('rank %d/%d %s %-12s state %s (%d nodes), gathered %s; fields with halo %s, gathered %s; wall force relative '
+          'difference %.1e%s' % (rank, size, (px, py, pz), case, verdict(diff), fluid.sum(), verdict(gathered),
+                                 verdict(halo), verdict(gathered_fields), walldiff, '' if ok else '  FAILED'), flush=True)
 
 for case in ('explicit', 'centered', 'faces'):
-    single, wall1, solid, particles1 = run_particles(case, (1, 1, 1))
-    split, wall2, _, particles2 = run_particles(case, (px, py, pz))
-    fluid = mask.copy()
-    fluid[solid] = False
-    diff = np.abs(split[:, fluid] - single[:, fluid]).max()
+    single, wall1, solid, particles1, _ = run_particles(case, (1, 1, 1))
+    split, wall2, _, particles2, domain = run_particles(case, (px, py, pz))
+    fluid = fluid_of_block(solid, domain)
+    diff = np.abs(split[:, fluid] - state_of_block(single, domain)[:, fluid]).max()
     pdiff = np.abs(particles2 - particles1).max()
     absdiff = np.abs(wall2 - wall1).max()
     ok = diff == 0 and pdiff == 0 and absdiff < 1e-12*PRESSURE_FORCE
@@ -186,7 +243,7 @@ for case in ('explicit', 'centered', 'faces'):
 # With the fluctuating fluid the ranks draw different random numbers, so the run differs from that of one domain; the
 # copies of the particles must stay identical (the plugin compares them every 10 steps here, and the hash printed by
 # every rank must be the same).
-_, _, _, particles = run_particles('thermal', (px, py, pz), steps=50)
+_, _, _, particles, _ = run_particles('thermal', (px, py, pz), steps=50)
 print('rank %d/%d %s thermal      runs; hash of the particles %s'
       % (rank, size, (px, py, pz), hashlib.md5(particles.tobytes()).hexdigest()[:16]), flush=True)
 

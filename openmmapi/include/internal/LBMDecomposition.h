@@ -70,6 +70,18 @@ public:
     }
     /** The first node and the number of nodes of this rank along each axis. */
     void getLocalDomain(int start[3], int count[3]) const;
+    /** The same for rank r. */
+    void getDomainOfRank(int r, int start[3], int count[3]) const;
+    /**
+     * Gather on rank 0 the values of the nodes of every rank: local holds valuesPerNode values for each node of this
+     * rank, in the order of the block (i fastest); on rank 0, global receives valuesPerNode values for each node of
+     * the lattice, in the order of the node index i + nx*(j + ny*k).  Collective; global is left empty on the other
+     * ranks.
+     */
+    void gatherBlocks(const std::vector<double>& local, int valuesPerNode, std::vector<double>& global) const;
+    /** The reverse of gatherBlocks(): rank 0 sends to every rank the values of its nodes.  Collective; global is
+        read only on rank 0. */
+    void scatterBlocks(const std::vector<double>& global, int valuesPerNode, std::vector<double>& local) const;
     /** Replace each of the n values by its sum over the ranks, added in rank order (the same on every rank and for
         every run with the same decomposition). */
     void sumInRankOrder(double* values, int n) const;

@@ -38,6 +38,9 @@ public:
     }
     /** With the decomposition, whether the copies of the particles are compared over the ranks. */
     bool particleCopiesCheck;
+    /** Whether the density and the velocity of the nodes around the domain of the rank (the halo) are exchanged at
+        the end of every step (setDensityHaloExchange(), setVelocityHaloExchange()). */
+    bool densityHaloExchange, velocityHaloExchange;
     /** Lattice spacing (nm) and lattice time step (ps). */
     double dx, dt;
     /** Mass density of the fluid at rest (Da/nm^3): the lattice density 1 corresponds to it. */
@@ -129,7 +132,9 @@ public:
      */
     virtual void copyParametersToContext(OpenMM::ContextImpl& context, const LBMLatticeParameters& lattice) = 0;
     /**
-     * Get the density (Da/nm^3) and velocity (nm/ps) of the fluid at every node.
+     * Get the density (Da/nm^3) and velocity (nm/ps) of the fluid at every node.  With the domain decomposition the
+     * vectors cover the whole lattice and hold the values of the nodes of the rank and, for the fields whose halo
+     * is exchanged, of the nodes of its halo; the other nodes hold NaN.
      */
     virtual void getFluidFields(OpenMM::ContextImpl& context, std::vector<double>& density, std::vector<OpenMM::Vec3>& velocity) = 0;
     /**
@@ -142,11 +147,13 @@ public:
      */
     virtual OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context) = 0;
     /**
-     * Get the populations of all nodes, in lattice units.
+     * Get the populations of all nodes, in lattice units.  With the domain decomposition only those of the nodes of
+     * the rank are valid.
      */
     virtual void getFluidState(OpenMM::ContextImpl& context, std::vector<double>& state) = 0;
     /**
-     * Set the populations of all nodes, in lattice units.
+     * Set the populations of all nodes, in lattice units.  With the domain decomposition only those of the nodes of
+     * the rank are used, and the call is collective (it exchanges the halo).
      */
     virtual void setFluidState(OpenMM::ContextImpl& context, const std::vector<double>& state) = 0;
     /**

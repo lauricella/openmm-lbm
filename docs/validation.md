@@ -588,6 +588,18 @@ The force on the walls and the removal differ by rounding because the ranks add 
 slots of the solid nodes are not compared: they hold what the fluid nodes pushed into them, on the rank of each
 fluid node, and are not part of the state of the fluid.
 
+**Fields and state of each domain.** The initial state of these cases is set from rank 0 (`getFluidState()` with
+`gather=True`, perturbed as a function of the global index, then `setFluidState()` with `scatter=True`). After the
+run every rank compares with one domain: the state of its domain (`getFluidState()`, `getLocalDomain()`) with the
+same block of the lattice; on rank 0 the state gathered from all the ranks (`gather=True`) with the whole lattice;
+the density and velocity of its domain with the halo (`getFluidFields()` with `halo=True` and the exchange of both
+fields on) with the fields of one domain extended periodically, NaN beyond the open faces; and on rank 0 the fields
+gathered from all the ranks. A sixth case, periodic, exchanges only the velocity, and the density of the halo must be
+NaN. Over the six decompositions (22 ranks): identical bit for bit in the four cases without the removal of the fluid
+momentum and in the sixth (110 of 110); with the removal the state agrees to $`1.1 \cdot 10^{-19}`$ and the fields to
+$`3.1 \cdot 10^{-17}`$ (density relative to $`\rho_0`$, velocity in nm/ps). With one domain
+`test_local_fields_halo_and_gather` checks the same rules (pytest, with and without open faces).
+
 **Coupled particles.** Seven particles of 50 Da, with a constant field and a soft pair force, at $`T = 0`$: near the
 borders of the blocks, two on the same node, one crossing the periodic boundaries and two moving into the solid
 plane $`k = 0`$, where they are reflected; friction 10 ps⁻¹, 60 steps. Cases: explicit drag with bounce-back walls,

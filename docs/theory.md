@@ -1137,9 +1137,25 @@ domain, nothing changes.
   does, instead of leaving the others waiting.
 - The MD part is not divided: every rank computes all the other forces of the System. This suits coarse-grained
   systems, in which the fluid dominates the cost.
-- For now `getFluidState()` and `getFluidFields()` return the whole lattice on every rank, valid only on the nodes
-  of the rank, and a Context with more than one domain refuses checkpoints; the CUDA, OpenCL and HIP platforms
-  refuse more than one domain.
+- **Fields and state of the fluid.** `getFluidFields()`, `getFluidState()` and `setFluidState()` work on the domain
+  of the rank (`getLocalDomain()`), without communication: the default keeps the data where they are, since gathering
+  them would move the whole lattice to one rank (320 MB of populations for $`128^3`$ nodes, 20 GB for $`512^3`$). The
+  whole lattice is gathered on rank 0, or set from it, only on request (`gather=True`, `scatter=True`, with
+  `MPI_Gatherv` and `MPI_Scatterv`), for tests and small lattices. With one domain the domain is the whole lattice
+  and nothing changes. The kernels give the fields and the state of the whole lattice; `LBMForceImpl` cuts the domain
+  out, so the same code serves every platform.
+- **Halo of the density and the velocity.** Observables that need the neighbours of a node, such as the gradient of
+  the density or the vorticity, need on each rank the fields of the layer one node thick around its domain (the
+  halo, 26 neighbours with edges and corners). Two switches, off by default, exchange them at the end of every step,
+  after the walls and the open faces, and when the state is set: `setDensityHaloExchange()` and
+  `setVelocityHaloExchange()`. Each rank sends to each neighbouring rank the fields of its nodes in the halo of that
+  rank, in index order, computed as for its own nodes, so the copies are identical bit for bit;
+  `getFluidFields(halo=True)` returns them around the domain, without communication. Across periodic boundaries the
+  halo wraps; beyond open faces it does not exist (NaN). The fields between steps are those of the populations at the
+  end of the step, which are also those the next step starts from. With one domain the halo comes from the lattice
+  itself. No observable of the plugin uses the halo yet.
+- For now a Context with more than one domain refuses checkpoints, `LBMVTKReporter` cannot write its fluid, and the
+  CUDA, OpenCL and HIP platforms refuse more than one domain.
 
 ## References
 

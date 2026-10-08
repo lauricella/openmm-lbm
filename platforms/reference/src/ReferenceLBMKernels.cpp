@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <limits>
+#include <set>
 #include <sstream>
 
 using namespace LBMPlugin;
@@ -176,6 +178,52 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
             for (auto& link : receive[r])
                 receiveSlots[r].push_back(link.second*numNodes + link.first);
         }
+
+        // The halo of the rank: the nodes of other ranks among the 26 neighbours of its nodes, across periodic
+        // boundaries but not across open faces.  The rank receives their fields from their owners, and sends to rank r
+        // its nodes that are in the halo of r; both sides list the nodes in index order.
+        haloSendNodes.clear();
+        haloReceiveNodes.clear();
+        haloDensity.clear();
+        haloVelocity.clear();
+        if (lattice.densityHaloExchange || lattice.velocityHaloExchange) {
+            vector<set<int> > haloSend(numRanks), haloReceive(numRanks);
+            for (int node = 0; node < numNodes; node++) {
+                if (!owned[node])
+                    continue;
+                int index[3] = {node%lattice.nx, (node/lattice.nx)%lattice.ny, node/(lattice.nx*lattice.ny)};
+                for (int dz = -1; dz <= 1; dz++)
+                    for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++) {
+                            int d[3] = {dx, dy, dz}, target[3];
+                            bool beyondFace = false;
+                            for (int a = 0; a < 3; a++) {
+                                target[a] = index[a] + d[a];
+                                if (target[a] < 0 || target[a] >= size[a]) {
+                                    beyondFace = beyondFace || lattice.isOpenAxis(a);
+                                    target[a] = (target[a] + size[a])%size[a];
+                                }
+                            }
+                            int t = target[0] + lattice.nx*(target[1] + lattice.ny*target[2]);
+                            if (beyondFace || owned[t])
+                                continue;
+                            int r = decomposition.ownerOfNode(t);
+                            haloSend[r].insert(node);
+                            haloReceive[r].insert(t);
+                        }
+            }
+            haloSendNodes.resize(numRanks);
+            haloReceiveNodes.resize(numRanks);
+            for (int r = 0; r < numRanks; r++) {
+                haloSendNodes[r].assign(haloSend[r].begin(), haloSend[r].end());
+                haloReceiveNodes[r].assign(haloReceive[r].begin(), haloReceive[r].end());
+            }
+            double nan = numeric_limits<double>::quiet_NaN();
+            if (lattice.densityHaloExchange)
+                haloDensity.assign(numNodes, nan);
+            if (lattice.velocityHaloExchange)
+                haloVelocity.assign(3*numNodes, nan);
+        }
     }
 
     // Coupled particles: masses in units of the mass of a cell, m_c = rho0 dx^3.  The coupling force is zero
@@ -203,6 +251,8 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
     }
     OpenMM_SFMT::init_gen_rand((uint32_t) seed, sfmt);
     hasStoredGaussian = false;
+    if (!haloSendNodes.empty())
+        exchangeHalo();
 }
 
 void ReferenceCalcLBMForceKernel::beginStep(ContextImpl& context) {
@@ -280,6 +330,8 @@ void ReferenceCalcLBMForceKernel::advanceFluid(ContextImpl& context) {
     }
     if (!boundaryNodes.empty())
         applyBoundaries();
+    if (!haloSendNodes.empty())
+        exchangeHalo();
     stepForcesCurrent = true;
     stepIndex++;
     if (lattice.machCheckFrequency > 0 && stepIndex%lattice.machCheckFrequency == 0)
@@ -917,28 +969,80 @@ void ReferenceCalcLBMForceKernel::copyParametersToContext(ContextImpl& context, 
     this->lattice = lattice;
 }
 
+void ReferenceCalcLBMForceKernel::nodeFields(int node, double& density, Vec3& velocity) const {
+    // The density and the velocity of the forced fluid, u = (j + F/2)/rho with F = rho*g from the body acceleration,
+    // in lattice units; zero at solid nodes.
+    if (!isFluid.empty() && !isFluid[node]) {
+        density = 0;
+        velocity = Vec3();
+        return;
+    }
+    int numNodes = lattice.getNumNodes();
+    double r = 1.0, jx = 0, jy = 0, jz = 0;            // from the deviations f - w
+    for (int q = 0; q < D3Q19::numVelocities; q++) {
+        double f = populations[q*numNodes+node];
+        r += f;
+        jx += D3Q19::cx[q]*f;
+        jy += D3Q19::cy[q]*f;
+        jz += D3Q19::cz[q]*f;
+    }
+    density = r;
+    velocity = Vec3(jx, jy, jz)*(1.0/r) + lattice.bodyAcceleration*0.5;
+}
+
+void ReferenceCalcLBMForceKernel::exchangeHalo() {
+    // The fields of the nodes of the rank that are in the halo of other ranks go to those ranks, and the fields of the
+    // halo of the rank come from their owners (the lists of initialize()).  Collective.  Each owner computes them with
+    // nodeFields(), as for its own nodes in getFluidFields(), so the copies are identical bit for bit.
+    bool exchangeDensity = !haloDensity.empty(), exchangeVelocity = !haloVelocity.empty();
+    int numRanks = decomposition.getSize();
+    vector<vector<double> > send(numRanks), receive(numRanks);
+    for (int r = 0; r < numRanks; r++) {
+        for (int node : haloSendNodes[r]) {
+            double rho;
+            Vec3 u;
+            nodeFields(node, rho, u);
+            if (exchangeDensity)
+                send[r].push_back(rho);
+            if (exchangeVelocity)
+                for (int a = 0; a < 3; a++)
+                    send[r].push_back(u[a]);
+        }
+        receive[r].resize(((exchangeDensity ? 1 : 0) + (exchangeVelocity ? 3 : 0))*haloReceiveNodes[r].size());
+    }
+    decomposition.exchange(send, receive);
+    for (int r = 0; r < numRanks; r++) {
+        int k = 0;
+        for (int node : haloReceiveNodes[r]) {
+            if (exchangeDensity)
+                haloDensity[node] = receive[r][k++];
+            if (exchangeVelocity)
+                for (int a = 0; a < 3; a++)
+                    haloVelocity[3*node+a] = receive[r][k++];
+        }
+    }
+}
+
 void ReferenceCalcLBMForceKernel::getFluidFields(ContextImpl& context, vector<double>& density, vector<Vec3>& velocity) {
-    // The velocity of the forced fluid is u = (j + F/2)/rho, with F = rho*g from the body acceleration.
+    // With the domain decomposition the nodes of other ranks take the fields of the halo, exchanged at the end of the
+    // last step (NaN if the field is not exchanged or the node is not in the halo).
     int numNodes = lattice.getNumNodes();
     double velocityScale = lattice.getVelocityScale();
+    double nan = numeric_limits<double>::quiet_NaN();
     density.resize(numNodes);
     velocity.resize(numNodes);
     for (int node = 0; node < numNodes; node++) {
-        if (!isFluid.empty() && !isFluid[node]) {
-            density[node] = 0;
-            velocity[node] = Vec3();
+        if (!isOwned(node)) {
+            density[node] = (haloDensity.empty() ? nan : haloDensity[node]*lattice.density);
+            velocity[node] = (haloVelocity.empty() ? Vec3(nan, nan, nan) :
+                    Vec3(haloVelocity[3*node], haloVelocity[3*node+1], haloVelocity[3*node+2])*velocityScale);
             continue;
         }
-        double r = 1.0, jx = 0, jy = 0, jz = 0;            // from the deviations f - w
-        for (int q = 0; q < D3Q19::numVelocities; q++) {
-            double f = populations[q*numNodes+node];
-            r += f;
-            jx += D3Q19::cx[q]*f;
-            jy += D3Q19::cy[q]*f;
-            jz += D3Q19::cz[q]*f;
-        }
+        double r;
+        Vec3 u;
+        nodeFields(node, r, u);
         density[node] = r*lattice.density;
-        velocity[node] = (Vec3(jx, jy, jz)*(1.0/r) + lattice.bodyAcceleration*0.5)*velocityScale;
+        velocity[node] = u*velocityScale;
     }
 }
 
@@ -984,6 +1088,8 @@ void ReferenceCalcLBMForceKernel::setFluidState(ContextImpl& context, const vect
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
     populations = state;
     stepForcesCurrent = false;
+    if (!haloSendNodes.empty())
+        exchangeHalo();
 }
 
 void ReferenceCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& stream) {
