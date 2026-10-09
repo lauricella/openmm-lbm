@@ -774,9 +774,10 @@ of the fluid, and pays where the fluid takes most of a step. Measured with coupl
 
 With $`10^4`$ particles they add 0.7 ms per step with one GPU and with four: the time of OpenMM and of the coupling,
 which every rank spends for all the particles. With $`10^5`$ particles they add 1.1 ms with one GPU but 6.2 ms with
-four, and four GPUs are no faster than one: the coupling forces, computed by the owner of each node, are summed over
-the ranks at every step ($`3 \times 10^5`$ numbers), and the cost of this part is not yet understood (summing the
-array of the device directly with CUDA-aware MPI, instead of through the host, took the same time). It is the second
+four, and four GPUs are no faster than one. What the decomposition adds for the particles is the sum of the coupling
+forces over the ranks at every step ($`3 \times 10^5`$ numbers; each force is computed by the owner of its nearest
+node) and the comparison of their copies every 100 steps; summing the array of the device directly with CUDA-aware
+MPI, instead of through the host, took the same time, so where this time goes is not yet known. It is the second
 optimization to make.
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
