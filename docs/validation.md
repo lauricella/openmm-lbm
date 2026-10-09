@@ -723,62 +723,94 @@ and on CUDA and OpenCL in the three precisions.
 Time per step of the fluid alone (`devtools/benchmark_decomposition.py`: periodic box, body force, one uncoupled
 particle, no removal of the fluid momentum; 200 steps timed after 20), CUDA platform, OpenMM 8.6.1, Open MPI 4.1.6
 with UCX 1.16, one A100 (64 GB) per rank, four per node, NVLink between the GPUs of a node, InfiniBand between nodes
-(one port of UCX, `UCX_NET_DEVICES=mlx5_0:1`). In milliseconds per step; "before" is the exchange of the first
-version (through the host, in double precision, with copies on the host), "host" the exchange through the host in the
-precision of the populations, "device" the exchange from GPU to GPU between the ranks of a node (CUDA-aware MPI) and
-through the host between nodes, the default.
+(one port of UCX, `UCX_NET_DEVICES=mlx5_0:1`, unless stated otherwise). In milliseconds per step; "device" is the
+default exchange, from GPU to GPU between the ranks of a node (CUDA-aware MPI) and through the host between nodes,
+"host" the exchange through the host also within a node (`OPENMM_LBM_DEVICE_MPI=0`).
 
-| Lattice | GPUs | Mixed: before | host | device | Single: before | host | device |
-|---|---|---|---|---|---|---|---|
-| $`128^3`$ | 1 | 0.87 | | | 0.48 | | |
-| $`256 \times 128 \times 128`$ | 2 ($`2 \times 1 \times 1`$) | 1.68 | 1.43 | 1.19 | 1.17 | 0.89 | 0.73 |
-| $`256 \times 256 \times 128`$ | 4 ($`2 \times 2 \times 1`$) | 2.24 | 1.75 | 1.20 | 2.12 | 1.07 | 0.75 |
-| $`512 \times 128 \times 128`$ | 4 ($`4 \times 1 \times 1`$) | 1.72 | 1.45 | 1.19 | 1.17 | 0.87 | 0.73 |
-| $`256^3`$ | 1 | fails | | 7.42 | 4.18 | | 4.18 |
-| $`256^3`$ | 2 ($`2 \times 1 \times 1`$) | 6.76 | 5.92 | 5.14 | 4.96 | 3.70 | 3.30 |
-| $`256^3`$ | 4 ($`2 \times 2 \times 1`$) | 4.59 | 3.42 | 2.50 | 4.90 | 2.02 | 1.58 |
-| $`256^3`$ | 4 ($`4 \times 1 \times 1`$) | 4.84 | 3.63 | 2.78 | 4.91 | 2.44 | 1.89 |
+| Lattice | GPUs (domains) | Mixed: device | host | Single: device | host |
+|---|---|---|---|---|---|
+| $`128^3`$ | 1 | 0.87 | | 0.48 | |
+| $`256 \times 128 \times 128`$ | 2 ($`2 \times 1 \times 1`$) | 1.19 | 1.46 | 0.73 | 0.89 |
+| $`128 \times 128 \times 256`$ | 2 ($`1 \times 1 \times 2`$) | 0.91 | 1.18 | 0.49 | 0.63 |
+| $`256 \times 256 \times 128`$ | 4 ($`2 \times 2 \times 1`$) | 1.20 | 1.69 | 0.75 | 1.02 |
+| $`128 \times 256 \times 256`$ | 4 ($`1 \times 2 \times 2`$) | 0.91 | 1.40 | 0.49 | 0.76 |
+| $`128 \times 128 \times 512`$ | 4 ($`1 \times 1 \times 4`$) | 0.91 | 1.21 | 0.49 | 0.64 |
+| $`256^3`$ | 1 | 7.42 | | 4.18 | |
+| $`256^3`$ | 4 ($`2 \times 2 \times 1`$) | 2.50 | 3.43 | 1.57 | 2.08 |
+| $`256^3`$ | 4 ($`4 \times 1 \times 1`$) | 2.77 | 3.71 | 1.89 | 2.41 |
+| $`256^3`$ | 4 ($`1 \times 2 \times 2`$) | 1.84 | 2.75 | 1.01 | 1.49 |
+| $`256^3`$ | 4 ($`1 \times 1 \times 4`$) | 1.84 | 2.87 | 1.00 | 1.42 |
 
-On two nodes (8 GPUs, mixed precision; single precision in brackets), host and device as above: $`256^3`$ with
-$`2 \times 2 \times 2`$ 2.10 and 1.82 ms (1.43 and 1.17), $`512 \times 256 \times 256`$ with $`2 \times 2 \times 2`$
-4.98 and 3.30 ms (2.28 and 1.95), $`1024 \times 128 \times 128`$ with $`8 \times 1 \times 1`$ 1.50 and 1.43 ms (0.88 and
-0.91). The network is shared with other jobs, and between nodes the times vary from one job to another by about as much
-as these differences: $`512 \times 256 \times 256`$ through the host took 3.7 ms in another job. Sending from GPU to GPU
-also between the nodes (GPUDirect over the one port) took 3.8 ms for $`256^3`$, against 2.1 ms through the host, a
-difference larger than that variation, and was faster only with long interiors that hide the transfer
-($`512 \times 256 \times 256`$, 2.3 ms in that job): so between nodes the default goes through the host. The ports of
-UCX and the transfers between nodes are to be measured again on more nodes.
-A fluctuating fluid adds the same time as with one domain: $`256 \times 256 \times 128`$ on four
-GPUs 1.58 ms in mixed precision and 1.06 ms in single (1.21 and 0.75 ms for $`128^3`$ on one GPU).
+With the blocks divided along y and z, four GPUs of a node run $`128^3`$ nodes per GPU at 96% of the speed of one
+GPU in mixed precision (97% in single precision), and $`256^3`$ 4.0 times faster than one GPU (4.2 times in single
+precision; one GPU runs $`256^3`$ a little slower per node than $`128^3`$). The exchange from GPU to GPU is hidden
+behind the collision of the interior; through the host it is not.
 
-With the exchange from GPU to GPU the time of the transfers no longer grows with the faces: what remains is a cost
-that grows with the nodes of the block. In mixed precision a block takes 0.57 to 0.61 ms per million nodes against
-0.44 ms with one domain, 30% to 40% more, and in single precision 0.38 against 0.25 ms: the kernels of the
-decomposition (the collision of a list of nodes, the indices with the layer of halo nodes) are slower per node than
-those of one domain. So four GPUs of a node run $`128^3`$ per GPU with 73% of the speed of one GPU in mixed precision
-(64% in single precision), and $`256^3`$ 3.0 times faster than one GPU (2.6 times in single precision). Making those
-kernels as fast as those of one domain is the next optimization.
+Dividing x, the axis along which consecutive nodes are consecutive in memory, costs 30% to 90% more (more in single
+precision and with more domains along x). A profile of
+rank 0 (Nsight Systems, block of $`128^3`$ nodes, mixed precision, per step) with $`2 \times 1 \times 1`$ against
+$`1 \times 1 \times 2`$: collision of the frame 88 against 10 µs, of the interior 554 against 473 µs, moments 458
+against 375 µs, packing and unpacking 62 against 14 µs (one domain: collision 482 µs, moments 372 µs). The frame and
+the slots of the faces normal to x are one node per row of the block, scattered in memory; why the interior and the
+moments are slower too is not understood. Two changes did not help and were left out: rows of the block starting a
+segment of 32 bytes (moments 424 µs, collision 670 µs, the same time per step) and the interior collided in the order of
+the block instead of from a list. So the automatic decomposition (a 0 in `setDomainDecomposition()`) puts the most
+domains along z, then y, and x should be divided only when y and z are not enough.
 
-Before, a lattice of $`256^3`$ nodes on one GPU failed in mixed and double precision (the upload of more than 2 GB,
-fixed in this version); in single precision it ran, and it ran with two or more GPUs. Every rank computes all the forces
-of OpenMM on all the particles (the particles are replicated), so a step takes about
-$`T_{\mathrm{LB}}/P + T_{\mathrm{MD}} + T_{\mathrm{comm}}`$ with $`P`$ ranks: the decomposition divides only the time
-of the fluid, and pays where the fluid takes most of a step. Measured with coupled particles (`--particles`, beads of
-100 Da with a soft repulsion, cutoff 1 nm, mixed precision) on $`256^3`$ nodes:
+A fluctuating fluid adds the same time as with one domain: $`256 \times 256 \times 128`$ on four GPUs
+($`2 \times 2 \times 1`$) 1.58 ms in mixed precision and 1.06 ms in single (1.21 and 0.75 ms for $`128^3`$ on one GPU).
 
-| Coupled particles | 1 GPU | 4 GPUs ($`2 \times 2 \times 1`$) |
-|---|---|---|
-| 0 | 7.35 ms | 2.50 ms |
-| $`10^4`$ | 8.08 ms | 3.20 ms |
-| $`10^5`$ | 8.48 ms | 8.67 ms |
+**Several nodes.** Between nodes the populations go through the host. With $`128^3`$ nodes per GPU (weak scaling) and
+$`512^3`$ nodes in all (strong scaling), in mixed precision (single precision in brackets), with blocks divided along
+y and z first (as the automatic decomposition does) and along x as well:
 
-With $`10^4`$ particles they add 0.7 ms per step with one GPU and with four: the time of OpenMM and of the coupling,
-which every rank spends for all the particles. With $`10^5`$ particles they add 1.1 ms with one GPU but 6.2 ms with
-four, and four GPUs are no faster than one. What the decomposition adds for the particles is the sum of the coupling
-forces over the ranks at every step ($`3 \times 10^5`$ numbers; each force is computed by the owner of its nearest
-node) and the comparison of their copies every 100 steps; summing the array of the device directly with CUDA-aware
-MPI, instead of through the host, took the same time, so where this time goes is not yet known. It is the second
-optimization to make.
+| Nodes (GPUs) | $`128^3`$ per GPU, y and z first | x as well | $`512^3`$, y and z first | x as well |
+|---|---|---|---|---|
+| 1 (4) | $`1 \times 2 \times 2`$: 0.90 (0.50) | $`2 \times 2 \times 1`$: 1.21 (0.75) | $`1 \times 2 \times 2`$: 15.5 (9.05) | $`2 \times 2 \times 1`$: 21.6 (14.7) |
+| 2 (8) | $`1 \times 2 \times 4`$: 1.31 (0.78) | $`2 \times 2 \times 2`$: 2.34 (1.27) | $`1 \times 2 \times 4`$: 9.75 (5.38) | $`2 \times 2 \times 2`$: 12.2 (7.76) |
+| 4 (16) | $`1 \times 4 \times 4`$: 1.55 (0.88) | $`4 \times 2 \times 2`$: 2.45 (1.42) | $`1 \times 4 \times 4`$: 5.60 (3.05) | $`4 \times 2 \times 2`$: 7.0 (4.33) |
+| 8 (32) | $`2 \times 4 \times 4`$: 2.38 (1.43) | $`4 \times 4 \times 2`$: 2.64 (1.52) | $`2 \times 4 \times 4`$: 4.04 (2.39) | $`4 \times 4 \times 2`$: 4.25 (2.48) |
+
+The transfers between nodes take longer than the collision of a block of $`128^3`$ nodes, so the time per step grows
+with the nodes until every block has its faces on other nodes. On $`512^3`$ nodes eight nodes are 3.8 times faster
+than one in mixed precision (3.8 in single precision), and 5.3 times faster than one node with x divided. With 32 ranks
+x had to be divided too. The time of $`512^3`$ on four nodes with x divided in mixed precision, 7.0 ms, comes from two
+other jobs (6.97 and 7.02 ms): in the job of this table that run did not end within the 240 s that the script allows
+it, and it printed nothing; it was not seen again. The network is shared with other jobs, and between nodes the times
+vary from one job to another by up to about 30% (two nodes, $`2 \times 2 \times 2`$, $`128^3`$ per GPU: 1.84 ms in
+another job). Two ports of UCX (`UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1`) took 6.55 ms instead of 6.97 ms on four
+nodes and 3.96 ms instead of 4.25 ms on eight ($`512^3`$, mixed precision, $`4 \times 2 \times 2`$ and
+$`4 \times 4 \times 2`$); with all four ports UCX stopped with an error when the ranks connected. Sending from GPU to
+GPU between the nodes too (GPUDirect over one port) took 3.8 ms for $`256^3`$ on two nodes against 2.1 ms through the
+host: between nodes the default goes through the host. At the end of a run on several nodes UCX may print
+`cudaHostUnregister() failed` or `failed to dereg from md[3]=cuda_cpy` on the ranks of the other nodes, after the work
+is done.
+
+**Coupled particles.** Every rank computes all the forces of OpenMM on all the particles (the particles are
+replicated), so a step takes about $`T_{\mathrm{LB}}/P + T_{\mathrm{MD}} + T_{\mathrm{comm}}`$ with $`P`$ ranks: the
+decomposition divides only the time of the fluid, and pays where the fluid takes most of a step. Measured with coupled
+particles (`--particles`, beads of 100 Da at random positions with a soft repulsion, cutoff 1 nm, explicit drag,
+mixed precision), on one node:
+
+| Coupled particles | $`256^3`$: 1 GPU | 4 GPUs ($`1 \times 2 \times 2`$) | $`128^3`$ per GPU: 1 GPU | 4 GPUs ($`1 \times 2 \times 2`$) |
+|---|---|---|---|---|
+| 0 | 7.42 | 1.84 | 0.87 | 0.91 |
+| $`10^4`$ | 8.08 | 2.21 | 1.07 | 1.26 |
+| $`10^5`$ | 8.49 | 3.37 | 1.43 | 2.41 |
+
+$`10^4`$ particles add 0.7 ms per step on $`256^3`$ nodes with one GPU and 0.4 ms with four, $`10^5`$ particles 1.1 and
+1.5 ms: the forces of OpenMM and the coupling, which every rank computes for all the particles, plus the sum of the
+coupling forces over the ranks ($`3 N_p`$ numbers, copied to the host and back). The centred drag takes the same time.
+The sort of the particles by node, which sums the reactions without atomic operations, needs keys spread over their
+values: with one key for all the particles of the other ranks, $`10^5`$ particles took 8.7 ms per step on four GPUs, more
+than on one ([theory](theory.md#8-domain-decomposition-in-development-for-version-040)). On $`512^3`$ nodes (a box of
+256 nm) $`10^5`$ particles add 3.7 ms per step on one node ($`2 \times 2 \times 1`$: 25.3 against 21.6 ms) and 4.3 ms
+on eight nodes ($`4 \times 4 \times 2`$: 8.51 against 4.25 ms): the difference, 0.6 ms, includes the sum of the forces
+over the network; why the same particles cost more in the larger box, already on one node, is not separated.
+Starting the sum without blocking (`MPI_Iallreduce`) after the coupling and waiting for it at the end of the lattice
+step, so that it would run while the fluid advances, gave 2.99 to 3.09 ms instead of 3.37 to 3.56 ms on $`256^3`$ nodes
+with $`10^5`$ particles on one node, but 2.58 instead of 2.41 ms with $`128^3`$ per GPU, and on four nodes ($`512^3`$,
+$`1 \times 4 \times 4`$) 10.3 to 11.1 ms instead of 9.1 to 9.3 ms: it was left out.
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 

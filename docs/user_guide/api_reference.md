@@ -75,7 +75,7 @@ See [the lattice](lattice.md#geometry) for the geometry and the numbering of the
 one per MPI rank, for runs of the same script in several processes (`srun` or `mpirun`). The default, 1, 1, 1, is
 one domain: the whole lattice in one process, without MPI. A 0 lets MPI choose the number of domains along that axis
 (`MPI_Dims_create`), with the most domains along z, then y. On the GPU platforms divide z and y rather than x, along
-which the nodes are consecutive in memory: a block divided along x takes 30% to 50% more time per step
+which the nodes are consecutive in memory: a block divided along x takes 30% to 90% more time per step
 (`docs/validation.md`, Performance of the domain decomposition).
 More than one domain needs the plugin built with MPI (`-DOPENMM_LBM_MPI=ON`, [installation](installation.md)), and
 the product must be the number of MPI ranks; otherwise creating the Context raises an error. It is fixed when the

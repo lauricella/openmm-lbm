@@ -117,7 +117,7 @@ void LBMDecomposition::resolve(int nx, int ny, int nz, const int requested[3], i
     int size = getWorldSize();
     if (procs[0] == 0 || procs[1] == 0 || procs[2] == 0) {
         // MPI_Dims_create puts the most domains on the first axis; they go to z instead, then y.  On the GPUs a block
-        // divided along x, along which the nodes are consecutive in memory, took 30% to 50% more time per step than
+        // divided along x, along which the nodes are consecutive in memory, took 30% to 90% more time per step than
         // one divided along y or z (docs/validation.md).
         int reversed[3] = {procs[2], procs[1], procs[0]};
         MPI_Dims_create(size, 3, reversed);
