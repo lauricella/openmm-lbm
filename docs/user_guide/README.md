@@ -62,8 +62,8 @@ Know these before using the plugin for a study:
    - A Couette flow between two open faces.
    - A flow in a duct driven by a pressure difference.
 8. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
-9. [Running on several GPUs](parallel.md): the lattice divided into domains, one MPI rank per GPU (in development
-   for version 0.4.0): when it pays, building with MPI, a complete script, job scripts for one and several nodes.
+9. [Running on several GPUs](parallel.md): the lattice divided into domains, one MPI rank per GPU: when it pays,
+   building with MPI, a complete script, job scripts for one and several nodes.
 
 ## What works in this version
 
@@ -79,7 +79,7 @@ Know these before using the plugin for a study:
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |
 | Checkpoints of the fluid (`createCheckpoint()`, `saveCheckpointFile()`, `openmmlbm.saveCheckpoint()`, `LBMCheckpointReporter`) | yes | yes |
-| Domain decomposition over MPI ranks ([`setDomainDecomposition()`](parallel.md), in development for version 0.4.0) | yes | yes |
+| Domain decomposition over MPI ranks ([`setDomainDecomposition()`](parallel.md)) | yes | yes |
 | VTK files of the fluid and of the particles for ParaView ([`openmmlbm.LBMVTKReporter`](api_reference.md#openmmlbmlbmvtkreporterprefix-reportinterval-force)) | yes | yes |
 
 Every feature runs on every platform. The random forces of the Reference platform, and the fluctuations of the fluid,

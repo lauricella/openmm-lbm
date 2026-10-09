@@ -3,9 +3,13 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.4.0 (2026-10-09)
 
-### Added (in development for 0.4.0)
+Decomposition of the lattice over MPI ranks, one GPU per rank, on every platform: the fluid is divided among the
+ranks, the particles are replicated on every rank, and the files of checkpoints and of the fluid are written by all
+the ranks together. Without the decomposition the algorithm is that of version 0.3.0; the fixes are listed below.
+
+### Added
 - Decomposition of the lattice over MPI ranks: CMake option `OPENMM_LBM_MPI` (off by default; only the MPI C API,
   in `openmmapi/src/LBMDecomposition.cpp`; the summary of `cmake` ends with `MPI: yes (MPI x.y)` or `MPI: no`),
   `setDomainDecomposition()`/`getDomainDecomposition()` (a 0 lets MPI choose, with the most domains along z, then y,
@@ -72,11 +76,13 @@ versions the API may still change.
   through the host are in their own precision and without copies on the host. `devtools/benchmark_decomposition.py`
   measures the time per step (`docs/validation.md`), also with coupled particles (`--particles`, `--centered`).
 
+- A job of the continuous integration builds with MPI and runs the decomposition on CPUs (Reference and OpenCL, two
+  to eight ranks); the decomposition on GPUs is tested by hand before every release (`CONTRIBUTING.md`).
 - With fluid fluctuations at a temperature above zero, the Context prints $`k_BT`$ in lattice units and the thermal
   Mach number $`\sqrt{3k_BT}`$ when it is created, and warns if $`k_BT`$ exceeds 1/3000, the largest value validated
   (`docs/theory.md`, section 7, Size of the fluctuations).
 
-### Changed (in development for 0.4.0)
+### Changed
 - The preset `fabio-g30` of `examples/cocomo/diffusion.py` (SOD1 in a box of 30 nm, friction 30/ps) is now called
   `sod1-g30`.
 - `LBMVTKReporter` writes the density and the velocity of the fluid in two files, `<prefix>_density_<step>.vti` and
@@ -106,6 +112,15 @@ versions the API may still change.
   particle on a `Density` face.
 
 ### Documentation
+- A new page of the user guide, `docs/user_guide/parallel.md`: when the decomposition pays, building with MPI, a
+  complete script, job scripts for one and several nodes, the choice of the InfiniBand ports. With coupled particles
+  and more than one domain `getState(getEnergy=True)` is a collective call, since the `VerletIntegrator` needs the
+  forces for the kinetic energy: a `StateDataReporter` with the temperature must be on every rank.
+- The documentation reviewed against the code: `docs/theory.md` section 8, `docs/architecture.md`, the API
+  reference, troubleshooting (the errors of the decomposition and of the checkpoint files), `docs/validation.md`
+  (every test file, the command lines of the MPI scripts, the cost of dividing x and of the coupled particles
+  explained); the environment set up on the compute node after the session or the job has started; references to
+  intermediate versions removed.
 - The regularized walls and the open faces are the thread-safe boundary condition of M. Lauricella et al.,
   Phys. Fluids 37, 072111 (2025), appendix (introduced by A. Montessori et al., Phys. Fluids 36, 035171, 2024), a
   non-equilibrium extrapolation of Guo, Zheng and Shi written for the post-collision populations: cited in

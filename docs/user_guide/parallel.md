@@ -1,11 +1,11 @@
 # Running on several GPUs
 
-**In development for version 0.4.0.** A lattice too large or too slow for one GPU can be divided into domains, one
+A lattice too large or too slow for one GPU can be divided into domains, one
 per MPI rank and GPU: every rank advances the fluid of its domain, and the ranks exchange the populations that cross
 the borders at every step. The particles are not divided: every rank builds the same System and integrates all the
 particles, so the decomposition speeds up the fluid only. It pays when the fluid takes most of the time of a step,
 as with coarse-grained molecules in a large box ([when it pays](#when-it-pays)). The method and its limits are in
-[theory](../theory.md#8-domain-decomposition-in-development-for-version-040), the measured speed in
+[theory](../theory.md#8-domain-decomposition-implemented-on-all-platforms), the measured speed in
 [validation](../validation.md#performance-of-the-domain-decomposition-cuda-nvidia-a100), and every method in the
 [API reference](api_reference.md#setdomaindecompositionpx-py-pz-getdomaindecomposition).
 

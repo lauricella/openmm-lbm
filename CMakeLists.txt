@@ -7,7 +7,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.17)
 PROJECT(OpenMMLBM)
 
 # The version number is set here and copied to anywhere it is needed.
-SET(OPENMM_LBM_VERSION 0.3.0 CACHE STRING "The version of openmm-lbm that will be built." FORCE)
+SET(OPENMM_LBM_VERSION 0.4.0 CACHE STRING "The version of openmm-lbm that will be built." FORCE)
 
 # We need to know where OpenMM is installed so we can access the headers and libraries.
 SET(OPENMM_DIR "/usr/local/openmm" CACHE PATH "Where OpenMM is installed")

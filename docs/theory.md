@@ -1125,7 +1125,7 @@ choose).
   the fourth shell on); decay of the thermal shear and sound modes as in the deterministic model; stability near
   $`\tau = 1/2`$ (above); coupled particles with both drags (above).
 
-## 8. Domain decomposition (in development for version 0.4.0)
+## 8. Domain decomposition (implemented on all platforms)
 
 `setDomainDecomposition(px, py, pz)` divides the lattice into $`p_x p_y p_z`$ blocks, one per MPI rank of
 `MPI_COMM_WORLD`, for runs of the same script in several processes. Rank $`r = c_x + p_x(c_y + p_y c_z)`$ owns the

@@ -215,7 +215,7 @@ What each command does:
    Among its messages it prints the version of OpenMM it found, for example
    `-- OpenMM 8.6.1 in /home/<you>/miniforge3/envs/lbm`, says why it leaves out a platform, for example
    `-- HIP was not found on this system: the HIP plugin of openmm-lbm is not built.`, prints what it builds,
-   `-- openmm-lbm 0.3.0: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`, and it ends with
+   `-- openmm-lbm 0.4.0: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`, and it ends with
    `-- Build files have been written to: ...`. A GPU platform is built only if the OpenMM in `OPENMM_DIR` has it (an
    OpenMM compiled from source may lack OpenCL, CUDA or HIP) and the system can compile it. It stops with an error if
    OpenMM is older than 8.3 (the message gives the version found), and warns if it is newer than 8.6, the newest tested
@@ -416,7 +416,7 @@ For each part that it leaves out, `cmake` says why, for example:
 and it ends with the list of what will be built:
 
 ```
--- openmm-lbm 0.3.0: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no
+-- openmm-lbm 0.4.0: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no
 ```
 
 The tests of a platform that is not built are not built, so `ctest` runs fewer tests: 2 (serialization and Reference),
@@ -452,7 +452,7 @@ with `No rule to make target 'PythonInstall'`.
 | `PYTHON_EXECUTABLE`, `SWIG_EXECUTABLE` | the full path of `python` and `swig`, if they are not the first ones in `PATH` |
 | `CMAKE_C_COMPILER`, `CMAKE_CXX_COMPILER` | the compilers, if not the default ones; use those that compiled OpenMM |
 | `LBM_DEBUG` | `ON` adds diagnostics of the fluid (`docs/theory.md`, section 6) |
-| `OPENMM_LBM_MPI` | `ON` builds the decomposition of the lattice over MPI ranks (`setDomainDecomposition()`, in development for version 0.4.0, on every platform); it needs an MPI library (`mpicc` in `PATH`), the same one that runs the program. `OFF` (the default) needs no MPI |
+| `OPENMM_LBM_MPI` | `ON` builds the decomposition of the lattice over MPI ranks (`setDomainDecomposition()`, on every platform); it needs an MPI library (`mpicc` in `PATH`), the same one that runs the program. `OFF` (the default) needs no MPI |
 
 ### Checks on OpenMM
 

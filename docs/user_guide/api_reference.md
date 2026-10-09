@@ -80,7 +80,7 @@ See [the lattice](lattice.md#geometry) for the geometry and the numbering of the
 
 ### `setDomainDecomposition(px, py, pz)`, `getDomainDecomposition()`
 
-**In development for version 0.4.0.** The decomposition of the lattice into $`p_x \times p_y \times p_z`$ domains,
+The decomposition of the lattice into $`p_x \times p_y \times p_z`$ domains,
 one per MPI rank, for runs of the same script in several processes (`srun` or `mpirun`). The default, 1, 1, 1, is
 one domain: the whole lattice in one process, without MPI. A 0 lets MPI choose the number of domains along that axis
 (`MPI_Dims_create`), with the most domains along z, then y. `getDomainDecomposition()` returns the values that were
@@ -94,7 +94,7 @@ A negative value is an error at once. More than one domain, or a 0, needs the pl
 cannot have more domains than nodes; otherwise creating the Context raises an error. The decomposition is fixed when
 the Context is created. Every platform decomposes the fluid, the walls, the open faces and the coupling of the
 particles, each rank on the CUDA, OpenCL and HIP platforms on its own GPU
-([theory](../theory.md#8-domain-decomposition-in-development-for-version-040)). With more than one domain
+([theory](../theory.md#8-domain-decomposition-implemented-on-all-platforms)). With more than one domain
 `createCheckpoint()` and `loadCheckpoint()` raise an error: save and load with `saveCheckpointFile()` and
 `loadCheckpointFile()`, or `openmmlbm.saveCheckpoint()` and `openmmlbm.loadCheckpoint()` ([restart](restart.md)).
 
@@ -163,7 +163,7 @@ print(LBMForce.getMPIRank(), LBMForce.getMPISize())   # 0 1 in one process
 
 ### `setParticleCopiesCheck(check)`, `getParticleCopiesCheck()`
 
-**In development for version 0.4.0.** With more than one domain, whether the copies of the particles are compared over
+With more than one domain, whether the copies of the particles are compared over
 the MPI ranks; `True` by default. A check computes a hash of the positions and velocities of all the particles, about
 7 ns per particle (0.7 ms for $`10^5`$ particles on one core), and compares it over the ranks with one small
 `MPI_Allreduce`; at the default period of 100 steps it costs well under 1 % of a step. Turn it off only to time runs
@@ -172,7 +172,7 @@ domain it does nothing. It is serialized with the force.
 
 ### `setDensityHaloExchange(exchange)`, `setVelocityHaloExchange(exchange)`
 
-**In development for version 0.4.0.** Whether the density, and the velocity, of the halo of each domain is exchanged:
+Whether the density, and the velocity, of the halo of each domain is exchanged:
 the layer one node thick around the domain, edges and corners included, whose nodes belong to the neighbouring ranks.
 When it is on, every rank receives at the end of every step the fields of its halo from their owners, so that
 `getFluidFields(context, halo=True)` returns them, for example to compute gradients on the domain of the rank without
