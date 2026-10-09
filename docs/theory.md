@@ -903,21 +903,21 @@ populations of each fluid node, before streaming, the random part
 with $`r_k`$ fifteen independent normal numbers $`N(0, 1)`$, $`\rho`$ the density of the node, $`\omega = 1/\tau`$
 and $`\mu = k_BT/c_s^2`$ in lattice units. The $`e_k`$ are the polynomials of the orthogonal D3Q19 basis of Lulli et
 al. (reference 18), orthogonal with the weights $`w_q`$,
-$`\sum_q w_q\, e_k(\mathbf c_q)\, e_l(\mathbf c_q) = b_k\,\delta_{kl}`$:
+$`\sum_q w_q\, e_k(\mathbf c_q)\, e_l(\mathbf c_q) = b_k\,\delta_{kl}`$, with $`c_s^2 = 1/3`$:
 
 | $`k`$ | $`e_k(\mathbf c)`$ | $`b_k`$ |
 |---|---|---|
 | 0 | $`1`$ | 1 |
 | 1-3 | $`c_x`$, $`c_y`$, $`c_z`$ | 1/3 |
-| 4-6 | $`c_x^2 - 1/3`$, $`c_y^2 - 1/3`$, $`c_z^2 - 1/3`$ | 2/9 |
+| 4-6 | $`c_x^2 - c_s^2`$, $`c_y^2 - c_s^2`$, $`c_z^2 - c_s^2`$ | 2/9 |
 | 7-9 | $`c_x c_y`$, $`c_x c_z`$, $`c_y c_z`$ | 1/9 |
-| 10-12 | $`c_y\,(c_x^2 - 1/3)`$, $`c_z\,(c_x^2 - 1/3)`$, $`c_x\,(c_y^2 - 1/3)`$ | 2/27 |
-| 13 | $`c_x\,(c_y^2 + 2c_z^2 - 1)/2`$ | 1/18 |
-| 14 | $`c_y\,(c_x^2 + 2c_z^2 - 1)/2`$ | 1/18 |
-| 15 | $`c_z\,(c_x^2 + 2c_y^2 - 1)/2`$ | 1/18 |
-| 16 | $`c_x^2 c_y^2 - c_x^2/3 - c_y^2/3 + c_z^2/6 + 1/18`$ | 7/162 |
-| 17 | $`\tfrac27 c_x^2 c_y^2 + c_x^2 c_z^2 - \tfrac37 c_x^2 + c_y^2/14 - \tfrac27 c_z^2 + 1/14`$ | 5/126 |
-| 18 | $`\tfrac25 c_x^2 c_y^2 + \tfrac25 c_x^2 c_z^2 + c_y^2 c_z^2 - c_x^2/10 - \tfrac25 c_y^2 - \tfrac25 c_z^2 + 1/10`$ | 1/30 |
+| 10-12 | $`c_y\,(c_x^2 - c_s^2)`$, $`c_z\,(c_x^2 - c_s^2)`$, $`c_x\,(c_y^2 - c_s^2)`$ | 2/27 |
+| 13 | $`c_x\,(c_y^2 + 2c_z^2 - 3c_s^2)/2`$ | 1/18 |
+| 14 | $`c_y\,(c_x^2 + 2c_z^2 - 3c_s^2)/2`$ | 1/18 |
+| 15 | $`c_z\,(c_x^2 + 2c_y^2 - 3c_s^2)/2`$ | 1/18 |
+| 16 | $`c_x^2 c_y^2 - c_s^2\,(c_x^2 + c_y^2) + \tfrac12 c_s^2 c_z^2 + \tfrac12 c_s^4`$ | 7/162 |
+| 17 | $`\tfrac27 c_x^2 c_y^2 + c_x^2 c_z^2 - \tfrac97 c_s^2 c_x^2 + \tfrac3{14} c_s^2 c_y^2 - \tfrac67 c_s^2 c_z^2 + \tfrac9{14} c_s^4`$ | 5/126 |
+| 18 | $`\tfrac25 c_x^2 c_y^2 + \tfrac25 c_x^2 c_z^2 + c_y^2 c_z^2 - \tfrac3{10} c_s^2 c_x^2 - \tfrac65 c_s^2\,(c_y^2 + c_z^2) + \tfrac9{10} c_s^4`$ | 1/30 |
 
 The same polynomials, written with the Hermite polynomials of the lattice velocities ($`c_s^2 = 1/3`$; for
 $`a \ne b`$, without sums over repeated indices):
