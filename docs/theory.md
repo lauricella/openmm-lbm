@@ -185,12 +185,11 @@ rest placed on the solid node.
   allowed: the boundary nodes on both sides rebuild the populations that would come from it.
 - The boundary nodes are fluid nodes in everything else: they enter the removal of the fluid momentum, and
   the reaction of a coupled particle whose nearest node is a boundary node acts on the fluid.
-- Up to version 0.2.1 there were no regularized walls; a first version during the development of 0.3.0 used the
-  local regularized boundary condition of Latt [20, 21] (section 5.2 of [20]; "BC3" of Malaspinas [22]), which
-  rebuilds all 19 populations of the boundary node with the velocity of the wall imposed on the node. It put the
-  wall on the boundary nodes, and next to it the fluctuations were 3 to 9 % below equilibrium (momentum normal to
-  the wall 0.910 on the first node): imposing $`\mathbf u = 0`$ on the node removes its momentum fluctuations in
-  every step without returning them. It was replaced by the scheme above.
+- An alternative, tried and left out, is the local regularized boundary condition of Latt [20, 21] (section 5.2 of [20];
+  "BC3" of Malaspinas [22]), which rebuilds all 19 populations of the boundary node with the velocity of the wall
+  imposed on the node. It put the wall on the boundary nodes, and next to it the fluctuations were 3 to 9 % below
+  equilibrium (momentum normal to the wall 0.910 on the first node): imposing $`\mathbf u = 0`$ on the node removes its
+  momentum fluctuations in every step without returning them. The scheme above is used instead.
 
 **Exact Poiseuille flow with regularized walls.** In the channel above, driven by $`g`$, the steady profile of the
 scheme is exactly, in lattice units,
@@ -299,9 +298,9 @@ faces have independent velocities and densities.
   an open face reappears on the opposite one, so keep them away from the open faces.
 - The body acceleration (`setBodyAcceleration()`) acts on the face nodes like on the others, and the velocity of a
   face is the velocity of the fluid $`(\mathbf j + \mathbf F/2)/\rho`$.
-- In a first version during the development of 0.3.0 the faces used the local regularized boundary condition of Latt
-  [20] (all 19 populations of the face node rebuilt, with the velocity or the density imposed on the face node
-  itself). The scheme above replaced it, with the regularized walls.
+- The local regularized boundary condition of Latt [20] (all 19 populations of the face node rebuilt, with the
+  velocity or the density imposed on the face node itself) was tried for the faces too, and left out with the one
+  of the walls.
 - Validation (`docs/validation.md`): a Couette flow between a face at rest and a moving face is linear to
   1e-14; a uniform flow from a Velocity inlet to a Density outlet is steady to rounding; a duct driven by a
   difference of density of 1 % agrees in the middle with the incompressible solution within 0.9 %.
