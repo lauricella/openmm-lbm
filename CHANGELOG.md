@@ -3,6 +3,14 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Documentation
+- `docs/theory.md`, new section 9: the interpolation stencils of the coupling planned for version 0.5.0 (trilinear,
+  three-point and Keys kernels; interpolation of the node velocity and spreading of the reaction with the same
+  weights; conservation of momentum and angular momentum; fluctuation-dissipation balance, exact for the centred drag
+  in the fluctuating fluid; the centred drag as a linear system; predicted self-mobility). Not implemented yet.
+
 ## 0.4.0 (2026-10-09)
 
 Decomposition of the lattice over MPI ranks, one GPU per rank, on every platform: the fluid is divided among the

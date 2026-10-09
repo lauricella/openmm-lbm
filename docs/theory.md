@@ -5,7 +5,8 @@ lattice units, and the conventions every platform must follow. Each section says
 already implemented or still to be implemented. The fluid and the explicit drag reproduce the CUDA
 lattice Boltzmann library of the DragOpenMM project; the centred drag (section 2), the regularized walls and
 the open faces (section 1) and the fluctuating fluid (section 7) are
-extensions of this plugin.
+extensions of this plugin. Section 9 describes the interpolation stencils of the coupling, in development for
+version 0.5.0.
 
 ## 1. Fluid model (implemented on all platforms)
 
@@ -1341,6 +1342,163 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
   arrays of the density, the velocity and the solid nodes from every rank, so they are the same files, byte for byte, as
   with one domain.
 
+## 9. Interpolation stencils (in development for version 0.5.0)
+
+Version 0.5.0 will couple a particle to several nodes around it, as in Ahlrichs and Dünweg [5] and in the immersed
+boundary method [30]. This section gives the model and its derivation. Nothing of it is implemented yet: the coupling
+of sections 2 and 8 uses the nearest node, which will remain the default. The properties stated below were checked
+with linear models of the lattice (the fluid of section 1 linearized about rest, on a periodic lattice, with the
+particles at fixed positions); the measurements with the plugin will replace the predictions.
+
+**Interpolation and spreading.** A particle at $`\mathbf X`$ sees the fluid velocity interpolated from the nodes
+$`\mathbf x_j`$ around it, and the reaction of its drag is spread on the same nodes with the same weights:
+
+```math
+\mathbf u(\mathbf X) = \sum_j \xi_j\,\mathbf u_j,\qquad
+\mathbf G_j = \rho_j\mathbf g - \sum_k \xi_{jk}\,\mathbf F_k,\qquad
+\xi_j = \phi\Bigl(\frac{X - x_j}{\Delta x}\Bigr)\,\phi\Bigl(\frac{Y - y_j}{\Delta x}\Bigr)\,\phi\Bigl(\frac{Z - z_j}{\Delta x}\Bigr),
+```
+
+where $`\mathbf G_j`$ is the force on node $`j`$ and $`\xi_{jk}`$ the weight of node $`j`$ for particle $`k`$. The
+velocity of a node is the one that the drag uses today at the nearest node: $`\mathbf u_j = \mathbf j_j/\rho_j`$ for
+the explicit drag and $`\mathbf u_j = (\mathbf j_j + \mathbf G_j/2)/\rho_j`$ for the centred drag (section 2, Drag
+schemes). The nearest node is the kernel $`\phi(r) = 1`$ for $`-1/2 \le r < 1/2`$ and 0 elsewhere. Three kernels are
+planned, selected with `setInterpolationStencil()`:
+
+| Stencil | Nodes | $`\phi(r)`$, with $`s = \lvert r\rvert`$, and 0 elsewhere | Kernel |
+|---|---|---|---|
+| `Trilinear` | $`2^3`$ | $`1 - s`$ for $`s < 1`$ | cloud in cell [27], used in [5] |
+| `ThreePoint` | $`3^3`$ | $`\bigl(1 + \sqrt{1 - 3s^2}\bigr)/3`$ for $`s \le 1/2`$, $`\bigl(5 - 3s - \sqrt{1 - 3(1 - s)^2}\bigr)/6`$ for $`1/2 < s < 3/2`$ | Roma, Peskin and Berger [28, 30] |
+| `Keys` | $`4^3`$ | $`1 - 5s^2/2 + 3s^3/2`$ for $`s \le 1`$, $`2 - 4s + 5s^2/2 - s^3/2`$ for $`1 < s < 2`$ | cubic convolution with $`a = -1/2`$ [29] |
+
+The same three kernels are the stencils 2, 3 and 4 of the `lb/fluid` fix of LAMMPS [31]; here they are implemented
+from the formulas of the papers. Their properties, along each axis and for every position $`r`$ of the particle
+(checked numerically):
+- The weights sum to one, $`\sum_j \phi(r - j) = 1`$, and their first moment vanishes,
+  $`\sum_j (r - j)\,\phi(r - j) = 0`$: a velocity field linear in space is interpolated exactly, whatever the density
+  of the nodes. The second moment $`\sum_j (r - j)^2\phi(r - j)`$ is 0 to 1/4 for the trilinear kernel, 1/4 to 1/3
+  for the three-point kernel and zero for Keys, which also interpolates quadratic fields exactly.
+- The trilinear kernel and Keys interpolate: $`\phi(0) = 1`$ and $`\phi`$ vanishes at the other integers, so a
+  particle at a node sees that node alone, as with the nearest node. The three-point kernel does not
+  ($`\phi(0) = 2/3`$). Keys has negative weights, for $`1 < s < 2`$.
+- The self weight $`\sum_j \xi_j^2`$, which enters the centred drag and the temperature below, is the product of
+  $`\sum_j \phi(r - j)^2`$ over the three axes. It is 1 for the nearest node, goes from 1 at a node to 1/8 at the
+  centre of a cell for the trilinear kernel and from 1 to 0.263 for Keys, and is 1/8 wherever the particle is for the
+  three-point kernel, whose construction requires $`\sum_j \phi(r - j)^2 = 1/2`$ [28].
+
+**The velocity, not the momentum, is interpolated.** The interpolation weighted with the density,
+$`\sum_j \xi_j\rho_j\mathbf u_j/\sum_j \xi_j\rho_j`$, used by LAMMPS [31], interpolates $`\rho\mathbf u`$. Where the
+density varies it misses a linear velocity field by the second moment of the kernel times
+$`(\partial\rho)(\partial u)/\rho`$, and it is no longer the transpose of the spreading, which the
+fluctuation-dissipation balance below requires.
+
+**Momentum and angular momentum.** The weights sum to one, so the nodes receive $`-\mathbf F_k`$ in total, and the
+total momentum of particles, fluid and walls is conserved exactly, as with the nearest node. The first moment of the
+weights vanishes, so the spread reaction has no torque about the particle,
+$`\sum_j \xi_j\,(\mathbf x_j - \mathbf X)\times(-\mathbf F) = 0`$: the exchange of momentum between a particle and
+the fluid carries no angular momentum. With the nearest node the reaction acts at a node up to
+$`\sqrt3\,\Delta x/2`$ away from the particle.
+
+**Dissipation and fluctuation-dissipation balance.** Because interpolation and spreading use the same weights, the
+power of the reaction on the fluid is $`\sum_j (-\xi_j\mathbf F)\cdot\mathbf u_j = -\mathbf F\cdot\mathbf u(\mathbf X)`$:
+the drag acts on the relative velocity $`\mathbf w = \mathbf v - \mathbf u(\mathbf X)`$ and dissipates
+$`\zeta\lvert\mathbf w\rvert^2`$, with $`\zeta = \gamma m`$. For the velocities $`(\mathbf v, \mathbf u_1, \mathbf u_2,
+\dots)`$ of a particle and its nodes, with the masses $`m`$ and $`\rho_j\Delta x^3`$, the friction is
+$`-\zeta\,b^{\mathsf T} b`$ with $`b = (1, -\xi_1, -\xi_2, \dots)`$ for each Cartesian component, and the random force
+$`\mathbf R`$ on the particle, with $`-\xi_j\mathbf R`$ on the nodes, has the covariance
+$`2\zeta k_BT\, b^{\mathsf T} b/\Delta t`$. This is the fluctuation-dissipation balance of Ahlrichs and Dünweg [5],
+and it holds for every stencil, every density of the nodes and any number of particles, whether their stencils
+overlap or not. In discrete time, in lattice units ($`\Delta t = 1`$, masses in cell masses):
+- For one particle and its nodes alone (without streaming and viscosity, as in section 2, Which velocity has the
+  right temperature), $`\mathbf w`$ relaxes with the rate $`\lambda = \gamma\,(1 + mK)`$, where
+  $`K = \sum_j \xi_j^2/\rho_j`$ is the self weight divided by the density ($`\sum_j \xi_j^2`$ at $`\rho = 1`$): the
+  rate $`\gamma\,(1 + m/m_c)`$ of the nearest node with $`m/m_c`$ replaced by $`mK`$. With the explicit drag this
+  mode has the temperature $`T/(1 - \lambda/2)`$ (checked to rounding), and its bound of stability, $`\lambda < 2`$,
+  is milder than with the nearest node, since $`K \le 1/\rho`$.
+- With the centred drag the update of the particle velocities (half steps) and of the node velocities (before and
+  after the force) is the midpoint rule of the linear friction. For any symmetric positive semidefinite friction
+  matrix $`\Gamma`$ and masses $`M`$, the midpoint rule with this random force maps the canonical distribution of
+  the velocities, Gaussian with covariance $`k_BT M^{-1}`$, onto itself: with
+  $`\Gamma' = M^{-1/2}\Gamma M^{-1/2}`$ and $`h = 1/2`$ the update is
+  $`(1 + h\Gamma')^{-1}(1 - h\Gamma')`$ and the covariance $`k_BT\,(1 + h\Gamma')^{-1}\bigl[(1 - h\Gamma')^2 +
+  4h\Gamma'\bigr](1 + h\Gamma')^{-1} = k_BT`$. This holds for every stencil, density and friction, also when the
+  stencils of several particles overlap, provided the linear system of the centred drag (below) is solved exactly.
+- The collision of the fluctuating fluid (section 7) keeps the same distribution of the node momenta, independent
+  of the other moments, and streaming permutes the populations, so with the centred drag the canonical distribution
+  of fluid and particles is an exact stationary state of the coupled model. Checked in the linearized lattice
+  ($`4^3`$ nodes, one particle at a node, at the centre of a cell and at a generic point, two particles with
+  overlapping stencils, $`\tau`$ = 0.62 to 3.51, $`m/m_c`$ = 1.33 to 13.3): the stationarity condition holds to
+  3e-16 with every stencil, against 2e-3 to 0.2 for the explicit drag. The half-step temperature of the centred
+  drag in the fluctuating fluid therefore stays exact with the stencils.
+- The temperatures of section 2 (fluid without fluctuations) and section 7 (explicit drag in the fluctuating fluid)
+  come from linear response and are expected to hold with $`m/m_c`$ replaced by $`mK`$ and with the self-mobility
+  $`y`$ of the stencil (below), for example
+  $`T_{\mathrm{explicit}}/T = 1 + \gamma\Delta t\, mK/\bigl(2\,(1 + \zeta y_{\mathrm{explicit}})\bigr)`$ in the
+  fluctuating fluid; they will be measured.
+
+**The centred drag with a stencil.** In the notation of section 2 (Solution of the centred drag, lattice units,
+$`h = 1/2`$, $`a = \gamma h`$), with $`\tilde{\mathbf v}_k = \mathbf v_k(t - h) + h\,\mathbf F^{\mathrm c}_k/m_k`$,
+$`\tilde{\mathbf u}_j = (\mathbf j_j + h\rho_j\mathbf g)/\rho_j`$ and
+$`\tilde{\mathbf U}_k = \sum_j \xi_{jk}\tilde{\mathbf u}_j`$, the drag of particle $`k`$ sees
+$`\mathbf v_k(t) = \tilde{\mathbf v}_k + h\,\mathbf F_k/m_k`$ and the nodes
+$`\mathbf u_j(t) = \tilde{\mathbf u}_j - h\sum_l \xi_{jl}\mathbf F_l/\rho_j`$, so
+
+```math
+(1 + a)\,\mathbf F_k + a\, m_k \sum_l K_{kl}\,\mathbf F_l = -\gamma m_k\,(\tilde{\mathbf v}_k - \tilde{\mathbf U}_k) + \mathbf R_k,
+\qquad K_{kl} = \sum_j \frac{\xi_{jk}\,\xi_{jl}}{\rho_j}.
+```
+
+- Divided by $`m_k`$, row by row, the matrix is $`(1 + a)/m_k`$ on the diagonal plus $`a K`$, and $`K`$ is positive
+  semidefinite (a sum of products of the weights over the nodes): the system is symmetric positive definite and has
+  one solution for every friction and time step, the same matrix for the three Cartesian components.
+- An isolated particle has
+  $`\mathbf F_k = \bigl[-\gamma m_k\,(\tilde{\mathbf v}_k - \tilde{\mathbf U}_k) + \mathbf R_k\bigr]/(1 + a + a\,m_k K_{kk})`$:
+  its reaction enters the interpolated velocity with the self weight $`K_{kk}`$, which replaces the $`1/m_c`$ of the
+  nearest node.
+- With the nearest node $`K_{kl} = 1/\rho_c`$ for the particles of the same node and 0 otherwise, and the solution is
+  the closed form of section 2 (checked to rounding).
+- Particles whose stencils share nodes are coupled through $`K_{kl}`$ and are solved together.
+
+**Self-mobility (prediction).** The calculation of section 2 (Self-mobility and relaxation time: linearized
+collision, unit force on a periodic lattice of $`16^3`$ nodes) gives, with the force spread by the stencil and the
+velocity interpolated by it, $`y_{\mathrm{centred}}\,\eta\,\Delta x`$ below. The explicit drag misses half of the
+reaction of the step, $`y_{\mathrm{explicit}} = y_{\mathrm{centred}} - K(\tau - 1/2)/6`$ in units of
+$`1/(\eta\,\Delta x)`$ (section 2, with the self weight); the values for the nearest node are those measured in
+section 2 within 0.002.
+
+| Stencil | Position in the cell | $`\sum_j \xi_j^2`$ | centred, $`\tau`$ = 0.62 / 1.1 / 3.51 | explicit, $`\tau`$ = 0.62 / 1.1 / 3.51 |
+|---|---|---|---|---|
+| nearest node | any | 1 | 0.0815 / 0.1443 / 0.3591 | 0.0615 / 0.0443 / -0.1426 |
+| `Trilinear` | node | 1 | 0.0815 / 0.1443 / 0.3591 | 0.0615 / 0.0443 / -0.1426 |
+| `Trilinear` | centre | 0.125 | 0.0387 / 0.0470 / 0.0786 | 0.0362 / 0.0345 / 0.0159 |
+| `Trilinear` | (0.25, 0.1, 0.4) | 0.267 | 0.0480 / 0.0654 / 0.1279 | 0.0427 / 0.0387 / -0.0058 |
+| `ThreePoint` | node | 0.125 | 0.0362 / 0.0445 / 0.0754 | 0.0337 / 0.0320 / 0.0127 |
+| `ThreePoint` | centre | 0.125 | 0.0387 / 0.0470 / 0.0786 | 0.0362 / 0.0345 / 0.0159 |
+| `ThreePoint` | (0.25, 0.1, 0.4) | 0.125 | 0.0372 / 0.0455 / 0.0766 | 0.0347 / 0.0330 / 0.0139 |
+| `Keys` | node | 1 | 0.0815 / 0.1443 / 0.3591 | 0.0615 / 0.0443 / -0.1426 |
+| `Keys` | centre | 0.263 | 0.0543 / 0.0715 / 0.1346 | 0.0490 / 0.0452 / 0.0027 |
+| `Keys` | (0.25, 0.1, 0.4) | 0.521 | 0.0647 / 0.0975 / 0.2126 | 0.0543 / 0.0454 / -0.0490 |
+
+- With the trilinear kernel and Keys the mobility depends on where the particle is in the cell: at a node they give
+  the nearest node, and between a node and the centre of a cell the centred value changes by a factor 2.1 at
+  $`\tau = 0.62`$ and 4.6 at $`\tau = 3.51`$ with the trilinear kernel, 1.5 and 2.7 with Keys.
+- With the three-point kernel it depends little on the position (within 7%), and the centred value grows by a factor
+  2.0 to 2.1 between $`\tau`$ = 0.62 and 3.51, against 4.4 for the nearest node. The growth comes from the term
+  $`K(\tau - 1/2)/6`$ of the centred drag: without it, with the explicit drag, $`y`$ decreases from 0.034-0.036 to
+  0.013-0.016 and stays positive. The stencil reduces the dependence of the self-mobility on $`\tau`$ (section 2) but does not
+  remove it.
+- For two particles the same calculation (lattice of $`32^3`$ nodes, approximately corrected for the periodic
+  images) gives at
+  six nodes of distance the same mutual mobility for every stencil and the nearest node within 5%, and within 5% of
+  the Oseen tensor for $`\tau \le 1.1`$; the stencils change the near field, where the nearest node gives a mobility
+  that jumps from cell to cell.
+
+**Domain decomposition** (section 8). The rank that owns the nearest node of a particle will compute its coupling, as
+now. From the nearest node the stencil reaches one node in each direction with the trilinear and three-point kernels
+and two with Keys, so the velocity halo needs one or two layers, and the reactions spread on halo nodes go to the
+ranks that own them, as the populations streamed across the borders. How a stencil that covers solid nodes or lies
+across an open face is treated will be defined with the implementation.
+
 ## References
 
 1. J. Latt and B. Chopard, Math. Comput. Simul. 72, 165 (2006): regularized collision.
@@ -1390,3 +1548,12 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
     simulations.
 26. Z. Guo, C. Zheng and B. Shi, Chin. Phys. 11, 366 (2002): non-equilibrium extrapolation method for velocity
     and pressure boundary conditions in the lattice Boltzmann method.
+27. C. K. Birdsall and D. Fuss, J. Comput. Phys. 3, 494 (1969), doi:10.1016/0021-9991(69)90058-8: clouds-in-clouds,
+    clouds-in-cells physics for many-body plasma simulation (cloud-in-cell weighting).
+28. A. M. Roma, C. S. Peskin and M. J. Berger, J. Comput. Phys. 153, 509 (1999), doi:10.1006/jcph.1999.6293: an
+    adaptive version of the immersed boundary method (three-point kernel).
+29. R. G. Keys, IEEE Trans. Acoust. Speech Signal Process. 29, 1153 (1981), doi:10.1109/TASSP.1981.1163711: cubic
+    convolution interpolation for digital image processing.
+30. C. S. Peskin, Acta Numer. 11, 479 (2002), doi:10.1017/S0962492902000077: the immersed boundary method.
+31. C. Denniston, N. Afrasiabian, M. G. Cole-André, F. E. Mackay, S. T. T. Ollila and T. Whitehead, Comput. Phys.
+    Commun. 275, 108318 (2022), doi:10.1016/j.cpc.2022.108318: LAMMPS lb/fluid fix version 2.
