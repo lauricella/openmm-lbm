@@ -20,7 +20,7 @@ using namespace std;
 
 LBMForce::LBMForce() : nx(0), ny(0), nz(0), randomNumberSeed(0), momentumRemovalFrequency(1), machCheckFrequency(100),
         particleCopiesCheck(true), densityHaloExchange(false), velocityHaloExchange(false), density(602.214), viscosity(1.0035), friction(1.0), temperature(300.0), machNumberLimit(0.3),
-        couplingScheme(EulerMaruyama), dragScheme(Explicit), wallScheme(BounceBack), fluidFluctuations(false), bodyAcceleration(0, 0, 0),
+        couplingScheme(EulerMaruyama), dragScheme(Explicit), interpolationStencil(NearestNode), wallScheme(BounceBack), fluidFluctuations(false), bodyAcceleration(0, 0, 0),
         initialVelocity(0, 0, 0) {
     for (int face = 0; face < 6; face++) {
         faceBoundary[face] = Periodic;
@@ -80,6 +80,14 @@ LBMForce::DragScheme LBMForce::getDragScheme() const {
 
 void LBMForce::setDragScheme(DragScheme scheme) {
     dragScheme = scheme;
+}
+
+LBMForce::InterpolationStencil LBMForce::getInterpolationStencil() const {
+    return interpolationStencil;
+}
+
+void LBMForce::setInterpolationStencil(InterpolationStencil stencil) {
+    interpolationStencil = stencil;
 }
 
 LBMForce::WallScheme LBMForce::getWallScheme() const {

@@ -24,7 +24,8 @@ namespace LBMPlugin {
  *
  * The fluid is a D3Q19 lattice Boltzmann model with regularized collision and Guo forcing.  Each
  * coupled particle feels a friction force -gamma*m*(v-u) relative to the fluid velocity u at the
- * nearest lattice node, plus a random force that satisfies the fluctuation-dissipation theorem at
+ * nearest lattice node, or interpolated from the nodes around it (setInterpolationStencil()), plus a random force
+ * that satisfies the fluctuation-dissipation theorem at
  * the given temperature (Euler-Maruyama scheme), and the fluid receives the opposite force.  The
  * drag is explicit or centred in time (setDragScheme()).  Drag and noise are part of this force, so
  * the System must be integrated with a VerletIntegrator.  The fluid can also have thermal fluctuations of its own at
@@ -72,6 +73,32 @@ public:
          * the System, and the System must not contain virtual sites.
          */
         Centered = 1
+    };
+    /**
+     * How the velocity of the fluid at a coupled particle is taken from the lattice, and how the reaction of the drag
+     * is given back to it (docs/theory.md, section 9).  With an interpolation stencil the particle sees the velocity
+     * interpolated from the nodes around it, u(X) = sum_j xi_j u_j, and the nodes receive the reaction with the same
+     * weights xi_j, products of a kernel along the three axes.  Solid nodes count as a wall at rest.
+     */
+    enum InterpolationStencil {
+        /**
+         * The nearest lattice node alone.  This is the default.
+         */
+        NearestNode = 0,
+        /**
+         * Trilinear interpolation between the 2x2x2 nodes of the cell that contains the particle (cloud in cell).
+         */
+        Trilinear = 1,
+        /**
+         * The three-point kernel of Roma, Peskin and Berger (1999) on 3x3x3 nodes, whose self weight sum_j xi_j^2 does
+         * not depend on the position of the particle.
+         */
+        ThreePoint = 2,
+        /**
+         * The cubic convolution kernel of Keys (1981), a = -1/2, on 4x4x4 nodes, which interpolates quadratic fields
+         * exactly and has negative weights.
+         */
+        Keys = 3
     };
     /**
      * The boundary condition of the fluid at the solid nodes (docs/theory.md, section 1).
@@ -283,6 +310,17 @@ public:
      * created: updateParametersInContext() cannot change it.
      */
     void setDragScheme(DragScheme scheme);
+    /**
+     * Get the interpolation stencil of the coupling.
+     */
+    InterpolationStencil getInterpolationStencil() const;
+    /**
+     * Set the interpolation stencil of the coupling: NearestNode (the default), Trilinear, ThreePoint or Keys
+     * (docs/theory.md, section 9).  It is fixed when a Context is created: updateParametersInContext() cannot change
+     * it.  In development for version 0.5.0: the stencils other than NearestNode work on the Reference platform with
+     * one domain and periodic faces.
+     */
+    void setInterpolationStencil(InterpolationStencil stencil);
     /**
      * Get whether the fluid has thermal fluctuations of its own.  See setFluidFluctuations().
      */
@@ -609,7 +647,7 @@ public:
      * fluid momentum, the frequency and limit of the Mach number check, the velocities and densities of the
      * faces, and the check of the copies of the particles.  The grid, the fluid density and viscosity, the solid
      * nodes, the wall scheme, the boundary types of the faces, the set of coupled particles, the drag scheme, the
-     * fluid fluctuations, the domain decomposition and the exchange of the halo cannot be changed this way, and an
+     * interpolation stencil, the fluid fluctuations, the domain decomposition and the exchange of the halo cannot be changed this way, and an
      * exception is thrown if they differ.  With fluid fluctuations the new
      * temperature applies to the fluid as well.  The initial fluid velocity and the random
      * number seed are used only when a Context is created.  The fluid itself is not modified.
@@ -631,6 +669,7 @@ private:
     double density, viscosity, friction, temperature, machNumberLimit;
     CouplingScheme couplingScheme;
     DragScheme dragScheme;
+    InterpolationStencil interpolationStencil;
     WallScheme wallScheme;
     BoundaryType faceBoundary[6];
     OpenMM::Vec3 faceVelocity[6];

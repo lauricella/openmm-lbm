@@ -1345,8 +1345,10 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
 ## 9. Interpolation stencils (in development for version 0.5.0)
 
 Version 0.5.0 will couple a particle to several nodes around it, as in Ahlrichs and Dünweg [5] and in the immersed
-boundary method [30]. This section gives the model and its derivation. Nothing of it is implemented yet: the coupling
-of sections 2 and 8 uses the nearest node, which will remain the default. The properties stated below were checked
+boundary method [30]. This section gives the model and its derivation. The explicit drag with the three kernels is
+implemented on the Reference platform, with one domain and periodic faces (`setInterpolationStencil()`); the rest is
+in development. The coupling of sections 2 and 8 uses the nearest node, which remains the default. The properties
+stated below were checked
 with linear models of the lattice (the fluid of section 1 linearized about rest, on a periodic lattice, with the
 particles at fixed positions); the measurements with the plugin will replace the predictions.
 
@@ -1363,7 +1365,7 @@ where $`\mathbf G_j`$ is the force on node $`j`$ and $`\xi_{jk}`$ the weight of 
 velocity of a node is the one that the drag uses today at the nearest node: $`\mathbf u_j = \mathbf j_j/\rho_j`$ for
 the explicit drag and $`\mathbf u_j = (\mathbf j_j + \mathbf G_j/2)/\rho_j`$ for the centred drag (section 2, Drag
 schemes). The nearest node is the kernel $`\phi(r) = 1`$ for $`-1/2 \le r < 1/2`$ and 0 elsewhere. Three kernels are
-planned, selected with `setInterpolationStencil()`:
+selected with `setInterpolationStencil()` (`internal/LBMStencils.h`, the same on every platform):
 
 | Stencil | Nodes | $`\phi(r)`$, with $`s = \lvert r\rvert`$, and 0 elsewhere | Kernel |
 |---|---|---|---|
@@ -1371,7 +1373,7 @@ planned, selected with `setInterpolationStencil()`:
 | `ThreePoint` | $`3^3`$ | $`\bigl(1 + \sqrt{1 - 3s^2}\bigr)/3`$ for $`s \le 1/2`$, $`\bigl(5 - 3s - \sqrt{1 - 3(1 - s)^2}\bigr)/6`$ for $`1/2 < s < 3/2`$ | Roma, Peskin and Berger [28, 30] |
 | `Keys` | $`4^3`$ | $`1 - 5s^2/2 + 3s^3/2`$ for $`s \le 1`$, $`2 - 4s + 5s^2/2 - s^3/2`$ for $`1 < s < 2`$ | cubic convolution with $`a = -1/2`$ [29] |
 
-The same three kernels are the stencils 2, 3 and 4 of the `lb/fluid` fix of LAMMPS [31]; here they will be written
+The same three kernels are the stencils 2, 3 and 4 of the `lb/fluid` fix of LAMMPS [31]; here they are written
 from the formulas of the papers. Their properties, along each axis and for every position $`r`$ of the particle
 (checked numerically):
 - The weights sum to one, $`\sum_j \phi(r - j) = 1`$, and their first moment vanishes,

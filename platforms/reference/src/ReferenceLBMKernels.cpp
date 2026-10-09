@@ -8,6 +8,7 @@
 #include "ReferenceLBMKernels.h"
 #include "internal/D3Q19.h"
 #include "internal/LBMBoundaries.h"
+#include "internal/LBMStencils.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/internal/OSRngSeed.h"
@@ -449,7 +450,7 @@ void ReferenceCalcLBMForceKernel::removeFluidMomentum() {
 }
 
 void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isStep) {
-    // Explicit Euler-Maruyama coupling at the nearest node, in lattice units (time step 1):
+    // Explicit Euler-Maruyama coupling at the nearest node (with a stencil, below), in lattice units (time step 1):
     //   F = -gamma m (v - j/rho) + sqrt(2 gamma m kT) xi,
     // with xi three independent N(0,1) numbers.  v is the velocity of OpenMM's leapfrog, v(t - dt/2), and j is
     // the momentum of the fluid before the force of this step, j(t - dt/2).  In a lattice step (isStep) the
@@ -470,8 +471,32 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
         drawNoise();
     if (isStep)
         fill(reaction.begin(), reaction.end(), 0.0);
+    vector<int> nodes;
+    vector<double> weights;
     for (int i = 0; i < (int) lattice.particles.size(); i++) {
         int particle = lattice.particles[i];
+        if (lattice.interpolationStencil != LBMForce::NearestNode) {
+            // With a stencil (docs/theory.md, section 9) the particle sees u = sum_j xi_j j_j/rho_j, a solid node
+            // being a wall at rest, and node j receives -xi_j F; one domain only, for now.
+            stencilNodes(positions[particle], nodes, weights);
+            Vec3 u;
+            for (int n = 0; n < (int) nodes.size(); n++) {
+                int node = nodes[n];
+                if (rho[node] > 0)
+                    u += Vec3(momentum[3*node], momentum[3*node+1], momentum[3*node+2])*(weights[n]/rho[node]);
+            }
+            Vec3 v = velocities[particle]*(1.0/velocityScale);
+            double m = particleMass[i];
+            Vec3 f = (v-u)*(-gamma*m);
+            if (randomForce)
+                f += noise[i]*sqrt(2.0*gamma*m*kT);
+            particleForces[i] = f*forceScale;
+            if (isStep)
+                for (int n = 0; n < (int) nodes.size(); n++)
+                    for (int k = 0; k < 3; k++)
+                        reaction[3*nodes[n]+k] -= weights[n]*f[k];
+            continue;
+        }
         int node = nearestNode(positions[particle]);
         if (!isOwned(node)) {
             particleForces[i] = Vec3();
@@ -659,6 +684,27 @@ int ReferenceCalcLBMForceKernel::nearestNode(const Vec3& position) const {
         index[k] = ((int) floor(s + 0.5))%size[k];
     }
     return index[0] + lattice.nx*(index[1] + lattice.ny*index[2]);
+}
+
+void ReferenceCalcLBMForceKernel::stencilNodes(const Vec3& position, vector<int>& nodes, vector<double>& weights) const {
+    // The position is wrapped into the box as for nearestNode(), and the weights are products of those of the axes.
+    int size[3] = {lattice.nx, lattice.ny, lattice.nz};
+    int index[3][LBMStencils::maxWidth];
+    double weight[3][LBMStencils::maxWidth];
+    for (int k = 0; k < 3; k++) {
+        double s = position[k]/lattice.dx;
+        s -= floor(s/size[k])*size[k];
+        LBMStencils::axisWeights(lattice.interpolationStencil, s, size[k], index[k], weight[k]);
+    }
+    int w = LBMStencils::width(lattice.interpolationStencil);
+    nodes.clear();
+    weights.clear();
+    for (int c = 0; c < w; c++)
+        for (int b = 0; b < w; b++)
+            for (int a = 0; a < w; a++) {
+                nodes.push_back(index[0][a] + lattice.nx*(index[1][b] + lattice.ny*index[2][c]));
+                weights.push_back(weight[0][a]*weight[1][b]*weight[2][c]);
+            }
 }
 
 Vec3 ReferenceCalcLBMForceKernel::wallNormal(const Vec3& position) const {

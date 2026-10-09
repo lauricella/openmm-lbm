@@ -217,6 +217,12 @@ public:
         Explicit = 0,
         Centered = 1
     };
+    enum InterpolationStencil {
+        NearestNode = 0,
+        Trilinear = 1,
+        ThreePoint = 2,
+        Keys = 3
+    };
     enum WallScheme {
         BounceBack = 0,
         Regularized = 1
@@ -277,6 +283,8 @@ public:
     void setCouplingScheme(CouplingScheme scheme);
     DragScheme getDragScheme() const;
     void setDragScheme(DragScheme scheme);
+    InterpolationStencil getInterpolationStencil() const;
+    void setInterpolationStencil(InterpolationStencil stencil);
     bool getFluidFluctuations() const;
     void setFluidFluctuations(bool fluctuations);
     WallScheme getWallScheme() const;

@@ -45,6 +45,7 @@ return `Quantity` objects where the quantity has units.
 | `addParticle(particle)`, `setParticle(index, particle)` | particle indices | none | no |
 | `setCouplingScheme(scheme)` | | `EulerMaruyama` | yes |
 | `setDragScheme(scheme)` | | `Explicit` | no |
+| `setInterpolationStencil(stencil)` | | `NearestNode` | no |
 | `setFluidFluctuations(fluctuations)` | | `False` | no |
 | `setFriction(friction)` | 1/ps | 1.0 | yes |
 | `setTemperature(temperature)` | K | 300 | yes |
@@ -485,6 +486,25 @@ checkpoint can only be loaded in a Context with the same drag scheme.
 force.setDragScheme(LBMForce.Centered)      # then system.addForce(force), after all the other forces
 ```
 
+### `setInterpolationStencil(stencil)`, `getInterpolationStencil()`
+
+In development for version 0.5.0. How the drag takes the fluid velocity at a coupled particle
+([theory.md](../theory.md#9-interpolation-stencils-in-development-for-version-050)):
+- `LBMForce.NearestNode`, the default: the velocity of the nearest node, which receives the whole reaction.
+- `LBMForce.Trilinear` ($`2^3`$ nodes), `LBMForce.ThreePoint` ($`3^3`$ nodes, the kernel of Roma, Peskin and
+  Berger) and `LBMForce.Keys` ($`4^3`$ nodes, cubic convolution): the velocity interpolated from the nodes around
+  the particle; the nodes receive the reaction with the same weights, so the momentum is conserved exactly. A solid
+  node of the stencil counts as a wall at rest: zero velocity, and its share of the reaction goes to the wall.
+
+For now the stencils other than `NearestNode` work only on the Reference platform, with the explicit drag, one
+domain and periodic faces; the other combinations stop with an error. The stencil is fixed when the Context is
+created and saved with the force by `XmlSerializer`; a checkpoint can only be loaded in a Context with the same
+stencil.
+
+```python
+force.setInterpolationStencil(LBMForce.ThreePoint)
+```
+
 ### `openmmlbm.LBMTemperatureReporter(file, reportInterval, force)`
 
 A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps, the step, the time (ps) and the
@@ -720,12 +740,14 @@ bytes b'LBMCKPT1'
 ```
 
 Errors: a checkpoint written on another platform, with another precision, for a different grid size,
-number of coupled particles, drag scheme, wall scheme, types of the faces (`setFaceBoundary()`) or switch of the
+number of coupled particles, drag scheme, interpolation stencil, wall scheme, types of the faces
+(`setFaceBoundary()`) or switch of the
 fluid fluctuations, by a newer version of the plugin, or data that are not a
 checkpoint or are damaged or truncated, make `loadCheckpoint()` raise an exception
 ([troubleshooting](troubleshooting.md)). A checkpoint of version 0.1.0 has no drag scheme in its header,
 and loads only in a Context with the explicit drag; checkpoints of versions 0.1 and 0.2 load only in a Context
-without fluid fluctuations, with the `BounceBack` wall scheme and with periodic faces. The velocities and densities
+without fluid fluctuations, with the `BounceBack` wall scheme and with periodic faces; checkpoints of versions 0.1
+to 0.4 load only in a Context with the nearest node. The velocities and densities
 of the faces are not checked: those of the new Context are used. The checkpoints work with every combination of
 fluid fluctuations, wall scheme and open faces, on every platform: the restarted run is identical, bit for bit,
 to the uninterrupted one, and the time filter of the `Density` faces needs nothing more, since it reads the
@@ -853,13 +875,15 @@ that the integrator evaluates; by default the integrator evaluates all groups.
 
 `openmm.XmlSerializer` saves and loads an `LBMForce`, alone or as part of a System, with all its
 parameters: grid, fluid properties, friction, temperature, random number seed, body acceleration, initial
-velocity, frequencies, Mach limit, coupling and drag schemes, fluid fluctuations, wall scheme, solid nodes, the
+velocity, frequencies, Mach limit, coupling and drag schemes, interpolation stencil, fluid fluctuations, wall
+scheme, solid nodes, the
 type, velocity and density of each face, coupled particles, domain decomposition, check of the copies of the
 particles, exchange of the halo of the density and of the velocity, force group and name. The fluid
-of a Context is not part of it. The XML has version 8. Older XML still loads: versions 1 to 3 (written by version
+of a Context is not part of it. The XML has version 9. Older XML still loads: versions 1 to 3 (written by version
 0.1.0) with the explicit drag, versions 1 to 4 (versions 0.1 and 0.2 of the plugin) without fluid fluctuations,
 versions 1 to 5 with the `BounceBack` wall scheme, versions 1 to 6 with periodic faces and versions 1 to 7 (version
-0.3 of the plugin) with one domain and the check of the copies on. Older versions of the plugin cannot
+0.3 of the plugin) with one domain and the check of the copies on, and versions 1 to 8 (version 0.4) with the
+nearest node. Older versions of the plugin cannot
 read newer XML. Import `openmmlbm` before
 deserializing. A force deserialized on its own is returned as a generic `openmm.Force`; obtain the
 `LBMForce` with `LBMForce.cast()` (see the [serialization example](examples.md#serialization)).

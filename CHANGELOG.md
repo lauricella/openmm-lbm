@@ -5,6 +5,17 @@ versions the API may still change.
 
 ## Unreleased
 
+### Added (in development)
+- Interpolation stencils of the coupling, `setInterpolationStencil()`/`getInterpolationStencil()` with
+  `NearestNode` (the default, unchanged bit for bit), `Trilinear`, `ThreePoint` and `Keys` (`docs/theory.md`,
+  section 9): for now the explicit drag on the Reference platform, with one domain and periodic faces; the other
+  combinations stop with an error. Solid nodes of a stencil count as a wall at rest. Serialization version 9 and
+  checkpoint version 6 with the stencil (older ones load with the nearest node).
+
+### Fixed
+- Tests: a range-based `for` loop read the velocities of a temporary `State` already destroyed
+  (`testRepeatedForceEvaluation`), which made its tolerance depend on undefined memory.
+
 ### Documentation
 - `docs/theory.md`, new section 9: the interpolation stencils of the coupling planned for version 0.5.0 (trilinear,
   three-point and Keys kernels; interpolation of the node velocity and spreading of the reaction with the same

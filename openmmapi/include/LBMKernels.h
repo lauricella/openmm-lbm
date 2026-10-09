@@ -54,6 +54,8 @@ public:
     double friction, kT;
     /** Time discretization of the drag, fixed when the Context is created. */
     LBMForce::DragScheme dragScheme;
+    /** Interpolation stencil of the coupling, fixed when the Context is created. */
+    LBMForce::InterpolationStencil interpolationStencil;
     /** True if the fluid has thermal fluctuations, fixed when the Context is created, and their thermal energy kT
         (kJ/mol): the temperature of the force with fluctuations, also with the NVE scheme, and 0 without. */
     bool fluidFluctuations;

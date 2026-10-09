@@ -20,7 +20,7 @@ LBMForceProxy::LBMForceProxy() : SerializationProxy("LBMForce") {
 }
 
 void LBMForceProxy::serialize(const void* object, SerializationNode& node) const {
-    node.setIntProperty("version", 8);
+    node.setIntProperty("version", 9);
     const LBMForce& force = *reinterpret_cast<const LBMForce*>(object);
     node.setIntProperty("forceGroup", force.getForceGroup());
     node.setStringProperty("name", force.getName());
@@ -46,6 +46,7 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
     node.setIntProperty("machCheckFrequency", force.getMachCheckFrequency());
     node.setIntProperty("couplingScheme", force.getCouplingScheme());
     node.setIntProperty("dragScheme", force.getDragScheme());
+    node.setIntProperty("interpolationStencil", force.getInterpolationStencil());
     node.setBoolProperty("fluidFluctuations", force.getFluidFluctuations());
     node.setIntProperty("wallScheme", force.getWallScheme());
     node.setDoubleProperty("machNumberLimit", force.getMachNumberLimit());
@@ -72,7 +73,7 @@ void LBMForceProxy::serialize(const void* object, SerializationNode& node) const
 
 void* LBMForceProxy::deserialize(const SerializationNode& node) const {
     int version = node.getIntProperty("version");
-    if (version < 1 || version > 8)
+    if (version < 1 || version > 9)
         throw OpenMMException("Unsupported version number");
     LBMForce* force = new LBMForce();
     try {
@@ -94,6 +95,9 @@ void* LBMForceProxy::deserialize(const SerializationNode& node) const {
         // Versions 1 to 3 were written before the drag scheme existed, with the explicit drag.
         if (version >= 4)
             force->setDragScheme((LBMForce::DragScheme) node.getIntProperty("dragScheme"));
+        // Versions 1 to 8 were written before the interpolation stencils existed, with the nearest node.
+        if (version >= 9)
+            force->setInterpolationStencil((LBMForce::InterpolationStencil) node.getIntProperty("interpolationStencil"));
         // Versions 1 to 4 were written before the fluid fluctuations existed, without them.
         if (version >= 5)
             force->setFluidFluctuations(node.getBoolProperty("fluidFluctuations"));

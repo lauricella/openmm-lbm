@@ -67,6 +67,9 @@ private:
     void drawNoise();
     void applyReaction();
     int nearestNode(const OpenMM::Vec3& position) const;
+    /** The nodes of the interpolation stencil of a particle at position and their weights (docs/theory.md, section
+        9), x fastest, then y, then z (internal/LBMStencils.h). */
+    void stencilNodes(const OpenMM::Vec3& position, std::vector<int>& nodes, std::vector<double>& weights) const;
     OpenMM::Vec3 wallNormal(const OpenMM::Vec3& position) const;
     double getGaussianRandom();
     void collideAndStream();

@@ -316,7 +316,8 @@ void testRepeatedForceEvaluation(Platform& platform, LBMForce::DragScheme drag=L
     integrator.step(5);
     compressPositions(context);
     double scale = 0;
-    for (Vec3 v : context.getState(State::Velocities).getVelocities())
+    State state = context.getState(State::Velocities);
+    for (Vec3 v : state.getVelocities())
         scale += couplingMass*sqrt(v.dot(v));
     Vec3 p0 = totalMomentum(context, force);
     integrator.step(1);

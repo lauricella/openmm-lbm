@@ -176,6 +176,9 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     if (force.getDragScheme() != LBMForce::Explicit && force.getDragScheme() != LBMForce::Centered)
         throw OpenMMException("LBMForce: unknown drag scheme");
     lattice.dragScheme = force.getDragScheme();
+    if (force.getInterpolationStencil() < LBMForce::NearestNode || force.getInterpolationStencil() > LBMForce::Keys)
+        throw OpenMMException("LBMForce: unknown interpolation stencil");
+    lattice.interpolationStencil = force.getInterpolationStencil();
     // The fluid fluctuates at the temperature of the force also with the NVE scheme, whose particles are then
     // thermalized only through the fluid.
     lattice.fluidFluctuations = force.getFluidFluctuations();
@@ -193,6 +196,21 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
             throw OpenMMException("LBMForce: coupled particles must have a positive mass");
         seen.insert(particle);
         lattice.particles.push_back(particle);
+    }
+
+    // The interpolation stencils are in development for version 0.5.0 (docs/theory.md, section 9): for now with the
+    // explicit drag, one domain and periodic faces.
+
+    if (lattice.interpolationStencil != LBMForce::NearestNode) {
+        if (lattice.dragScheme == LBMForce::Centered)
+            throw OpenMMException("LBMForce: the Centered drag scheme with an interpolation stencil other than "
+                    "NearestNode is not available yet (in development for version 0.5.0)");
+        if (lattice.isDecomposed())
+            throw OpenMMException("LBMForce: the domain decomposition with an interpolation stencil other than "
+                    "NearestNode is not available yet (in development for version 0.5.0)");
+        if (lattice.hasOpenFaces())
+            throw OpenMMException("LBMForce: open faces with an interpolation stencil other than NearestNode are not "
+                    "available yet (in development for version 0.5.0)");
     }
     return lattice;
 }
@@ -362,6 +380,8 @@ void LBMForceImpl::updateParametersInContext(ContextImpl& context) {
             throw OpenMMException("updateParametersInContext: the boundary types of the faces cannot be changed");
     if (updated.dragScheme != lattice.dragScheme)
         throw OpenMMException("updateParametersInContext: the drag scheme cannot be changed");
+    if (updated.interpolationStencil != lattice.interpolationStencil)
+        throw OpenMMException("updateParametersInContext: the interpolation stencil cannot be changed");
     if (updated.fluidFluctuations != lattice.fluidFluctuations)
         throw OpenMMException("updateParametersInContext: the fluid fluctuations cannot be switched on or off");
     lattice = updated;
@@ -455,13 +475,14 @@ void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& sta
 /**
  * A checkpoint starts with a header that identifies it: a tag, the format version, the platform, the grid size,
  * the number of coupled particles, (from version 2) the drag scheme, (from version 3) whether the fluid
- * fluctuates, (from version 4) the wall scheme and (from version 5) the boundary types of the six faces.  The
- * kernel writes the rest.  Version 1 was written before the drag scheme existed, with the explicit drag, versions 1
- * and 2 before the fluid fluctuations, without them, versions 1 to 3 before the wall schemes, with bounce-back, and
- * versions 1 to 4 with periodic faces.
+ * fluctuates, (from version 4) the wall scheme, (from version 5) the boundary types of the six faces and (from
+ * version 6) the interpolation stencil.  The kernel writes the rest.  Version 1 was written before the drag scheme
+ * existed, with the explicit drag, versions 1 and 2 before the fluid fluctuations, without them, versions 1 to 3
+ * before the wall schemes, with bounce-back, versions 1 to 4 with periodic faces, and versions 1 to 5 with the
+ * nearest node.
  */
 static const char checkpointTag[8] = {'L', 'B', 'M', 'C', 'K', 'P', 'T', '1'};
-static const int checkpointVersion = 5;
+static const int checkpointVersion = 6;
 
 void LBMForceImpl::writeCheckpointHeader(ContextImpl& context, ostream& stream) const {
     stream.write(checkpointTag, sizeof(checkpointTag));
@@ -470,10 +491,11 @@ void LBMForceImpl::writeCheckpointHeader(ContextImpl& context, ostream& stream) 
     int length = platform.size();
     stream.write((const char*) &length, sizeof(int));
     stream.write(platform.c_str(), length);
-    int header[13] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme,
+    int header[14] = {lattice.nx, lattice.ny, lattice.nz, (int) lattice.particles.size(), (int) lattice.dragScheme,
                       (int) lattice.fluidFluctuations, (int) lattice.wallScheme};
     for (int face = 0; face < 6; face++)
         header[7+face] = (int) lattice.faceBoundary[face];
+    header[13] = (int) lattice.interpolationStencil;
     stream.write((const char*) header, sizeof(header));
 }
 
@@ -494,10 +516,11 @@ void LBMForceImpl::readCheckpointHeader(ContextImpl& context, istream& stream) c
     if (platform != context.getPlatform().getName())
         throw OpenMMException("LBMForce: the checkpoint was written on the platform " + platform + ", not on " +
                 context.getPlatform().getName());
-    int header[13] = {0, 0, 0, 0, (int) LBMForce::Explicit, 0, (int) LBMForce::BounceBack};
+    int header[14] = {0, 0, 0, 0, (int) LBMForce::Explicit, 0, (int) LBMForce::BounceBack};
     for (int face = 0; face < 6; face++)
         header[7+face] = (int) LBMForce::Periodic;
-    stream.read((char*) header, (version <= 4 ? version+3 : 13)*sizeof(int));
+    header[13] = (int) LBMForce::NearestNode;
+    stream.read((char*) header, (version <= 4 ? version+3 : version == 5 ? 13 : 14)*sizeof(int));
     if (!stream || header[0] != lattice.nx || header[1] != lattice.ny || header[2] != lattice.nz ||
             header[3] != (int) lattice.particles.size())
         throw OpenMMException("LBMForce: the checkpoint was written for a different grid size or number of coupled particles");
@@ -511,6 +534,8 @@ void LBMForceImpl::readCheckpointHeader(ContextImpl& context, istream& stream) c
     for (int face = 0; face < 6; face++)
         if (header[7+face] != (int) lattice.faceBoundary[face])
             throw OpenMMException("LBMForce: the checkpoint was written with different boundary types of the faces (setFaceBoundary())");
+    if (header[13] != (int) lattice.interpolationStencil)
+        throw OpenMMException("LBMForce: the checkpoint was written with a different interpolation stencil");
 }
 
 void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {

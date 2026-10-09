@@ -45,6 +45,10 @@ def test_parameters_with_units():
     assert force.getDragScheme() == LBMForce.Explicit
     force.setDragScheme(LBMForce.Centered)
     assert force.getDragScheme() == LBMForce.Centered
+    assert force.getInterpolationStencil() == LBMForce.NearestNode
+    for stencil in (LBMForce.Trilinear, LBMForce.ThreePoint, LBMForce.Keys, LBMForce.NearestNode):
+        force.setInterpolationStencil(stencil)
+        assert force.getInterpolationStencil() == stencil
 
 
 def test_fluid_fields_and_state():

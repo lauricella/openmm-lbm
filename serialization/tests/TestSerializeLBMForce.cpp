@@ -41,6 +41,7 @@ void testSerialization() {
     force.setMachNumberLimit(0.2);
     force.setCouplingScheme(LBMForce::NVE);
     force.setDragScheme(LBMForce::Centered);
+    force.setInterpolationStencil(LBMForce::ThreePoint);
     force.setFluidFluctuations(true);
     force.setWallScheme(LBMForce::Regularized);
     force.setFaceBoundary(LBMForce::YMin, LBMForce::Density);
@@ -90,6 +91,7 @@ void testSerialization() {
     ASSERT_EQUAL(force.getMachNumberLimit(), force2.getMachNumberLimit());
     ASSERT_EQUAL(force.getCouplingScheme(), force2.getCouplingScheme());
     ASSERT_EQUAL(force.getDragScheme(), force2.getDragScheme());
+    ASSERT_EQUAL(force.getInterpolationStencil(), force2.getInterpolationStencil());
     ASSERT_EQUAL(force.getFluidFluctuations(), force2.getFluidFluctuations());
     ASSERT_EQUAL(force.getWallScheme(), force2.getWallScheme());
     for (int face = 0; face < 6; face++) {
@@ -113,11 +115,25 @@ void testSerialization() {
     // schemes existed (version 5) has bounce-back walls, one written before the fluid fluctuations existed (version
     // 4) has none, and one written before the drag scheme existed (version 3) has the explicit drag.
 
+    // A force written before the interpolation stencils existed (version 8) has the nearest node.
+
+    string xml = buffer.str();
+    size_t stencil = xml.find(" interpolationStencil=\"2\"");
+    ASSERT(stencil != string::npos);
+    xml.erase(stencil, 25);
+    size_t version = xml.find("version=\"9\"");
+    ASSERT(version != string::npos);
+    xml.replace(version, 11, "version=\"8\"");
+    stringstream buffer8(xml);
+    LBMForce* copy8 = XmlSerializer::deserialize<LBMForce>(buffer8);
+    ASSERT_EQUAL(LBMForce::NearestNode, copy8->getInterpolationStencil());
+    ASSERT_EQUAL(LBMForce::Centered, copy8->getDragScheme());
+    delete copy8;
+
     // A force written before the domain decomposition existed (version 7) has one domain, the check of the copies of
     // the particles on and no exchange of the halo.
 
-    string xml = buffer.str();
-    size_t version = xml.find("version=\"8\"");
+    version = xml.find("version=\"8\"");
     ASSERT(version != string::npos);
     xml.replace(version, 11, "version=\"7\"");
     stringstream buffer7(xml);

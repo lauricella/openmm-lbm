@@ -102,6 +102,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     ContextSelector selector(cc);
     if (cc.getNumContexts() > 1)
         throw OpenMMException("LBMForce does not support running on multiple devices");
+    if (lattice.interpolationStencil != LBMForce::NearestNode)
+        throw OpenMMException("LBMForce: on the " + getPlatform().getName() + " platform the interpolation stencils "
+                "other than NearestNode are not available yet (in development for version 0.5.0; Reference platform only)");
     decomposition = LBMDecomposition(lattice.nx, lattice.ny, lattice.nz, lattice.procs);
     bool decomposed = decomposition.isDecomposed();
     if (decomposed) {

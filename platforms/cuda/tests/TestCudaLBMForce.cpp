@@ -9,6 +9,7 @@
 #include "TestLBMFluid.h"
 #include "TestLBMCoupling.h"
 #include "TestLBMCentered.h"
+#include "TestLBMStencils.h"
 #include "TestLBMFluctuations.h"
 
 extern "C" OPENMM_EXPORT void registerLBMCudaKernelFactories();
@@ -24,6 +25,7 @@ int main(int argc, char* argv[]) {
         runWallTests(platform);
         runCouplingTests(platform);
         runCenteredTests(platform);
+        runStencilTests(platform);
         runFluctuationTests(platform);
     }
     catch (const exception& e) {
