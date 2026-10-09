@@ -37,17 +37,17 @@ reproducible and understandable by someone who arrives without any prior context
 - **Changes to the physics** (fluctuating LB, interpolation, boundaries; the centred drag followed this rule) require three things:
   - a written derivation in `docs/theory.md`;
   - a test that checks it;
-  - a comparison with reference values whose provenance is recorded (run, date, version).
+  - a comparison with reference values, with their protocol, platform and version (the details of the runs are kept in the notes of the maintainers).
 - **Units.** The public API uses OpenMM units only. Lattice units stay internal; the conversion is documented in `docs/theory.md` (section 3) and done with the same factors on every platform (`docs/architecture.md`, Invariants).
 
 ## Tests and acceptance
 
 - **All platforms aligned.** Every feature, physical or not, is implemented and tested on every platform: Reference, CUDA, OpenCL and HIP (HIP at least built, where no AMD GPU is available). A feature available on one platform only may exist on `develop` as an intermediate step, with a clear error on the other platforms, but it does not reach `main` or a release. The same tests run on every platform, with tolerances tied to the precision mode.
 - **Everything is documented**, including results that are negative or contradict an expectation, with their numbers and protocol (`docs/theory.md`, `docs/validation.md`).
-- **Green tests before merging.** No commit reaches `main` with failing tests. Tests run on every available platform (Reference, CUDA, OpenCL, and HIP where possible), in the `single`, `mixed` and `double` precision modes.
+- **Green tests before merging.** No commit reaches `main` with failing tests. Tests run on every available platform (Reference, CUDA, OpenCL, and HIP where possible), in the `single`, `mixed` and `double` precision modes, and, for the domain decomposition, with the plugin built with `OPENMM_LBM_MPI`: `TestMPIReferenceLBMForce` and `python/tests/mpi_decomposition.py` with several decompositions on every platform.
 - **Every new feature comes with a test**, and every fixed defect with a regression test.
 - **Reference values** (smoke tests, single-particle drag and finite-size mobility, …) live in a versioned file, with tolerances and provenance.
-- **Continuous integration.** GitHub CI builds the Reference, OpenCL and CUDA platforms and the Python wrapper against each supported OpenMM version, runs the C++ tests of serialization, Reference and OpenCL on CPU (PoCL) and the Python tests, and builds the HIP platform against OpenMM 8.6. The CUDA and HIP platforms are built but not run there. GPU tests are run on a GPU machine, and their outcome is recorded (machine, date, version).
+- **Continuous integration.** GitHub CI builds the Reference, OpenCL and CUDA platforms and the Python wrapper against each supported OpenMM version, runs the C++ tests of serialization, Reference and OpenCL on CPU (PoCL) and the Python tests, and builds the HIP platform against OpenMM 8.6. The CUDA and HIP platforms are built but not run there. The CI builds without MPI, so the tests of the domain decomposition are run by hand. GPU tests are run on a GPU machine, and their outcome is recorded with the platform and the version.
 - **OpenCL on NVIDIA GPUs with an older driver.** When the CUDA forward-compatibility libraries (`cuda-compat`) are on `LD_LIBRARY_PATH`, which the CUDA platform needs if the driver is older than the CUDA version of OpenMM, the NVIDIA OpenCL driver crashes intermittently while compiling kernels, also without this plugin. Run the CUDA tests with those libraries and the OpenCL tests (`ctest -R OpenCL`, `pytest -k OpenCL`) without them.
 
 ## Supported OpenMM versions
@@ -62,7 +62,7 @@ reproducible and understandable by someone who arrives without any prior context
 
 - **No atomic operations in the plugin kernels.** Per-cell sums use sorting with unique keys followed by segmented reductions, with one writer per cell (as in A. Kassen, V. Shankar and A. L. Fogelson, Int. J. High Perform. Comput. Appl. 36, 443 (2022); `docs/theory.md`, section 2). Given the same input and seed, results are bitwise identical on the same device. Tests use fixed seeds.
 - **Portable kernels.** They are written only in the OpenMM common compute dialect (`platforms/common/src/kernels/*.cc`). No CUDA-specific code is allowed outside the kernel factories.
-- **Dependencies.** OpenMM in the supported range (see above), CMake, SWIG, and Python with NumPy, setuptools and pip (pytest for the tests) only. No thrust or CUB.
+- **Dependencies.** OpenMM in the supported range (see above), CMake, SWIG, and Python with NumPy, setuptools and pip (pytest for the tests) only; for the domain decomposition, optionally, an MPI library (its C API only). No thrust or CUB.
 
 ## Licensing and code provenance
 
@@ -96,10 +96,10 @@ The documentation is written for users and developers. It must be complete enoug
 | File | Content |
 |---|---|
 | `README.md` | what the plugin does, installation, minimal example, authors, license, how to cite |
-| `docs/theory.md` | model (regularized D3Q19, weakly compressible, Guo forcing; walls and open faces; fluctuating fluid), Euler–Maruyama coupling with the explicit and the centred drag, time levels (leapfrog, half step), units and conversions, equations with references |
+| `docs/theory.md` | model (regularized D3Q19, weakly compressible, Guo forcing; walls and open faces; fluctuating fluid), Euler–Maruyama coupling with the explicit and the centred drag, time levels (leapfrog, half step), units and conversions, the domain decomposition (section 8), equations with references |
 | `docs/architecture.md` | file map; data flow within one step; invariants (one fluid update per step, no atomics, kernel order); how to add a platform or a kernel |
 | `docs/validation.md` | tests, reference values, tolerances, how to reproduce them |
-| `docs/user_guide/` | user guide: installation, tutorial, getting started, the lattice, API reference, restarts, examples, troubleshooting, glossary; its Python blocks are checked with `devtools/check_user_guide.py` |
+| `docs/user_guide/` | user guide: installation, tutorial, getting started, the lattice, API reference, restarts, examples, troubleshooting, glossary, running on several GPUs; its Python blocks are checked with `devtools/check_user_guide.py` |
 | `CONTRIBUTING.md` | this file |
 | `CHANGELOG.md`, `CITATION.cff` | version history; citation, with authors in the order of the README |
 

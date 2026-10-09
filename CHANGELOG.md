@@ -6,21 +6,23 @@ versions the API may still change.
 ## Unreleased
 
 ### Added (in development for 0.4.0)
-- Decomposition of the lattice over MPI ranks, first part: CMake option `OPENMM_LBM_MPI` (off by default; only the
-  MPI C API, in `openmmapi/src/LBMDecomposition.cpp`), `setDomainDecomposition()`/`getDomainDecomposition()`,
-  `isMPIAvailable()`, `getMPIRank()`/`getMPISize()`/`getMPILocalRank()` (`openmmlbm.mpiRank()` and the like in
-  Python), serialization version 8 with the decomposition. Without MPI, or with one domain, nothing changes.
+- Decomposition of the lattice over MPI ranks: CMake option `OPENMM_LBM_MPI` (off by default; only the MPI C API,
+  in `openmmapi/src/LBMDecomposition.cpp`; the summary of `cmake` ends with `MPI: yes (MPI x.y)` or `MPI: no`),
+  `setDomainDecomposition()`/`getDomainDecomposition()` (a 0 lets MPI choose, with the most domains along z, then y,
+  since dividing x costs more on the GPUs), `isMPIAvailable()`, `getMPIRank()`/`getMPISize()`/`getMPILocalRank()`
+  (`openmmlbm.mpiRank()` and the like in Python), serialization version 8 with the decomposition. Without MPI, or
+  with one domain, nothing changes. The user guide has a new page, `docs/user_guide/parallel.md`.
 - Reference platform: the fluid, the walls and the open faces with more than one domain (`docs/theory.md`, section 8):
   each rank advances the nodes of its block and exchanges the populations streamed between blocks, overlapping the
   exchange with the collision of the interior of the block; identical bit for
   bit to one domain without the removal of the fluid momentum (`python/tests/mpi_decomposition.py`).
-- Reference platform: coupled particles with more than one domain. The particles are replicated on every rank; the
-  rank of the nearest node computes the coupling force, and the forces are summed over the ranks (exact). The
-  reflection at the walls is done by every rank, and its momentum counted once. Identical bit for bit to one domain at
-  T = 0, with both drag schemes. Checks that stop every rank together: the same platform and precision on every rank,
-  identical copies of the particles (a hash of positions and velocities, at the first step and then with the period
-  of the Mach number check); an `AndersenThermostat` or a Monte Carlo barostat is refused with more than one domain. With more than one
-  domain the warnings of the Context are printed by rank 0 only. `setParticleCopiesCheck()` turns the comparison of
+- Reference platform: coupled particles with more than one domain. The particles are replicated on every rank; the rank
+  of the nearest node computes the coupling force, and the forces are summed over the ranks (exact). The reflection at
+  the walls is done by every rank, and its momentum counted once. Identical bit for bit to one domain at T = 0, with
+  both drag schemes. Checks that stop every rank together: the same platform and precision on every rank, identical
+  copies of the particles (a hash of positions and velocities, at the first step and then with the period of the Mach
+  number check); an `AndersenThermostat` or a Monte Carlo barostat is refused with more than one domain. With more than
+  one domain the warnings of the Context are printed by rank 0 only. `setParticleCopiesCheck()` turns the comparison of
   the copies off (on by default; serialized in version 8). With more than one MPI rank the Python module aborts every
   rank (`LBMForce.abortMPI()`, `MPI_Abort`) after printing an uncaught exception, so that an error on one rank does not
   leave the others waiting.
@@ -29,19 +31,21 @@ versions the API may still change.
   only on request (`gather=True`, `scatter=True`); `getFluidFields(halo=True)` adds a layer one node thick around the
   domain, filled for the fields whose halo is exchanged at the end of every step (`setDensityHaloExchange()`,
   `setVelocityHaloExchange()`, off by default, serialized in version 8) and NaN otherwise. With one domain the new
-  arguments change nothing, and the halo comes from the lattice across the periodic boundaries.
+  arguments change nothing else, and the halo of an exchanged field comes from the lattice across the periodic
+  boundaries (NaN beyond the open faces).
 - CUDA, OpenCL and HIP platforms: the fluid, the walls and the open faces with more than one domain, one GPU per rank.
-  Each rank stores only its block and a layer of halo nodes along the divided axes; the populations pushed into the
-  halo are packed on the device, sent through the host with non-blocking MPI calls while the interior of the block
-  collides, and unpacked into the blocks of their owners. Identical bit for bit to one domain on the same platform and
-  precision without the removal of the fluid momentum. Without the decomposition the arithmetic and the kernels do not
-  change. Coupled particles as on the Reference platform: the rank of the nearest node computes the coupling force,
-  the forces are summed over the ranks, and the CUDA and HIP platforms need the property `DeterministicForces`; the
-  copies of the particles are compared over the ranks as on the Reference platform. The exchange of the halo of the
-  density and the velocity: the device copies the moments of the nodes to send, and the host computes their fields as
-  `getFluidFields()` does and sends them, so that the copies are identical bit for bit. The kernels of every platform
-  give the fields and the state of the domain of the rank only (with its halo on request), so a rank holds those of
-  the whole lattice only when they are gathered on it.
+  Each rank stores only its block and a layer of halo nodes along the divided axes; the populations pushed into the halo
+  are packed on the device, sent with non-blocking MPI calls while the interior of the block collides, and unpacked into
+  the blocks of their owners: on the CUDA platform with CUDA-aware MPI from device to device between the ranks of a node
+  (over NVLink), through the host between nodes and on the other platforms. Identical bit for bit to one domain on the
+  same platform and precision without the removal of the fluid momentum. Without the decomposition the arithmetic and
+  the kernels do not change. Coupled particles as on the Reference platform: the rank of the nearest node computes the
+  coupling force, the forces are summed over the ranks, and the CUDA and HIP platforms need the property
+  `DeterministicForces`; the copies of the particles are compared over the ranks as on the Reference platform. The
+  exchange of the halo of the density and the velocity: the device copies the moments of the nodes to send, and the host
+  computes their fields as `getFluidFields()` does and sends them, so that the copies are identical bit for bit. The
+  kernels of every platform give the fields and the state of the domain of the rank only (with its halo on request), so
+  a rank holds those of the whole lattice only when they are gathered on it.
 - With `OPENMM_LBM_MPI`, the test `TestMPIReferenceLBMForce`, which `ctest` runs under `mpiexec` with two ranks.
 - The fluctuating fluid with more than one domain validated statistically (`docs/validation.md`): variances and spectra
   of the fluctuations as with one domain, no difference at the planes of the borders of the blocks (within 2e-4 of
@@ -51,7 +55,8 @@ versions the API may still change.
   the ranks, written and read with collective MPI-IO, each rank the populations of its domain at their place in the
   lattice, with the particles and, for every rank, its OpenMM checkpoint and its part of the state of the force.
   Loaded with the same decomposition the run continues bit for bit; with another one, another number of ranks or one
-  domain, the fluid and the particles are restored exactly and the random numbers continue from the generators of the
+  domain, the fluid is restored exactly, the particles exactly in double precision and to float rounding in mixed and
+  single precision (OpenMM keeps the positions in float), and the random numbers continue from the generators of the
   new Context. With one domain no MPI is needed, and the file can be continued with several domains.
   `openmmlbm.saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter` use it with more than one domain; with
   one domain they write and read the same files as before. `LBMForce.createCheckpoint()` (the state of one domain)
@@ -60,12 +65,12 @@ versions the API may still change.
   by all the ranks with MPI-IO (`writeFluidFile()`), and rank 0 writes the particles and the list of files.
 
 - CUDA platform with more than one domain: with an MPI library that reads and writes device memory (CUDA-aware MPI)
-  the populations exchanged between the ranks go from device to device, over NVLink within a node, while the
-  interior of the block collides; `OPENMM_LBM_DEVICE_MPI=0` makes them go through the host. Only the first Context of
-  a process uses it (the MPI library binds these transfers to the CUDA context of the first one). The populations
-  exchanged through the host are in their own precision (4 bytes in single precision instead of 8) and without
-  copies on the host. `devtools/benchmark_decomposition.py` measures the time per step (`docs/validation.md`), also
-  with coupled particles (`--particles`, `--centered`).
+  the populations exchanged between the ranks of the same node go from device to device, over NVLink, while the
+  interior of the block collides; between nodes they go through the host, which was faster.
+  `OPENMM_LBM_DEVICE_MPI=0` makes them go through the host also within a node. Only the first Context of a process
+  uses it (the MPI library binds these transfers to the CUDA context of the first one). The populations exchanged
+  through the host are in their own precision and without copies on the host. `devtools/benchmark_decomposition.py`
+  measures the time per step (`docs/validation.md`), also with coupled particles (`--particles`, `--centered`).
 
 - With fluid fluctuations at a temperature above zero, the Context prints $`k_BT`$ in lattice units and the thermal
   Mach number $`\sqrt{3k_BT}`$ when it is created, and warns if $`k_BT`$ exceeds 1/3000, the largest value validated
@@ -211,14 +216,14 @@ results are those of version 0.2.0.
 
 ### Fixed
 - Build: a GPU platform is built only if the OpenMM in `OPENMM_DIR` has it, that is its header
-  (`include/openmm/opencl/OpenCLContext.h`, `cuda/CudaContext.h`, `hip/HipContext.h`) and its library (in `lib`
-  or `lib/plugins`), besides the toolkit that compiles it. Before, CMake looked only for the toolkit on the
-  system, so with an OpenMM compiled from source without OpenCL, on a system with OpenCL, `cmake` succeeded
-  and `make` stopped with `fatal error: openmm/opencl/OpenCLContext.h: No such file or directory`. Versions
-  0.1.0 and 0.2.0 are affected. The Python wrapper is built only if Python imports the OpenMM module, NumPy,
-  setuptools and pip, SWIG is found, and OpenMM has its SWIG files and the headers of its plugins. CMake says why it leaves
-  a part out and prints the list of what it builds; an option set to `ON` for a part that cannot be built
-  stops `cmake` with an error, instead of the build. The tests of a platform that is not built are not built.
+  (`include/openmm/opencl/OpenCLContext.h`, `cuda/CudaContext.h`, `hip/HipContext.h`) and its library (in `lib` or
+  `lib/plugins`), besides the toolkit that compiles it. Before, CMake looked only for the toolkit on the system, so with
+  an OpenMM compiled from source without OpenCL, on a system with OpenCL, `cmake` succeeded and `make` stopped with
+  `fatal error: openmm/opencl/OpenCLContext.h: No such file or directory`. Versions 0.1.0 and 0.2.0 are affected. The
+  Python wrapper is built only if Python imports the OpenMM module, NumPy, setuptools and pip, SWIG is found, and OpenMM
+  has its SWIG files and the headers of its plugins. CMake says why it leaves a part out and prints the list of what it
+  builds; an option set to `ON` for a part that cannot be built stops `cmake` with an error, instead of the build. The
+  tests of a platform that is not built are not built.
 
 ## 0.2.0 (2026-10-07)
 

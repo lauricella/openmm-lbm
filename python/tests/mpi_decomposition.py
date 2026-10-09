@@ -151,8 +151,8 @@ def compare_halo(single, split, case, density_halo=True, velocity_halo=True):
     return max(np.nan_to_num(np.abs(got_density - expected_density)).max()/602.214,
                np.nan_to_num(np.abs(got_velocity - expected_velocity)).max())
 
-# Coupled particles of 50 Da: near the borders of the blocks, sharing a node (0 and 6), crossing the periodic
-# boundaries (2) and moving into the wall z = 0 (0 and 4).  A constant field and a soft pair force act on them, so
+# Coupled particles of 50 Da: near the borders of the blocks, sharing a node (0 and 6), and crossing the periodic
+# boundaries into the solid plane y = 0, where it is reflected (2).  A constant field and a soft pair force act on them, so
 # that the centred drag reads other forces.
 POSITIONS = [(1.70, 0.40, 0.30), (1.70, 2.00, 1.30), (0.05, 2.90, 2.95), (3.20, 0.80, 1.30), (2.40, 2.10, 0.20),
              (1.78, 2.05, 1.22), (1.72, 1.95, 1.35)]
@@ -244,7 +244,7 @@ def expect_error(name, text, case='explicit', **options):
     print('rank %d/%d %s %-12s %s' % (rank, size, (px, py, pz), name, message), flush=True)
 
 # Without a body force the force on the walls is a small difference between the pressure forces on the two sides of
-# the solid plane z = 0, each about rho c_s^2 times its area (6.0e6 kJ/mol/nm here); the ranks add the momenta in
+# the solid plane y = 0, each about rho c_s^2 times its area (6.0e6 kJ/mol/nm here); the ranks add the momenta in
 # another order, so it agrees to the rounding of those.
 PRESSURE_FORCE = 602.214*(0.5/0.01)**2/3*4*3
 

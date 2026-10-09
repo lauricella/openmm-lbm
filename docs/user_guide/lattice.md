@@ -19,6 +19,7 @@ examples. The rest of this page explains each of them.
 | Temperature | that of the simulation, e.g. 298 K | the fluid is the thermostat of the coupled particles: no other thermostat |
 | Integrator | `VerletIntegrator(dt)` | friction and random force are part of `LBMForce` |
 | Removal of the fluid momentum | every step (the default) | keeps the system at rest; set 0 for flows driven by a body force, and with open faces |
+| Fluid fluctuations | off (the default), or on with the centred drag | with them $`k_BT\,\Delta t^2/(m_c\Delta x^2)`$ must stay small: $`1.3 \cdot 10^{-5}`$ for water at 300 K with the values above, against the 1/3000 validated; with $`\Delta x = 0.25`$ nm it is $`4.2 \cdot 10^{-4}`$, above it, and the Context warns ([relaxation time](#relaxation-time)) |
 
 **Checking a new setup.** Create the Context, then:
 
@@ -166,6 +167,15 @@ too large, do the opposite. Coarse-grained models often use a viscosity larger t
 $`\tau`$ up. Inside a Context, `getLatticeParametersInContext(context)` returns $`\Delta x`$, $`\Delta t`$ and
 $`\tau`$.
 
+**With fluid fluctuations the spacing and the time step also set their size.** The fluctuations of a node are
+those of a cell of mass $`m_c = \rho_0\Delta x^3`$ at the temperature of the force, and in lattice units their size
+is $`k_BT\,\Delta t^2/(m_c\Delta x^2)`$, which grows as $`\Delta t^2/\Delta x^5`$; the fluctuating fluid is stable
+only while it is small. The Context prints it with the thermal Mach number $`\sqrt{3k_BT}`$ in lattice units, and
+warns above 1/3000, the largest value validated. For water at 300 K and $`\Delta t = 0.01`$ ps it is
+$`1.3 \cdot 10^{-5}`$ at $`\Delta x = 0.5`$ nm, but $`4.2 \cdot 10^{-4}`$ at $`\Delta x = 0.25`$ nm: a finer lattice
+needs a smaller time step ([theory](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Size of the
+fluctuations).
+
 **With the explicit drag, coupled particles need $`\tau`$ below about 1.7.** With the explicit drag at the nearest
 node, the hydrodynamic part of the mobility of a particle decreases as $`\tau`$ grows. At $`\tau = 1.7`$ it is about
 15% of its value at $`\tau = 1.1`$, and above $`\tau = 1.79`$ it is negative: particles then move less than a
@@ -188,12 +198,14 @@ Context is created.
 | Cost on a GPU | | 0 to 6% more |
 | Same results as | version 0.1.0 and the DragOpenMM library | |
 
-**With the fluctuating fluid** ([`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations))
-**use the centred drag**: its particles have the set temperature (at half steps), while the explicit drag makes
-them too hot (last paragraph).
+**With the fluctuating fluid**
+([`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)) **use the
+centred drag**: its particles have the set temperature (at half steps), while the explicit drag makes them too hot (last
+paragraph).
 
 **Without fluid fluctuations use the explicit drag** (the default) in most cases: it is accurate for
-$`\text{friction}\times\Delta t`$ up to about 0.1, it reproduces the previous results, the temperature that OpenMM
+$`\text{friction}\times\Delta t`$ up to about 0.1, it reproduces the results of version 0.1.0 and of the DragOpenMM
+library, the temperature that OpenMM
 reports is right, and its particles are the closest to $`T`$ (next paragraph).
 
 **Use the centred drag** when the explicit drag is unstable: large friction, or several heavy beads at a node. With
