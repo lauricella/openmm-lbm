@@ -77,6 +77,8 @@ versions the API may still change.
   (`docs/theory.md`, section 7, Size of the fluctuations).
 
 ### Changed (in development for 0.4.0)
+- The preset `fabio-g30` of `examples/cocomo/diffusion.py` (SOD1 in a box of 30 nm, friction 30/ps) is now called
+  `sod1-g30`.
 - `LBMVTKReporter` writes the density and the velocity of the fluid in two files, `<prefix>_density_<step>.vti` and
   `<prefix>_velocity_<step>.vti` (each with the solid nodes, so that it opens alone), instead of one
   `<prefix>_fluid_<step>.vti`; `density=False` or `velocity=False` leaves one of them out (`fluid=False` both). The

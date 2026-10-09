@@ -17,7 +17,7 @@ Parameter sets (--preset):
              COCOMO2, with the nonbonded terms scaled by the solvent exposure of each residue
              (data/sod1.surface); box 15 nm, friction 10/ps, time step 10 fs, nu = 5.0175 nm^2/ps
              (tau = 1.10), 200 ns: the runs of the DragOpenMM project
-  fabio-g30  SOD1 in a box of 30 nm, friction 30/ps, 50 ns
+  sod1-g30   SOD1 in a box of 30 nm, friction 30/ps, 50 ns
   smoke      SOD1 with friction 5/ps for 2000 steps: a quick check that everything runs
   rlp        an intrinsically disordered protein (166 beads, data/rlp.pdb), no elastic network; box
              20 nm, friction 100/ps, time step 2 fs, nu = 1.0035 nm^2/ps (tau = 0.52), 10 ns
@@ -65,7 +65,7 @@ DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 SOD1 = dict(pdb='sod1.pdb', surface='sod1.surface', domain=[1, 108], enm_domain=[2, 109], dt=0.01, viscosity=5.0175)
 PRESETS = {
     'sod1': dict(SOD1, box=15.0, friction=10.0, steps=20000000, report=10000),
-    'fabio-g30': dict(SOD1, box=30.0, friction=30.0, steps=5000000, report=10000),
+    'sod1-g30': dict(SOD1, box=30.0, friction=30.0, steps=5000000, report=10000),
     'smoke': dict(SOD1, box=15.0, friction=5.0, steps=2000, report=100),
     'rlp': dict(pdb='rlp.pdb', surface=None, domain=None, enm_domain=None, dt=0.002, viscosity=1.0035,
                 box=20.0, friction=100.0, steps=5000000, report=5000),

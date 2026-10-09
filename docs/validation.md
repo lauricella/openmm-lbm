@@ -1118,7 +1118,7 @@ were regenerated with the Euler-Maruyama scheme for this comparison ($`v_1/v_0 =
   at half steps, is 277.5 K (half step 310.3 K and full step 294.0 K with the explicit drag; full step
   264.4 K with the centred drag): 6.9% below $`T`$, against 1.3% for the explicit drag
   ([theory.md](theory.md), section 2, temperature with a fluid without fluctuations).
-- **Friction 30/ps** (`--preset fabio-g30`, 50 ns, seed 1): both drags are stable; the apparent diffusion
+- **Friction 30/ps** (`--preset sod1-g30`, 50 ns, seed 1): both drags are stable; the apparent diffusion
   coefficient is 0.89, 0.98, 1.00, 1.00, 1.04, 1.24 and 1.25 Å²/ns with the explicit drag and 0.86, 0.93,
   0.96, 0.99, 1.02, 1.28 and 1.35 with the centred drag, within the statistics of one run
   ($`k_BT/(M\gamma)`$ = 0.75 Å²/ns); the temperature is 294.6 K at full steps with the explicit drag and 250.2 K
@@ -1280,7 +1280,7 @@ With the centred drag and the fluctuating fluid the fluctuation-dissipation theo
 well: the velocity autocorrelation equals the response to a kick.
 
 **SOD1 with the fluctuating fluid** (`examples/cocomo/diffusion.py --fluid-fluctuations`, presets `sod1`:
-friction 10/ps, box 15 nm, 200 ns, and `fabio-g30`: friction 30/ps, box 30 nm, 50 ns; one run each, seed 1, the
+friction 10/ps, box 15 nm, 200 ns, and `sod1-g30`: friction 30/ps, box 30 nm, 50 ns; one run each, seed 1, the
 same as the first run without fluctuations). Temperatures in K (target 298 K) and apparent diffusion coefficient
 of the centre of mass, $`\mathrm{MSD}(\mathrm{lag})/(6\,\mathrm{lag})`$, in Å²/ns at lags of 0.1, 1, 2 and 3 ns:
 
@@ -1290,10 +1290,10 @@ of the centre of mass, $`\mathrm{MSD}(\mathrm{lag})/(6\,\mathrm{lag})`$, in Å²
 | sod1 | centred | without fluctuations | 264.1 | 277.2 | 2.32 / 2.40 / 2.38 / 2.39 |
 | sod1 | explicit | fluctuating | 316.4 | 333.7 | 4.91 / 4.91 / 4.76 / 4.77 |
 | sod1 | centred | fluctuating | 284.8 | **298.6** | 4.99 / 5.11 / 4.87 / 4.70 |
-| fabio-g30 | explicit | without fluctuations | 294.6 | 349.7 | 0.89 / 0.98 / 1.00 / 1.00 |
-| fabio-g30 | centred | without fluctuations | 220.5 | 250.2 | 0.86 / 0.93 / 0.96 / 0.99 |
-| fabio-g30 | explicit | fluctuating | 355.6 | 419.8 | 3.67 / 3.39 / 3.21 / 3.18 |
-| fabio-g30 | centred | fluctuating | 264.6 | **298.7** | 3.68 / 3.34 / 3.25 / 3.29 |
+| sod1-g30 | explicit | without fluctuations | 294.6 | 349.7 | 0.89 / 0.98 / 1.00 / 1.00 |
+| sod1-g30 | centred | without fluctuations | 220.5 | 250.2 | 0.86 / 0.93 / 0.96 / 0.99 |
+| sod1-g30 | explicit | fluctuating | 355.6 | 419.8 | 3.67 / 3.39 / 3.21 / 3.18 |
+| sod1-g30 | centred | fluctuating | 264.6 | **298.7** | 3.68 / 3.34 / 3.25 / 3.29 |
 
 With the fluctuating fluid and the centred drag the protein has the set temperature, and its diffusion coefficient
 gains the hydrodynamic contribution of the solvent (twice and three times the value without fluctuations, which is

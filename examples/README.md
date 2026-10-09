@@ -107,7 +107,7 @@ python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient
 
 - `--preset sod1` reproduces the runs of the DragOpenMM project with the folded protein SOD1 (box 15 nm, friction
   10/ps, 298 K, $`\Delta t`$ 10 fs, $`\nu = 5.0175`$ nm²/ps, removal of the fluid momentum at every step);
-  `--preset fabio-g30` a larger box (30 nm) with friction 30/ps for 50 ns.
+  `--preset sod1-g30` a larger box (30 nm) with friction 30/ps for 50 ns.
 - `--preset rlp` is an intrinsically disordered protein of 166 residues, without elastic network (box 20 nm,
   friction 100/ps, $`\Delta t`$ 2 fs, $`\nu = 1.0035`$ nm²/ps, 10 ns), from the thermal-diffusion example of the
   DragOpenMM plugin. Its full-step temperature stays at about 260 K, 13% below 298 K: with this large friction the
@@ -178,7 +178,7 @@ the same parameters, the DragOpenMM plugin in double precision gives the same tr
 | protein kick, peptide (COCOMO2), 2000 steps | CUDA double | velocity of the centre of mass 1e-13 of $`v_0`$; positions equal to the printed digits |
 | SOD1 diffusion, `--preset sod1`, three runs of 200 ns | CUDA mixed | apparent diffusion coefficient of the centre of mass 2.3-2.9 Å²/ns at lag times from 0.1 to 18 ns, against 2.3-2.6 in three runs of the DragOpenMM plugin (spread between runs 1.9-3.4 at 18 ns); $`k_BT/(M\gamma) = 2.26`$ Å²/ns |
 | `--preset rlp`, 10 ns | CUDA mixed | full-step temperature 259.1 K and half-step 293.6 K at 298 K, against 259.9 K and 294.7 K for the DragOpenMM plugin (0.2 ns, double precision) |
-| `--preset fabio-g30`, 50 ns | CUDA mixed | 0.89-1.0 Å²/ns between 0.1 and 1 ns, against 0.86 for a run of the DragOpenMM plugin (explicit drag); $`k_BT/(M\gamma) = 0.75`$ Å²/ns |
+| `--preset sod1-g30`, 50 ns | CUDA mixed | 0.89-1.0 Å²/ns between 0.1 and 1 ns, against 0.86 for a run of the DragOpenMM plugin (explicit drag); $`k_BT/(M\gamma) = 0.75`$ Å²/ns |
 
 The thermal run can be compared step by step because both plugins draw their random numbers from
 OpenMM's generator in the same order. OpenCL generates them with slightly different rounding from
