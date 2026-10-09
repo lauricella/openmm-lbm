@@ -604,6 +604,9 @@ NaN. Over the six decompositions (22 ranks): identical bit for bit in the four c
 momentum and in the sixth (110 of 110); with the removal the state agrees to $`1.1 \cdot 10^{-19}`$ and the fields to
 $`3.1 \cdot 10^{-17}`$ (density relative to $`\rho_0`$, velocity in nm/ps). With one domain
 `test_local_fields_halo_and_gather` checks the same rules (pytest, with and without open faces).
+A seventh case, added later, exchanges only the density, and the velocity of the halo must be NaN: identical bit for
+bit on the Reference platform ($`2 \times 1 \times 1`$, $`1 \times 2 \times 2`$), on OpenCL on the CPU and on CUDA
+and OpenCL with A100 GPUs (in double and single precision).
 
 **CUDA and OpenCL platforms.** All the cases of this section, the fluid ones with the exchange of the halo and the
 coupled particles, on one node with four A100 GPUs, one GPU per rank, against one domain on the same platform and

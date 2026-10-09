@@ -254,10 +254,11 @@ def verdict(diff):
 reference = (PLATFORM == 'Reference')
 ON = dict(platform=PLATFORM, properties=PROPERTIES)
 single_precision = (PROPERTIES.get('Precision') == 'single')
-for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal', 'velocityhalo'):
-    halos = dict(density_halo=(case != 'velocityhalo'))
-    single = run('periodic' if case == 'velocityhalo' else case, (1, 1, 1), **ON)
-    split = run('periodic' if case == 'velocityhalo' else case, (px, py, pz), **halos, **ON)
+for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal', 'velocityhalo', 'densityhalo'):
+    # velocityhalo and densityhalo: the periodic fluid with the exchange of the halo of one field only.
+    halos = dict(density_halo=(case != 'velocityhalo'), velocity_halo=(case != 'densityhalo'))
+    single = run('periodic' if case.endswith('halo') else case, (1, 1, 1), **ON)
+    split = run('periodic' if case.endswith('halo') else case, (px, py, pz), **halos, **ON)
     # The slots of solid nodes only hold what the fluid nodes pushed into them in the last streaming, on the rank of
     # each fluid node: they are not part of the state of the fluid.
     fluid = fluid_of_block(single['solid'], split['domain'])
