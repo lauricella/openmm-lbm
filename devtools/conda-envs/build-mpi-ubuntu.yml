@@ -1,0 +1,19 @@
+name: build
+channels:
+  - conda-forge
+dependencies:
+  - cmake
+  - cuda-nvcc
+  - cuda-version 12.*
+  - cxx-compiler
+  - make
+  - numpy
+  - ocl-icd
+  - opencl-headers
+  - openmm 8.6.*
+  - openmpi 4.1.*
+  - pip
+  - pocl
+  - pytest
+  - python
+  - swig
