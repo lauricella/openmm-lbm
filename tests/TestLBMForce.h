@@ -20,6 +20,7 @@
 #include "openmm/VerletIntegrator.h"
 #include "openmm/internal/AssertionUtilities.h"
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <sstream>
 #include <string>

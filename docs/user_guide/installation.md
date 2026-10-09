@@ -422,7 +422,7 @@ Reference), plus 3 for each GPU platform. With `OPENMM_LBM_MPI` there is one mor
 | `PYTHON_EXECUTABLE`, `SWIG_EXECUTABLE` | the full path of `python` and `swig`, if they are not the first ones in `PATH` |
 | `CMAKE_C_COMPILER`, `CMAKE_CXX_COMPILER` | the compilers, if not the default ones; use those that compiled OpenMM |
 | `LBM_DEBUG` | `ON` adds diagnostics of the fluid (`docs/theory.md`, section 6) |
-| `OPENMM_LBM_MPI` | `ON` builds the decomposition of the lattice over MPI ranks (`setDomainDecomposition()`, in development for version 0.4.0, on every platform; not yet the checkpoints); it needs an MPI library (`mpicc` in `PATH`), the same one that runs the program. `OFF` (the default) needs no MPI |
+| `OPENMM_LBM_MPI` | `ON` builds the decomposition of the lattice over MPI ranks (`setDomainDecomposition()`, in development for version 0.4.0, on every platform); it needs an MPI library (`mpicc` in `PATH`), the same one that runs the program. `OFF` (the default) needs no MPI |
 
 ### Checks on OpenMM
 

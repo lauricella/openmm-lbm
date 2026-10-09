@@ -9,6 +9,7 @@
 #include "openmm/OpenMMException.h"
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #ifdef OPENMM_LBM_MPI
 #include <mpi.h>
@@ -417,4 +418,207 @@ void LBMDecomposition::exchange(const vector<vector<double> >& send, vector<vect
         }
     MPI_Waitall((int) requests.size(), requests.data(), MPI_STATUSES_IGNORE);
 #endif
+}
+
+// The largest number of bytes moved by one call to the standard library or to MPI, whose counts are int.
+static const long long maxChunk = 1LL << 30;
+
+LBMParallelFile::LBMParallelFile(const LBMDecomposition& decomposition, const string& path, bool write) :
+        decomposition(decomposition), path(path), parallel(decomposition.getSize() > 1), isOpen(false), stream(NULL) {
+    if (!parallel) {
+        fstream* file = new fstream(path.c_str(), write ? ios::out | ios::binary | ios::trunc : ios::in | ios::binary);
+        if (!*file) {
+            delete file;
+            throw OpenMMException("LBMForce: cannot open " + path + (write ? " to write it" : " to read it"));
+        }
+        stream = file;
+        isOpen = true;
+        return;
+    }
+#ifdef OPENMM_LBM_MPI
+    handle.resize(sizeof(MPI_File));
+    MPI_File& file = *(MPI_File*) handle.data();
+    int mode = (write ? MPI_MODE_CREATE | MPI_MODE_WRONLY : MPI_MODE_RDONLY);
+    if (MPI_File_open(MPI_COMM_WORLD, path.c_str(), mode, MPI_INFO_NULL, &file) != MPI_SUCCESS)
+        error = "LBMForce: cannot open " + path + (write ? " to write it" : " to read it");
+    else
+        isOpen = true;
+    // The opening is collective, so it succeeds or fails on every rank; then a file that exists is emptied.
+    checkErrors();
+    if (write && MPI_File_set_size(file, 0) != MPI_SUCCESS)
+        error = "LBMForce: cannot write " + path;
+    try {
+        checkErrors();
+    }
+    catch (...) {
+        // The destructor is not called when the constructor throws.
+        MPI_File_close(&file);
+        throw;
+    }
+#endif
+}
+
+LBMParallelFile::~LBMParallelFile() {
+    if (isOpen) {
+        if (parallel) {
+#ifdef OPENMM_LBM_MPI
+            MPI_File_close((MPI_File*) handle.data());
+#endif
+        }
+    }
+    delete (fstream*) stream;
+}
+
+void LBMParallelFile::writeOnRoot(long long offset, const string& data) {
+    if (decomposition.getRank() == 0)
+        writeAt(offset, data.data(), data.size());
+}
+
+void LBMParallelFile::writeAt(long long offset, const char* data, long long length) {
+    if (!error.empty())
+        return;
+    if (!parallel) {
+        fstream& file = *(fstream*) stream;
+        file.seekp(offset);
+        file.write(data, length);
+        if (!file)
+            error = "LBMForce: error writing " + path;
+        return;
+    }
+#ifdef OPENMM_LBM_MPI
+    MPI_File file = *(MPI_File*) handle.data();
+    for (long long done = 0; done < length; done += maxChunk) {
+        int count = (int) min(maxChunk, length-done);
+        MPI_Status status;
+        if (MPI_File_write_at(file, offset+done, (void*) (data+done), count, MPI_BYTE, &status) != MPI_SUCCESS) {
+            error = "LBMForce: error writing " + path;
+            return;
+        }
+    }
+#endif
+}
+
+void LBMParallelFile::readAt(long long offset, char* data, long long length) {
+    if (!error.empty())
+        return;
+    if (!parallel) {
+        fstream& file = *(fstream*) stream;
+        file.seekg(offset);
+        file.read(data, length);
+        if (!file)
+            error = "LBMForce: " + path + " is truncated or cannot be read";
+        return;
+    }
+#ifdef OPENMM_LBM_MPI
+    MPI_File file = *(MPI_File*) handle.data();
+    for (long long done = 0; done < length; done += maxChunk) {
+        int count = (int) min(maxChunk, length-done), read = 0;
+        MPI_Status status;
+        if (MPI_File_read_at(file, offset+done, data+done, count, MPI_BYTE, &status) != MPI_SUCCESS ||
+                MPI_Get_count(&status, MPI_BYTE, &read) != MPI_SUCCESS || read != count) {
+            error = "LBMForce: " + path + " is truncated or cannot be read";
+            return;
+        }
+    }
+#endif
+}
+
+void LBMParallelFile::writeDomain(long long offset, const void* data, int elementSize, int valuesPerNode, bool valueMajor) {
+    transferDomain(offset, const_cast<void*>(data), elementSize, valuesPerNode, valueMajor, true);
+}
+
+void LBMParallelFile::readDomain(long long offset, void* data, int elementSize, int valuesPerNode, bool valueMajor) {
+    transferDomain(offset, data, elementSize, valuesPerNode, valueMajor, false);
+}
+
+void LBMParallelFile::transferDomain(long long offset, void* data, int elementSize, int valuesPerNode, bool valueMajor, bool write) {
+    int nodes[3], start[3], count[3];
+    decomposition.getGridSize(nodes);
+    decomposition.getLocalDomain(start, count);
+    long long length = ((long long) nodes[0])*nodes[1]*nodes[2]*elementSize*valuesPerNode;
+    if (!parallel) {
+        // One domain: the array of the domain is the array of the lattice.
+        if (write)
+            writeAt(offset, (const char*) data, length);
+        else
+            readAt(offset, (char*) data, length);
+        return;
+    }
+#ifdef OPENMM_LBM_MPI
+    // The file is seen through a subarray of bytes: (values, k, j, i*elementSize) value by value, or
+    // (k, j, i*valuesPerNode*elementSize) node by node, so that the rows of the domain along x are contiguous both in
+    // the file and in memory.  All the ranks take part in the view and in the transfer, even after an error.
+    int nodeBytes = (valueMajor ? elementSize : elementSize*valuesPerNode);
+    int sizes[4], subsizes[4], starts[4], dims = 0;
+    if (valueMajor) {
+        sizes[0] = subsizes[0] = valuesPerNode;
+        starts[0] = 0;
+        dims = 1;
+    }
+    for (int a = 2; a >= 0; a--, dims++) {
+        int scale = (a == 0 ? nodeBytes : 1);
+        sizes[dims] = nodes[a]*scale;
+        subsizes[dims] = count[a]*scale;
+        starts[dims] = start[a]*scale;
+    }
+    MPI_Datatype fileType, rowType;
+    MPI_Type_create_subarray(dims, sizes, subsizes, starts, MPI_ORDER_C, MPI_BYTE, &fileType);
+    MPI_Type_commit(&fileType);
+    MPI_Type_contiguous(count[0]*nodeBytes, MPI_BYTE, &rowType);
+    MPI_Type_commit(&rowType);
+    int rows = count[1]*count[2]*(valueMajor ? valuesPerNode : 1);
+    MPI_File file = *(MPI_File*) handle.data();
+    MPI_Status status;
+    int result = MPI_File_set_view(file, offset, MPI_BYTE, fileType, "native", MPI_INFO_NULL);
+    if (result == MPI_SUCCESS)
+        result = (write ? MPI_File_write_all(file, data, rows, rowType, &status) :
+                          MPI_File_read_all(file, data, rows, rowType, &status));
+    int moved = 0;
+    if (result == MPI_SUCCESS && !write && (MPI_Get_count(&status, rowType, &moved) != MPI_SUCCESS || moved != rows))
+        result = MPI_ERR_OTHER;
+    MPI_File_set_view(file, 0, MPI_BYTE, MPI_BYTE, "native", MPI_INFO_NULL);
+    MPI_Type_free(&fileType);
+    MPI_Type_free(&rowType);
+    if (result != MPI_SUCCESS && error.empty())
+        error = (write ? "LBMForce: error writing " + path : "LBMForce: " + path + " is truncated or cannot be read");
+    checkErrors();
+#endif
+}
+
+long long LBMParallelFile::getSize() {
+    if (!parallel) {
+        fstream& file = *(fstream*) stream;
+        file.seekg(0, ios::end);
+        return (long long) file.tellg();
+    }
+    long long size = 0;
+#ifdef OPENMM_LBM_MPI
+    MPI_Offset fileSize;
+    if (MPI_File_get_size(*(MPI_File*) handle.data(), &fileSize) == MPI_SUCCESS)
+        size = fileSize;
+#endif
+    return size;
+}
+
+void LBMParallelFile::checkErrors() {
+    decomposition.throwIfAnyError(error);
+}
+
+void LBMParallelFile::close() {
+    if (isOpen) {
+        isOpen = false;
+        if (parallel) {
+#ifdef OPENMM_LBM_MPI
+            if (MPI_File_close((MPI_File*) handle.data()) != MPI_SUCCESS && error.empty())
+                error = "LBMForce: error writing " + path;
+#endif
+        }
+        else {
+            fstream& file = *(fstream*) stream;
+            file.close();
+            if (file.fail() && error.empty())
+                error = "LBMForce: error writing " + path;
+        }
+    }
+    checkErrors();
 }

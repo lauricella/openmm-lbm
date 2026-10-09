@@ -328,6 +328,10 @@ public:
     void setFluidState(OpenMM::Context& context, const std::vector<double>& state, bool scatter);
     double getFluidMachNumber(OpenMM::Context& context) const;
     OpenMM::Vec3 getWallForce(OpenMM::Context& context) const;
+    void saveCheckpointFile(OpenMM::Context& context, const std::string& file) const;
+    void loadCheckpointFile(OpenMM::Context& context, const std::string& file);
+    void writeFluidFile(OpenMM::Context& context, const std::string& file, const std::string& head,
+            const std::string& tail, const std::string& arrays, bool doublePrecision) const;
 
     %apply double& OUTPUT {double& dx};
     %apply double& OUTPUT {double& dt};
@@ -405,6 +409,7 @@ import struct as _struct
 import sys as _sys
 
 _CHECKPOINT_TAG = b'OPENMMLBM-CHECKPOINT-1\n'
+_CHECKPOINT_FILE_TAG = b'OPENMMLBM-CHECKPOINT-2\n'
 
 
 def mpiRank():
@@ -471,16 +476,24 @@ def _abortMPIOnException(excType, value, traceback, _previous=_sys.excepthook):
 _sys.excepthook = _abortMPIOnException
 
 
+def _isDecomposed(context, force):
+    """True if the lattice of the Context is divided into domains (setDomainDecomposition())."""
+    return force.getLocalDomain(context)[1] != tuple(force.getGridSize())
+
+
 def saveCheckpoint(file, context, force):
     """Save the complete state of a Context with an LBMForce to a file.
 
-    The file holds an OpenMM checkpoint (Context.createCheckpoint(): positions, velocities, periodic box,
-    time, step count, state of the integrator and of OpenMM's random number generators) and the checkpoint
-    of the force (LBMForce.createCheckpoint(): fluid, random numbers already drawn for the next step, force on
-    the walls of the last step).  Loading it with loadCheckpoint() continues the run exactly, bit for bit.
-    The data are written to file + '.tmp' and then renamed, so an interrupted write never replaces a valid
-    checkpoint with a damaged one.  Like OpenMM checkpoints, the file is specific to the platform, the
-    precision and the System.
+    With one domain the file holds an OpenMM checkpoint (Context.createCheckpoint(): positions, velocities,
+    periodic box, time, step count, state of the integrator and of OpenMM's random number generators) and the
+    checkpoint of the force (LBMForce.createCheckpoint(): fluid, random numbers already drawn for the next step, force
+    on the walls of the last step).  With the domain decomposition (setDomainDecomposition()) every MPI rank must call
+    it, and the file is that of LBMForce.saveCheckpointFile(): the fluid of the whole lattice, written by every rank
+    for its domain, and the OpenMM checkpoint of every rank; it can be loaded with any decomposition.  Loading it with
+    loadCheckpoint() continues the run exactly, bit for bit (with the decomposition, if it is the same).  The data are
+    written to file + '.tmp' and then renamed, so an interrupted write never replaces a valid checkpoint with a
+    damaged one.  Like OpenMM checkpoints, the file is specific to the platform, the precision and the System.  To
+    continue a run of one domain with several, write its checkpoint with LBMForce.saveCheckpointFile().
 
     Parameters
     ----------
@@ -491,6 +504,9 @@ def saveCheckpoint(file, context, force):
     force : LBMForce
         the LBMForce of the System of the Context
     """
+    if _isDecomposed(context, force):
+        force.saveCheckpointFile(context, file)
+        return
     openmmData = context.createCheckpoint()
     forceData = force.createCheckpoint(context)
     temporary = file + '.tmp'
@@ -503,11 +519,13 @@ def saveCheckpoint(file, context, force):
 
 
 def loadCheckpoint(file, context, force):
-    """Load a file written by saveCheckpoint() into a Context.
+    """Load a file written by saveCheckpoint() or LBMForce.saveCheckpointFile() into a Context.
 
     The Context must be built from the same System (same particles, forces and LBMForce parameters) on the
     same platform and precision.  It restores positions, velocities, box, time and step count as
-    Context.loadCheckpoint() does, and the fluid and the random numbers of the force.
+    Context.loadCheckpoint() does, and the fluid and the random numbers of the force.  With the domain decomposition
+    every MPI rank must call it; a file written with another decomposition gives the same fluid and particles, and the
+    run continues with the random number generators of the new Context (LBMForce.saveCheckpointFile()).
 
     Parameters
     ----------
@@ -519,9 +537,14 @@ def loadCheckpoint(file, context, force):
         the LBMForce of the System of the Context
     """
     with open(file, 'rb') as stream:
-        data = stream.read()
-    if not data.startswith(_CHECKPOINT_TAG):
+        tag = stream.read(len(_CHECKPOINT_TAG))
+    if tag not in (_CHECKPOINT_TAG, _CHECKPOINT_FILE_TAG):
         raise ValueError('%s is not a checkpoint written by openmmlbm.saveCheckpoint()' % file)
+    if tag == _CHECKPOINT_FILE_TAG or _isDecomposed(context, force):
+        force.loadCheckpointFile(context, file)
+        return
+    with open(file, 'rb') as stream:
+        data = stream.read()
     start = len(_CHECKPOINT_TAG) + 16
     openmmLength, forceLength = _struct.unpack_from('<qq', data, len(_CHECKPOINT_TAG))
     if len(data) != start + openmmLength + forceLength:
@@ -631,28 +654,34 @@ def _vtkUnits(units):
             '    </FieldData>\n' % (len(units), codes))
 
 
-def _writeVTKFile(path, kind, opening, closing, arrays):
-    """Write a VTK XML file whose data arrays are appended in binary (raw, little endian, UInt64 sizes).
+def _vtkHead(kind, opening, closing, sizes):
+    """The text of a VTK XML file before its data arrays, appended in binary (raw, little endian, UInt64 sizes).
 
     opening and closing are the XML lines before and after the data, with {offset<i>} where the i-th array goes;
-    arrays is the list of numpy arrays, written in that order."""
-    import numpy as np
+    sizes are the numbers of bytes of the arrays, in order."""
     offsets, offset = {}, 0
-    blocks = []
-    for i, array in enumerate(arrays):
-        data = np.ascontiguousarray(array).astype(array.dtype.newbyteorder('<'), copy=False).tobytes()
+    for i, size in enumerate(sizes):
         offsets['offset%d' % i] = offset
-        blocks.append(data)
-        offset += 8 + len(data)
-    header = ('<?xml version="1.0"?>\n<!-- openmmlbm.LBMVTKReporter, in OpenMM units: see the field data array "units" -->\n'
-              '<VTKFile type="%s" version="1.0" byte_order="LittleEndian" header_type="UInt64">\n' % kind) + \
-             opening.format(**offsets) + closing + '  <AppendedData encoding="raw">\n_'
+        offset += 8 + size
+    return ('<?xml version="1.0"?>\n<!-- openmmlbm.LBMVTKReporter, in OpenMM units: see the field data array "units" -->\n'
+            '<VTKFile type="%s" version="1.0" byte_order="LittleEndian" header_type="UInt64">\n' % kind) + \
+           opening.format(**offsets) + closing + '  <AppendedData encoding="raw">\n_'
+
+
+_VTK_TAIL = '\n  </AppendedData>\n</VTKFile>\n'
+
+
+def _writeVTKFile(path, kind, opening, closing, arrays):
+    """Write a VTK XML file whose data arrays, the numpy arrays given in order, are appended in binary (_vtkHead())."""
+    import numpy as np
+    blocks = [np.ascontiguousarray(array).astype(array.dtype.newbyteorder('<'), copy=False).tobytes() for array in arrays]
+    header = _vtkHead(kind, opening, closing, [len(data) for data in blocks])
     with open(path, 'wb') as out:
         out.write(header.encode('ascii'))
         for data in blocks:
             out.write(_struct.pack('<Q', len(data)))
             out.write(data)
-        out.write(b'\n  </AppendedData>\n</VTKFile>\n')
+        out.write(_VTK_TAIL.encode('ascii'))
 
 
 class LBMVTKReporter(object):
@@ -660,10 +689,11 @@ class LBMVTKReporter(object):
     VTK files, which ParaView and VisIt read, in OpenMM units.
 
     Every reportInterval steps it writes, with the given prefix and the step number:
-      <prefix>_fluid_<step>.vti      the fluid (VTK XML ImageData): point (i, j, k) is the lattice node at
-                                     (i dx, j dx, k dx), in nm; "density" in Da/nm^3 and "velocity" in nm/ps, as
-                                     LBMForce.getFluidFields() returns them; with solid nodes also "solid", 1 for a
-                                     solid node and 0 for a fluid one;
+      <prefix>_density_<step>.vti    the density of the fluid in Da/nm^3 (VTK XML ImageData): point (i, j, k) is the
+                                     lattice node at (i dx, j dx, k dx), in nm;
+      <prefix>_velocity_<step>.vti   the velocity of the fluid in nm/ps, on the same points; both as
+                                     LBMForce.getFluidFields() returns them, and with solid nodes both also have
+                                     "solid", 1 for a solid node and 0 for a fluid one, so that each opens alone;
       <prefix>_particles_<step>.vtp  the particles (VTK XML PolyData): positions in nm (with each molecule
                                      wrapped into the periodic box, as State does with enforcePeriodicBox, unless
                                      wrap=False), "velocity" in nm/ps (the velocities of the State, at
@@ -672,10 +702,14 @@ class LBMVTKReporter(object):
       <prefix>.pvd                   the list of all the files written, with their times in ps: open it in
                                      ParaView to load the whole series.
     The numbers are binary, in single precision unless double=True.  The reporter does not change the run: like
-    getState(), getFluidFields() neither advances the fluid nor draws random numbers.
+    getState(), getFluidFields() neither advances the fluid nor draws random numbers.  With the domain decomposition
+    (setDomainDecomposition()) every MPI rank must have the reporter: the files of the fluid are written together, each
+    rank writing the nodes of its domain (LBMForce.writeFluidFile(), MPI-IO), and rank 0 writes the particles and the
+    list.
     """
 
-    def __init__(self, prefix, reportInterval, force, fluid=True, particles=True, double=False, wrap=True, append=False):
+    def __init__(self, prefix, reportInterval, force, fluid=True, particles=True, double=False, wrap=True, append=False,
+                 density=True, velocity=True):
         """
         Parameters
         ----------
@@ -686,7 +720,7 @@ class LBMVTKReporter(object):
         force : LBMForce
             the LBMForce of the System of the Simulation
         fluid : bool
-            write the fluid (default True)
+            write the fluid (default True); False writes neither the density nor the velocity
         particles : bool
             write the particles (default True)
         double : bool
@@ -696,14 +730,20 @@ class LBMVTKReporter(object):
             True)
         append : bool
             keep the files already listed in <prefix>.pvd, for a run continued from a checkpoint (default False)
+        density : bool
+            write the density of the fluid (default True)
+        velocity : bool
+            write the velocity of the fluid (default True)
         """
         self._prefix = prefix
         self._reportInterval = reportInterval
         self._force = force
-        self._fluid = fluid
+        self._density = fluid and density
+        self._velocity = fluid and velocity
         self._particles = particles
         self._double = double
         self._wrap = wrap
+        self._hasSolid = None
         self._datasets = []
         if append and _os.path.exists(prefix + '.pvd'):
             with open(prefix + '.pvd') as pvd:
@@ -721,37 +761,38 @@ class LBMVTKReporter(object):
         step = simulation.currentStep
         time = state.getTime().value_in_unit(unit.picosecond)
         files = []
-        if self._fluid:
-            nx, ny, nz = self._force.getGridSize()
-            if self._force.getLocalDomain(simulation.context)[1] != (nx, ny, nz):
-                raise mm.OpenMMException('LBMVTKReporter: the fluid of a run with more than one domain '
-                                         '(setDomainDecomposition()) cannot be written yet')
+        nx, ny, nz = self._force.getGridSize()
+        if self._hasSolid is None:
+            self._hasSolid = len(self._force.getSolidNodes()) > 0
+        for field, components, unitName in (('density', 1, 'Da/nm^3'), ('velocity', 3, 'nm/ps')):
+            if not (self._density if field == 'density' else self._velocity):
+                continue
             dx = self._force.getLatticeParametersInContext(simulation.context)[0]
             dx = dx.value_in_unit(unit.nanometer) if unit.is_quantity(dx) else dx
-            density, velocity = self._force.getFluidFields(simulation.context)
-            arrays = [np.asarray(density.value_in_unit(unit.dalton/unit.nanometer**3), dtype=real),
-                      np.asarray(velocity.value_in_unit(unit.nanometer/unit.picosecond), dtype=real).reshape(-1)]
-            solid = list(self._force.getSolidNodes())
             extent = '0 %d 0 %d 0 %d' % (nx - 1, ny - 1, nz - 1)
-            units = ['Origin, Spacing: nm', 'density: Da/nm^3', 'velocity: nm/ps']
-            if solid:
+            units = ['Origin, Spacing: nm', '%s: %s' % (field, unitName)]
+            sizes = [nx*ny*nz*components*np.dtype(real).itemsize]
+            arrays = field
+            if self._hasSolid:
                 units.append('solid: 1 for a solid node, 0 for a fluid node')
+                sizes.append(nx*ny*nz)
+                arrays += ' solid'
             opening = ('  <ImageData WholeExtent="%s" Origin="0 0 0" Spacing="%.17g %.17g %.17g">\n' % (extent, dx, dx, dx) +
                        _vtkUnits(units) +
                        '    <Piece Extent="%s">\n'
-                       '      <PointData Scalars="density" Vectors="velocity">\n'
-                       '        <DataArray type="%s" Name="density" format="appended" offset="{offset0}"/>\n'
-                       '        <DataArray type="%s" Name="velocity" NumberOfComponents="3" format="appended" '
-                       'offset="{offset1}"/>\n' % (extent, name, name))
-            if solid:
-                flags = np.zeros(nx*ny*nz, dtype=np.uint8)
-                flags[solid] = 1
-                arrays.append(flags)
-                opening += '        <DataArray type="UInt8" Name="solid" format="appended" offset="{offset2}"/>\n'
+                       '      <PointData %s="%s">\n'
+                       '        <DataArray type="%s" Name="%s"%s format="appended" offset="{offset0}"/>\n' %
+                       (extent, 'Scalars' if components == 1 else 'Vectors', field, name, field,
+                        ' NumberOfComponents="3"' if components == 3 else ''))
+            if self._hasSolid:
+                opening += '        <DataArray type="UInt8" Name="solid" format="appended" offset="{offset1}"/>\n'
             closing = '      </PointData>\n    </Piece>\n  </ImageData>\n'
-            path = '%s_fluid_%010d.vti' % (self._prefix, step)
-            _writeVTKFile(path, 'ImageData', opening, closing, arrays)
+            path = '%s_%s_%010d.vti' % (self._prefix, field, step)
+            self._force.writeFluidFile(simulation.context, path, _vtkHead('ImageData', opening, closing, sizes),
+                                       _VTK_TAIL, arrays, self._double)
             files.append(path)
+        if LBMForce.getMPIRank() != 0:
+            return
         if self._particles:
             system = simulation.system
             n = system.getNumParticles()

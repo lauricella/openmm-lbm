@@ -12,8 +12,7 @@ collect it:
 
 By default it runs on the Reference platform.  With --platform the cases run on that platform and precision, against
 one domain on the same platform (each rank on device local rank % devices with --devices; on CUDA and HIP with
-DeterministicForces, which the decomposition with coupled particles needs), and the checkpoints, not available yet
-there with the decomposition, must stop every rank with an error.
+DeterministicForces, which the decomposition with coupled particles needs).
 
 Every rank runs each case twice in the same process, with one domain (no communication) and with px*py*pz domains,
 and compares with the single domain: the state of the fluid nodes of its domain (getFluidState(), getLocalDomain()),
@@ -22,12 +21,17 @@ the state of the whole lattice gathered on rank 0 (gather=True), the density and
 particles at T = 0, the positions and velocities of all the particles.  The initial state is set from rank 0
 (scatter=True).  Without the removal of the fluid momentum they must be identical bit for bit; with it they agree to
 rounding, because the sums of the ranks are added in another order.  Then the checks that must stop every rank
-together: copies of the particles that differ between the ranks, an AndersenThermostat, and (with the optional
-argument OpenCL) rank 0 on the Reference platform and the others on OpenCL.  A line with FAILED marks a failure."""
+together: copies of the particles that differ between the ranks, an AndersenThermostat, LBMForce.createCheckpoint()
+(the state of one domain), and (with the optional argument OpenCL) rank 0 on the Reference platform and the others on
+OpenCL.  Last, the checkpoint files and the VTK files written by all the ranks with MPI-IO, in the folder
+mpi_decomposition_files of the working directory: a run continued from a checkpoint with the same decomposition, with
+another one and with one domain, and VTK files against those of one domain.  A line with FAILED marks a failure."""
 import hashlib
+import os
 import sys
 import numpy as np
 import openmm as mm
+import openmm.app as app
 import openmm.unit as unit
 import openmmlbm
 from openmmlbm import LBMForce
@@ -155,8 +159,8 @@ POSITIONS = [(1.70, 0.40, 0.30), (1.70, 2.00, 1.30), (0.05, 2.90, 2.95), (3.20, 
 VELOCITIES = [(1.5, 0.3, -2.0), (-1.0, 0.5, 0.2), (-0.8, 1.0, 0.6), (0.4, -0.6, 0.9), (0.0, 0.0, -1.5),
               (0.3, 0.2, -0.4), (-0.2, -0.3, 0.5)]
 
-def run_particles(case, decomposition, steps=60, platform='Reference', thermostat=False, perturb=False, check=True,
-                  properties={}, halo=False, checkpoint=False):
+def particle_context(case, decomposition, platform='Reference', thermostat=False, check=True, properties={}, halo=False,
+                     simulation=False):
     system = mm.System()
     system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 3, 0), mm.Vec3(0, 0, 3))
     field = mm.CustomExternalForce('-3*x+2*y-z')
@@ -201,7 +205,18 @@ def run_particles(case, decomposition, steps=60, platform='Reference', thermosta
     force.setVelocityHaloExchange(halo)
     system.addForce(force)
     integrator = mm.VerletIntegrator(0.01)
-    context = mm.Context(system, integrator, mm.Platform.getPlatformByName(platform), properties)
+    if simulation:
+        sim = app.Simulation(app.Topology(), system, integrator, mm.Platform.getPlatformByName(platform), properties)
+        context = sim.context
+    else:
+        sim = None
+        context = mm.Context(system, integrator, mm.Platform.getPlatformByName(platform), properties)
+    return context, integrator, force, solid, sim
+
+def run_particles(case, decomposition, steps=60, platform='Reference', thermostat=False, perturb=False, check=True,
+                  properties={}, halo=False, checkpoint=False):
+    context, integrator, force, solid, _ = particle_context(case, decomposition, platform, thermostat, check, properties,
+                                                            halo)
     if checkpoint:
         context.createCheckpoint()
     context.setPositions([mm.Vec3(*x) for x in POSITIONS])
@@ -293,13 +308,12 @@ if px in (2, 4) and N[0] % px == 0:
         print('rank %d/%d %s independence  correlation of the fluctuations of two blocks %.3f (identical noise: 1)%s'
               % (rank, size, (px, py, pz), corr, '' if abs(corr) < 0.3 else '  FAILED'), flush=True)
 
-if not reference:
-    # Not available yet on this platform with the decomposition: every rank must stop with the error.
-    expect_error('checkpoint', 'checkpoints with the domain decomposition', case='fluid', density_halo=False,
-                 velocity_halo=False, checkpoint=True, **ON)
-    if PLATFORM in ('CUDA', 'HIP'):
-        expect_error('determinism', 'DeterministicForces', platform=PLATFORM,
-                     properties=dict(PROPERTIES, DeterministicForces='false'))
+if PLATFORM in ('CUDA', 'HIP'):
+    expect_error('determinism', 'DeterministicForces', platform=PLATFORM,
+                 properties=dict(PROPERTIES, DeterministicForces='false'))
+# LBMForce.createCheckpoint() writes the state of one domain: with the decomposition the checkpoints go to a file.
+expect_error('checkpoint', 'checkpoints are written to a file', case='fluid', density_halo=False, velocity_halo=False,
+             checkpoint=True, **ON)
 
 for case in ('explicit', 'centered', 'faces'):
     single, wall1, solid, particles1, _ = run_particles(case, (1, 1, 1), **ON)
@@ -334,3 +348,124 @@ print('rank %d/%d %s %-12s %s' % (rank, size, (px, py, pz), 'unchecked', message
 expect_error('andersen', 'AndersenThermostat', thermostat=True, **ON)
 if other_platform is not None:
     expect_error('platforms', 'same platform and precision', platform='Reference' if rank == 0 else other_platform)
+
+# Checkpoint files (LBMForce.saveCheckpointFile(), openmmlbm.saveCheckpoint()) and VTK files of the fluid, written by
+# every rank for its domain with MPI-IO, in the folder mpi_decomposition_files of the working directory (shared by the
+# ranks).  A run of 60 steps is interrupted by a checkpoint after 30 and continued in new Contexts: with the same
+# decomposition it must continue bit for bit, also with the fluctuating fluid; with another decomposition, or with one
+# domain, the fluid and the particles restored must be those saved, and without fluctuations the continued run must be
+# that of the uninterrupted one (it does not depend on the decomposition).
+FILES = 'mpi_decomposition_files'
+os.makedirs(FILES, exist_ok=True)
+
+def snapshot(context, force):
+    state = context.getState(getPositions=True, getVelocities=True)
+    particles = np.concatenate([state.getPositions(asNumpy=True).value_in_unit(unit.nanometer),
+                                state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)])
+    return (np.array(force.getFluidState(context, gather=True)).reshape(19, -1), particles,
+            state.getTime().value_in_unit(unit.picosecond), state.getStepCount())
+
+def positions_restored(loaded, saved, same):
+    # With another decomposition the particles are set from their State.  In mixed and single precision OpenMM keeps
+    # the positions in float, wrapped into the box (with a correction in mixed precision), and the State gives them
+    # unwrapped: set again, a position outside the box is rounded to float, so it agrees to that rounding.
+    if same or PROPERTIES.get('Precision', 'double') == 'double':
+        return np.array_equal(loaded, saved)
+    return np.array_equal(loaded[len(POSITIONS):], saved[len(POSITIONS):]) and \
+        np.all(np.abs(loaded - saved) <= 1e-6*np.maximum(1.0, np.abs(saved)))
+
+def started(case, decomposition):
+    context, integrator, force, solid, _ = particle_context(case, decomposition, **ON)
+    context.setPositions([mm.Vec3(*x) for x in POSITIONS])
+    context.setVelocities([mm.Vec3(*v) for v in VELOCITIES])
+    return context, integrator, force, solid
+
+others = [d for d in ((size, 1, 1), (1, size, 1), (1, 1, size)) if d != (px, py, pz)][:1] + [(1, 1, 1)]
+for case in ('centered', 'faces', 'thermal'):
+    path = '%s/%s_%d%d%d.chk' % (FILES, case, px, py, pz)
+    context, integrator, force, solid = started(case, (px, py, pz))
+    integrator.step(30)
+    openmmlbm.saveCheckpoint(path, context, force)
+    saved = snapshot(context, force)
+    integrator.step(30)
+    final = snapshot(context, force)
+    fluid = np.ones(np.prod(N), dtype=bool)
+    fluid[solid] = False
+    for decomposition in [(px, py, pz)] + others:
+        context2, integrator2, force2, _, _ = particle_context(case, decomposition, **ON)
+        openmmlbm.loadCheckpoint(path, context2, force2)
+        loaded = snapshot(context2, force2)
+        integrator2.step(30)
+        continued = snapshot(context2, force2)
+        if rank != 0:
+            continue
+        same = (decomposition == (px, py, pz))
+        restored = (np.array_equal(loaded[0], saved[0]) and loaded[2:] == saved[2:] and
+                    positions_restored(loaded[1], saved[1], same))
+        fdiff = np.abs(continued[0][:, fluid] - final[0][:, fluid]).max()
+        pdiff = np.abs(continued[1] - final[1]).max()
+        if same or case != 'thermal':
+            # With another decomposition the particles are set from their State, which is restored exactly; in mixed
+            # and single precision OpenMM rebuilds from it its float representation of the positions (wrapped into
+            # the box, with a correction in mixed precision), whose last bits may differ, so the run continues to
+            # rounding.
+            exact = (same or PROPERTIES.get('Precision', 'double') == 'double')
+            ok = restored and continued[2:] == final[2:] and (fdiff == pdiff == 0 if exact else max(fdiff, pdiff) < 1e-5)
+            result = 'continued run: fluid %s, particles %s' % (verdict(fdiff), verdict(pdiff))
+        else:
+            ok = restored and continued[3] == final[3]
+            result = 'continued with new random numbers (fluid differs by %.1e)' % fdiff
+        print('rank %d/%d %s checkpoint_%-8s loaded with %s: state %s, %s%s'
+              % (rank, size, (px, py, pz), case, decomposition, 'restored' if restored else 'NOT RESTORED',
+                 result, '' if ok else '  FAILED'), flush=True)
+
+# A file of saveCheckpoint() with one domain (written by rank 0 for itself) cannot be loaded with the decomposition;
+# one of saveCheckpointFile() with one domain can.
+single_path = '%s/single_%d.chk' % (FILES, rank)
+single_file = '%s/single_file_%d.chk' % (FILES, rank)
+context, integrator, force, solid = started('centered', (1, 1, 1))
+integrator.step(30)
+openmmlbm.saveCheckpoint(single_path, context, force)
+force.saveCheckpointFile(context, single_file)
+saved = snapshot(context, force)
+integrator.step(30)
+final = snapshot(context, force)
+context2, integrator2, force2, _, _ = particle_context('centered', (px, py, pz), **ON)
+try:
+    openmmlbm.loadCheckpoint('%s/single_0.chk' % FILES, context2, force2)
+    message = 'no error  FAILED'
+except Exception as e:
+    message = ('stops with the expected error' if 'written with one domain' in str(e) else 'unexpected error: %s  FAILED' % e)
+print('rank %d/%d %s %-12s %s' % (rank, size, (px, py, pz), 'single_chk', message), flush=True)
+openmmlbm.loadCheckpoint('%s/single_file_0.chk' % FILES, context2, force2)
+loaded = snapshot(context2, force2)
+integrator2.step(30)
+continued = snapshot(context2, force2)
+if rank == 0:
+    exact = PROPERTIES.get('Precision', 'double') == 'double'
+    fdiff = np.abs(continued[0][:, fluid] - final[0][:, fluid]).max()
+    pdiff = np.abs(continued[1] - final[1]).max()
+    restored = np.array_equal(loaded[0], saved[0]) and positions_restored(loaded[1], saved[1], False)
+    ok = restored and (fdiff == pdiff == 0 if exact else max(fdiff, pdiff) < 1e-5)
+    print('rank %d/%d %s single_file   one domain loaded with the decomposition: state %s, continued run: fluid %s, '
+          'particles %s%s' % (rank, size, (px, py, pz), 'restored' if restored else 'NOT RESTORED',
+                              verdict(fdiff), verdict(pdiff), '' if ok else '  FAILED'), flush=True)
+
+# VTK files of the fluid: the files written with the decomposition (every rank its domain) must be those of one domain,
+# byte for byte, and only rank 0 writes the particles and the list.
+for double in (False, True):
+    prefixes = {}
+    for decomposition, prefix in (((1, 1, 1), '%s/vtk_single_%d' % (FILES, rank)), ((px, py, pz), '%s/vtk_split' % FILES)):
+        context, integrator, force, solid, sim = particle_context('faces', decomposition, simulation=True, **ON)
+        context.setPositions([mm.Vec3(*x) for x in POSITIONS])
+        context.setVelocities([mm.Vec3(*v) for v in VELOCITIES])
+        sim.reporters.append(openmmlbm.LBMVTKReporter(prefix, 10, force, double=double))
+        sim.step(20)
+        prefixes[decomposition == (1, 1, 1)] = prefix
+    if rank == 0:
+        names = ['density_0000000020.vti', 'velocity_0000000020.vti', 'particles_0000000020.vtp']
+        same = [open('%s_%s' % (prefixes[True], n), 'rb').read() == open('%s_%s' % (prefixes[False], n), 'rb').read()
+                for n in names]
+        print('rank %d/%d %s vtk_%-8s density, velocity and particles files identical to one domain: %s%s'
+              % (rank, size, (px, py, pz), 'double' if double else 'single', same, '' if all(same) else '  FAILED'),
+              flush=True)

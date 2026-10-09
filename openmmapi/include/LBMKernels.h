@@ -170,6 +170,20 @@ public:
      * Read a checkpoint written by createCheckpoint() of a kernel of the same platform, precision and System.
      */
     virtual void loadCheckpoint(OpenMM::ContextImpl& context, std::istream& stream) = 0;
+    /**
+     * Write the part of the state of the kernel that belongs to this rank and is not in getFluidState(), for the
+     * checkpoint files of the domain decomposition (LBMForce::saveCheckpointFile()): what createCheckpoint() writes
+     * except the populations.
+     */
+    virtual void createRankCheckpoint(OpenMM::ContextImpl& context, std::ostream& stream) = 0;
+    /** Read the data written by createRankCheckpoint() on the same rank of the same decomposition. */
+    virtual void loadRankCheckpoint(OpenMM::ContextImpl& context, std::istream& stream) = 0;
+    /**
+     * Forget the random numbers already drawn for the next step and the momentum given to the walls in the last
+     * step, after the fluid of a checkpoint file written with another decomposition, which cannot restore them; the
+     * random number generator keeps its state.
+     */
+    virtual void resetRankState(OpenMM::ContextImpl& context) = 0;
 };
 
 } // namespace LBMPlugin

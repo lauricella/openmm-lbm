@@ -10,12 +10,13 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `openmmapi/include/LBMForce.h`, `openmmapi/src/LBMForce.cpp` | public API: parameters, coupled particles, access to the fluid |
 | `openmmapi/include/LBMKernels.h` | `CalcLBMForceKernel`, the interface every platform implements, and `LBMLatticeParameters` |
 | `openmmapi/include/internal/LBMForceImpl.h`, `openmmapi/src/LBMForceImpl.cpp` | checks the setup, computes the lattice parameters for all platforms (Invariants, below), prints the warnings, writes and checks the header of the checkpoints |
+| `openmmapi/include/internal/LBMDecomposition.h`, `openmmapi/src/LBMDecomposition.cpp` | `LBMDecomposition`: the blocks of the domain decomposition and every MPI call of the plugin (collective errors, sums in rank order, the exchanges, gathering and scattering); `LBMParallelFile`: the files written and read by all the ranks together with MPI-IO, each rank the nodes of its domain at their place in an array of the lattice (checkpoint files, VTK files of the fluid). The only file compiled with MPI (`OPENMM_LBM_MPI`); without it, one domain and the standard library |
 | `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium and its deviation from the rest equilibrium, Hermite polynomial $`H^{(2)}`$, regularized non-equilibrium part, Guo forcing, orthogonal basis of Lulli et al. and random part of the fluctuating fluid (host code) |
 | `openmmapi/include/internal/LBMBoundaries.h` | `LBMBoundaries`: finds the boundary nodes of regularized walls and open faces, with the bits of their unknown and solid directions, what each one imposes and the face that gives it, and the links of the bounce-back walls from the fluid nodes to the solid nodes (host code, used by every platform) |
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform (on OpenCL its subclass `OpenCLCalcLBMForceKernel`, step 3 below), and the tests |
-| `serialization/` | XML proxy of `LBMForce` (parameters only; version 7, which reads versions 1 to 6) |
+| `serialization/` | XML proxy of `LBMForce` (parameters only; version 8, which reads versions 1 to 7) |
 | `python/` | SWIG wrapper `openmmlbm`, with the Python helpers `LBMTemperatureReporter`, `LBMVTKReporter`, `saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter`, and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
 | `examples/` | example scripts, ports of the examples of the DragOpenMM plugin (`examples/README.md`) |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
@@ -134,7 +135,14 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    solid nodes and of the nodes of regularized walls. The Reference kernel writes the populations, the random numbers of the next step, the wall
    momentum and its SFMT generator, with the Gaussian number kept by its Box-Muller transform. The Python module adds
    `openmmlbm.saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter` (in `python/openmmlbm.i`),
-   which store an OpenMM checkpoint and the checkpoint of the force in one file.
+   which store an OpenMM checkpoint and the checkpoint of the force in one file. The checkpoint files of
+   `saveCheckpointFile()`, which any decomposition can load, are written by `LBMForceImpl::saveCheckpointFile()`
+   through `LBMParallelFile`: a head from rank 0 (the header above, the precision, the blocks, the particles), the
+   table of the data of the ranks, the populations of the lattice from every rank, and the data of each rank (its
+   OpenMM checkpoint and `createRankCheckpoint()` of its kernel, which is what `createCheckpoint()` writes except the
+   populations). `loadCheckpointFile()` loads the data of the rank with the same decomposition, and otherwise sets the
+   particles from the head and calls `resetRankState()` of the kernel (`docs/theory.md`, section 8). With more than
+   one domain the Python functions use these files.
 5. **Fluid access.** `getFluidFields()`, `getFluidState()` and `setFluidState()` go from `LBMForce`,
    through `LBMForceImpl`, to the kernel. The common implementation computes density and momentum on
    the device (`computeFluidMoments`), then converts them to OpenMM units on the host.

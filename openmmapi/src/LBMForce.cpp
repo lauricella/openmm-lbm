@@ -302,6 +302,20 @@ void LBMForce::loadCheckpoint(Context& context, istream& stream) {
     dynamic_cast<LBMForceImpl&>(getImplInContext(context)).loadCheckpoint(getContextImpl(context), stream);
 }
 
+void LBMForce::saveCheckpointFile(Context& context, const string& file) const {
+    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).saveCheckpointFile(getContextImpl(context), file);
+}
+
+void LBMForce::loadCheckpointFile(Context& context, const string& file) {
+    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).loadCheckpointFile(getContextImpl(context), file);
+}
+
+void LBMForce::writeFluidFile(Context& context, const string& file, const string& head, const string& tail,
+        const string& arrays, bool doublePrecision) const {
+    dynamic_cast<LBMForceImpl&>(getImplInContext(context)).writeFluidFile(getContextImpl(context), file, head, tail,
+            arrays, doublePrecision);
+}
+
 double LBMForce::getFluidMachNumber(Context& context) const {
     return dynamic_cast<LBMForceImpl&>(getImplInContext(context)).getFluidMachNumber(getContextImpl(context));
 }

@@ -53,6 +53,15 @@ public:
     int getSize() const {
         return size;
     }
+    /** The size of the lattice and the number of blocks along each axis. */
+    void getGridSize(int nodes[3]) const {
+        for (int a = 0; a < 3; a++)
+            nodes[a] = n[a];
+    }
+    void getBlocks(int blocks[3]) const {
+        for (int a = 0; a < 3; a++)
+            blocks[a] = procs[a];
+    }
     /** The block of the rank that owns the node index i along axis a. */
     int blockOf(int axis, int i) const {
         return (procs[axis]*(i + 1) - 1)/n[axis];
@@ -122,6 +131,50 @@ private:
     int n[3], procs[3], coords[3], rank, size;
     std::vector<char> requests;         // the MPI_Request of the pending exchange (mpi.h is not included here)
     int numRequests = 0;
+};
+
+/**
+ * A file that the ranks of a decomposition write or read together, for the checkpoints and the VTK files of the
+ * fluid: with more than one block through MPI-IO, so that each rank writes or reads its own part of one file, and
+ * with one block through the standard library.  The arrays of the lattice are stored in the order of the node index
+ * i + nx*(j + ny*k) whatever the decomposition, so that a file written with one decomposition can be read with any
+ * other.  The methods are collective unless stated otherwise; an error on any rank is thrown on every rank, by the
+ * collective method in which it happens or by close().
+ * @private
+ */
+class OPENMM_EXPORT_LBM LBMParallelFile {
+public:
+    /** Open the file to write it (created, or emptied if it exists) or to read it. */
+    LBMParallelFile(const LBMDecomposition& decomposition, const std::string& path, bool write);
+    ~LBMParallelFile();
+    /** Rank 0 writes the bytes at the offset; the other ranks write nothing.  Not collective. */
+    void writeOnRoot(long long offset, const std::string& data);
+    /** Every rank writes its own bytes at its own offset.  Not collective. */
+    void writeAt(long long offset, const char* data, long long length);
+    /** Every rank reads the bytes at the offset.  Not collective; a read past the end of the file is an error. */
+    void readAt(long long offset, char* data, long long length);
+    /**
+     * Write an array of the whole lattice that starts at the offset, with valuesPerNode values of elementSize bytes
+     * for each node: node by node ([node*valuesPerNode + v]) or, with valueMajor, value by value
+     * ([v*numNodes + node]).  Every rank gives the values of the nodes of its domain, in the same layout over the
+     * domain (numNodes and the node index replaced by those of the domain, getLocalDomain()).
+     */
+    void writeDomain(long long offset, const void* data, int elementSize, int valuesPerNode, bool valueMajor);
+    /** Read the part of such an array that belongs to the domain of this rank. */
+    void readDomain(long long offset, void* data, int elementSize, int valuesPerNode, bool valueMajor);
+    /** The size of the file in bytes. */
+    long long getSize();
+    /** Throw on every rank the first error of any rank, if there is one. */
+    void checkErrors();
+    /** Close the file, and throw on every rank the first error of any rank. */
+    void close();
+private:
+    void transferDomain(long long offset, void* data, int elementSize, int valuesPerNode, bool valueMajor, bool write);
+    const LBMDecomposition& decomposition;
+    std::string path, error;
+    bool parallel, isOpen;
+    std::vector<char> handle;           // the MPI_File with more than one rank
+    void* stream;                       // the std::fstream with one rank
 };
 
 } // namespace LBMPlugin

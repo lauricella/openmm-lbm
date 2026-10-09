@@ -1299,7 +1299,8 @@ void CommonCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& s
     // last step, as they are on the device, so that the checkpoint is exact in every precision.  The random
     // number generator belongs to OpenMM and is part of OpenMM checkpoints.
     if (decomposition.isDecomposed())
-        throw OpenMMException("LBMForce: checkpoints with the domain decomposition are not available yet");
+        throw OpenMMException("LBMForce: with the domain decomposition the checkpoints are written to a file, with "
+                "saveCheckpointFile() (openmmlbm.saveCheckpoint() in Python)");
     ContextSelector selector(cc);
     int elementSize = populations.getElementSize();
     stream.write((const char*) &elementSize, sizeof(int));
@@ -1314,7 +1315,8 @@ void CommonCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& s
 
 void CommonCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& stream) {
     if (decomposition.isDecomposed())
-        throw OpenMMException("LBMForce: checkpoints with the domain decomposition are not available yet");
+        throw OpenMMException("LBMForce: with the domain decomposition the checkpoints are read from a file, with "
+                "loadCheckpointFile() (openmmlbm.loadCheckpoint() in Python)");
     ContextSelector selector(cc);
     int elementSize;
     stream.read((char*) &elementSize, sizeof(int));
@@ -1330,5 +1332,42 @@ void CommonCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& str
     readArray(particleWallMomentum, stream);
     readArray(wallExchange, stream);
     readArray(boundaryExchange, stream);
+}
+
+void CommonCalcLBMForceKernel::createRankCheckpoint(ContextImpl& context, ostream& stream) {
+    // What createCheckpoint() writes, except the populations.
+    ContextSelector selector(cc);
+    int elementSize = populations.getElementSize();
+    stream.write((const char*) &elementSize, sizeof(int));
+    int flags[2] = {noiseDrawn ? 1 : 0, hasAdvanced ? 1 : 0};
+    stream.write((const char*) flags, sizeof(flags));
+    writeArray(noise, stream);
+    writeArray(particleWallMomentum, stream);
+    writeArray(wallExchange, stream);
+    writeArray(boundaryExchange, stream);
+}
+
+void CommonCalcLBMForceKernel::loadRankCheckpoint(ContextImpl& context, istream& stream) {
+    ContextSelector selector(cc);
+    int elementSize;
+    stream.read((char*) &elementSize, sizeof(int));
+    if (!stream || elementSize != populations.getElementSize())
+        throw OpenMMException("LBMForce: the checkpoint was written with a different precision");
+    int flags[2];
+    stream.read((char*) flags, sizeof(flags));
+    noiseDrawn = (flags[0] != 0);
+    hasAdvanced = (flags[1] != 0);
+    stepForcesCurrent = false;
+    readArray(noise, stream);
+    readArray(particleWallMomentum, stream);
+    readArray(wallExchange, stream);
+    readArray(boundaryExchange, stream);
+}
+
+void CommonCalcLBMForceKernel::resetRankState(ContextImpl& context) {
+    // Without the momentum of the last step getWallForce() gives zero until the next step, as in a new Context.
+    noiseDrawn = false;
+    hasAdvanced = false;
+    stepForcesCurrent = false;
 }
 

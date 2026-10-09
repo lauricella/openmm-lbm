@@ -15,12 +15,16 @@
 #include "openmm/MonteCarloBarostat.h"
 #include "openmm/MonteCarloFlexibleBarostat.h"
 #include "openmm/MonteCarloMembraneBarostat.h"
+#include "openmm/Context.h"
 #include "openmm/OpenMMException.h"
+#include "openmm/State.h"
 #include "openmm/VerletIntegrator.h"
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/reference/SimTKOpenMMRealType.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <set>
@@ -411,7 +415,7 @@ void LBMForceImpl::setFluidState(ContextImpl& context, const vector<double>& sta
 static const char checkpointTag[8] = {'L', 'B', 'M', 'C', 'K', 'P', 'T', '1'};
 static const int checkpointVersion = 5;
 
-void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
+void LBMForceImpl::writeCheckpointHeader(ContextImpl& context, ostream& stream) const {
     stream.write(checkpointTag, sizeof(checkpointTag));
     stream.write((const char*) &checkpointVersion, sizeof(int));
     string platform = context.getPlatform().getName();
@@ -423,12 +427,9 @@ void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
     for (int face = 0; face < 6; face++)
         header[7+face] = (int) lattice.faceBoundary[face];
     stream.write((const char*) header, sizeof(header));
-    kernel.getAs<CalcLBMForceKernel>().createCheckpoint(context, stream);
-    if (!stream)
-        throw OpenMMException("LBMForce: error writing the checkpoint");
 }
 
-void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
+void LBMForceImpl::readCheckpointHeader(ContextImpl& context, istream& stream) const {
     char tag[sizeof(checkpointTag)];
     stream.read(tag, sizeof(tag));
     if (!stream || !equal(tag, tag+sizeof(tag), checkpointTag))
@@ -462,9 +463,358 @@ void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
     for (int face = 0; face < 6; face++)
         if (header[7+face] != (int) lattice.faceBoundary[face])
             throw OpenMMException("LBMForce: the checkpoint was written with different boundary types of the faces (setFaceBoundary())");
+}
+
+void LBMForceImpl::createCheckpoint(ContextImpl& context, ostream& stream) {
+    writeCheckpointHeader(context, stream);
+    kernel.getAs<CalcLBMForceKernel>().createCheckpoint(context, stream);
+    if (!stream)
+        throw OpenMMException("LBMForce: error writing the checkpoint");
+}
+
+void LBMForceImpl::loadCheckpoint(ContextImpl& context, istream& stream) {
+    readCheckpointHeader(context, stream);
     kernel.getAs<CalcLBMForceKernel>().loadCheckpoint(context, stream);
     if (!stream)
         throw OpenMMException("LBMForce: the checkpoint is truncated");
+}
+
+/**
+ * Checkpoint files.  The file of openmmlbm.saveCheckpoint() with one domain (tag fileTagSingle) holds the OpenMM
+ * checkpoint and the checkpoint of the force (createCheckpoint()), each after its length:
+ *
+ *   tag, int64 length of the OpenMM checkpoint, int64 length of the force checkpoint, the two checkpoints.
+ *
+ * The file of saveCheckpointFile() (tag fileTagDomains) can be read with any decomposition:
+ *
+ *   tag, int64 length of the head, head, int64 number of ranks R, R x (int64 offset, int64 length) of the data of
+ *   each rank, populations of the whole lattice, data of each rank.
+ *
+ * The head, written by rank 0, has the header of createCheckpoint(), the precision, the number of blocks along
+ * each axis and the particles (time, step count, box, positions and velocities, global parameters), which are the
+ * same on every rank.  The populations are doubles, [q*numNodes + node], written and read by every rank for the
+ * nodes of its domain.  The data of a rank are its OpenMM checkpoint, after its int64 length, and
+ * createRankCheckpoint() of its kernel.  With the same decomposition every rank loads its own data and the run
+ * continues bit for bit; with another one the particles are set from the head, and each rank keeps the random
+ * number generators of its new Context.
+ */
+static const char fileTagSingle[] = "OPENMMLBM-CHECKPOINT-1\n";
+static const char fileTagDomains[] = "OPENMMLBM-CHECKPOINT-2\n";
+static const int fileTagLength = sizeof(fileTagSingle) - 1;
+
+static void writeInt64(string& data, long long value) {
+    data.append((const char*) &value, sizeof(value));
+}
+
+/** The precision of the Context, as the property "Precision" of the GPU platforms gives it, or "double". */
+static string getContextPrecision(ContextImpl& context) {
+    const Platform& platform = context.getPlatform();
+    const vector<string>& names = platform.getPropertyNames();
+    if (find(names.begin(), names.end(), "Precision") == names.end())
+        return "double";
+    return platform.getPropertyValue(context.getOwner(), "Precision");
+}
+
+void LBMForceImpl::saveCheckpointFile(ContextImpl& context, const string& path) {
+    // Every rank builds the head, which is the same on all of them, so that every rank knows the offsets.
+    CalcLBMForceKernel& lbm = kernel.getAs<CalcLBMForceKernel>();
+    const int Q = 19;
+    stringstream head;
+    writeCheckpointHeader(context, head);
+    string precision = getContextPrecision(context);
+    int length = precision.size(), blocks[3];
+    head.write((const char*) &length, sizeof(int));
+    head.write(precision.c_str(), length);
+    decomposition.getBlocks(blocks);
+    head.write((const char*) blocks, sizeof(blocks));
+    State state = context.getOwner().getState(State::Positions | State::Velocities | State::Parameters);
+    double time = state.getTime();
+    long long stepCount = state.getStepCount(), numParticles = context.getSystem().getNumParticles();
+    head.write((const char*) &time, sizeof(double));
+    head.write((const char*) &stepCount, sizeof(long long));
+    Vec3 box[3];
+    state.getPeriodicBoxVectors(box[0], box[1], box[2]);
+    head.write((const char*) box, sizeof(box));
+    head.write((const char*) &numParticles, sizeof(long long));
+    head.write((const char*) state.getPositions().data(), numParticles*sizeof(Vec3));
+    head.write((const char*) state.getVelocities().data(), numParticles*sizeof(Vec3));
+    const map<string, double>& parameters = state.getParameters();
+    int numParameters = parameters.size();
+    head.write((const char*) &numParameters, sizeof(int));
+    for (auto& parameter : parameters) {
+        int nameLength = parameter.first.size();
+        head.write((const char*) &nameLength, sizeof(int));
+        head.write(parameter.first.c_str(), nameLength);
+        head.write((const char*) &parameter.second, sizeof(double));
+    }
+
+    // The data of this rank and the table of the data of all the ranks.
+    stringstream openmm, rankData;
+    context.getOwner().createCheckpoint(openmm);
+    string data;
+    writeInt64(data, openmm.str().size());
+    data += openmm.str();
+    lbm.createRankCheckpoint(context, rankData);
+    data += rankData.str();
+    int numRanks = decomposition.getSize();
+    vector<double> lengths(numRanks, 0.0);
+    lengths[decomposition.getRank()] = (double) data.size();
+    decomposition.sum(lengths.data(), numRanks);
+    string start(fileTagDomains, fileTagLength);
+    writeInt64(start, head.str().size());
+    start += head.str();
+    writeInt64(start, numRanks);
+    long long fluidOffset = start.size() + 16LL*numRanks;
+    long long offset = fluidOffset + ((long long) Q)*lattice.getNumNodes()*sizeof(double), myOffset = 0;
+    for (int r = 0; r < numRanks; r++) {
+        if (r == decomposition.getRank())
+            myOffset = offset;
+        writeInt64(start, offset);
+        writeInt64(start, (long long) lengths[r]);
+        offset += (long long) lengths[r];
+    }
+    vector<double> populations;
+    lbm.getFluidState(context, populations);
+
+    // The file is written under a temporary name and then renamed, so that an interrupted write never replaces a
+    // valid checkpoint with a damaged one.
+    string temporary = path + ".tmp";
+    LBMParallelFile file(decomposition, temporary, true);
+    file.writeOnRoot(0, start);
+    file.writeDomain(fluidOffset, populations.data(), sizeof(double), Q, true);
+    file.writeAt(myOffset, data.data(), data.size());
+    file.close();
+    string error;
+    if (decomposition.getRank() == 0 && rename(temporary.c_str(), path.c_str()) != 0)
+        error = "LBMForce: cannot rename " + temporary + " to " + path;
+    decomposition.throwIfAnyError(error);
+}
+
+/** A reader of the bytes of a head, which throws if they end too soon. */
+class HeadReader {
+public:
+    HeadReader(const string& data, const string& path) : data(data), path(path), position(0) {
+    }
+    void read(void* value, size_t length) {
+        if (position + length > data.size())
+            throw OpenMMException("LBMForce: " + path + " is damaged");
+        memcpy(value, data.data()+position, length);
+        position += length;
+    }
+    void skip(size_t length) {
+        position += length;
+    }
+    template <class T> T get() {
+        T value;
+        read(&value, sizeof(T));
+        return value;
+    }
+    string getString() {
+        int length = get<int>();
+        if (length < 0 || length > 100000)
+            throw OpenMMException("LBMForce: " + path + " is damaged");
+        string value(length, ' ');
+        read(&value[0], length);
+        return value;
+    }
+private:
+    const string& data;
+    const string& path;
+    size_t position;
+};
+
+void LBMForceImpl::loadCheckpointFile(ContextImpl& context, const string& path) {
+    CalcLBMForceKernel& lbm = kernel.getAs<CalcLBMForceKernel>();
+    const int Q = 19;
+    LBMParallelFile file(decomposition, path, false);
+    long long size = file.getSize();
+    string tag(fileTagLength, ' ');
+    file.readAt(0, &tag[0], min((long long) fileTagLength, size));
+    file.checkErrors();
+    if (tag == fileTagSingle) {
+        // A file of openmmlbm.saveCheckpoint() with one domain.
+        if (decomposition.isDecomposed())
+            throw OpenMMException("LBMForce: " + path + " was written with one domain by openmmlbm.saveCheckpoint(), and "
+                    "only a Context with one domain can load it; to continue a run with another decomposition write the "
+                    "checkpoint with LBMForce.saveCheckpointFile()");
+        long long lengths[2];
+        file.readAt(fileTagLength, (char*) lengths, sizeof(lengths));
+        file.checkErrors();
+        if (lengths[0] < 0 || lengths[1] < 0 || fileTagLength + 16 + lengths[0] + lengths[1] != size)
+            throw OpenMMException("LBMForce: " + path + " is truncated or damaged");
+        string openmm(lengths[0], ' '), force(lengths[1], ' ');
+        file.readAt(fileTagLength + 16, &openmm[0], lengths[0]);
+        file.readAt(fileTagLength + 16 + lengths[0], &force[0], lengths[1]);
+        file.close();
+        stringstream openmmStream(openmm), forceStream(force);
+        context.getOwner().loadCheckpoint(openmmStream);
+        loadCheckpoint(context, forceStream);
+        return;
+    }
+    if (tag != fileTagDomains)
+        throw OpenMMException("LBMForce: " + path + " is not a checkpoint written by LBMForce.saveCheckpointFile() or "
+                "openmmlbm.saveCheckpoint()");
+
+    // The head, which every rank reads.
+    long long headLength = 0, numRanks = 0;
+    file.readAt(fileTagLength, (char*) &headLength, sizeof(long long));
+    file.checkErrors();
+    if (headLength < 0 || fileTagLength + 16 + headLength > size)
+        throw OpenMMException("LBMForce: " + path + " is truncated or damaged");
+    string head(headLength, ' ');
+    file.readAt(fileTagLength + 8, &head[0], headLength);
+    file.readAt(fileTagLength + 8 + headLength, (char*) &numRanks, sizeof(long long));
+    file.checkErrors();
+    stringstream headStream(head);
+    readCheckpointHeader(context, headStream);
+    HeadReader reader(head, path);
+    reader.skip((size_t) headStream.tellg());
+    string precision = reader.getString();
+    if (precision != getContextPrecision(context))
+        throw OpenMMException("LBMForce: " + path + " was written in " + precision + " precision, and this Context uses " +
+                getContextPrecision(context));
+    int blocks[3], myBlocks[3];
+    reader.read(blocks, sizeof(blocks));
+    decomposition.getBlocks(myBlocks);
+    bool sameDecomposition = (blocks[0] == myBlocks[0] && blocks[1] == myBlocks[1] && blocks[2] == myBlocks[2] &&
+                              numRanks == decomposition.getSize());
+    if (numRanks < 1 || numRanks != ((long long) blocks[0])*blocks[1]*blocks[2])
+        throw OpenMMException("LBMForce: " + path + " is damaged");
+    vector<long long> table(2*numRanks);
+    long long tableOffset = fileTagLength + 16 + headLength;
+    file.readAt(tableOffset, (char*) table.data(), 16*numRanks);
+    file.checkErrors();
+    long long fluidOffset = tableOffset + 16*numRanks;
+    if (fluidOffset + ((long long) Q)*lattice.getNumNodes()*sizeof(double) > size)
+        throw OpenMMException("LBMForce: " + path + " is truncated");
+
+    // The particles and the data of the rank.
+    if (sameDecomposition) {
+        int rank = decomposition.getRank();
+        long long offset = table[2*rank], length = table[2*rank+1], openmmLength = -1;
+        string data(length >= 8 && offset >= fluidOffset && offset + length <= size ? length : 0, ' ');
+        file.readAt(offset, &data[0], data.size());
+        int start[3], count[3];
+        decomposition.getLocalDomain(start, count);
+        vector<double> populations(((size_t) Q)*count[0]*count[1]*count[2]);
+        file.readDomain(fluidOffset, populations.data(), sizeof(double), Q, true);
+        file.close();
+        if (!data.empty())
+            memcpy(&openmmLength, data.data(), 8);
+        string error;
+        if (openmmLength < 0 || 8 + openmmLength > (long long) data.size())
+            error = "LBMForce: " + path + " is damaged";
+        else {
+            // An error of one rank must stop all of them (collective errors).
+            try {
+                stringstream openmm(data.substr(8, openmmLength));
+                context.getOwner().loadCheckpoint(openmm);
+            }
+            catch (exception& e) {
+                error = e.what();
+            }
+        }
+        decomposition.throwIfAnyError(error);
+        lbm.setFluidState(context, populations);
+        stringstream rankData(data.substr(8 + openmmLength));
+        try {
+            lbm.loadRankCheckpoint(context, rankData);
+            if (!rankData)
+                error = "LBMForce: " + path + " is damaged";
+        }
+        catch (exception& e) {
+            error = e.what();
+        }
+        decomposition.throwIfAnyError(error);
+        return;
+    }
+    double time = reader.get<double>();
+    long long stepCount = reader.get<long long>();
+    Vec3 box[3];
+    reader.read(box, sizeof(box));
+    long long numParticles = reader.get<long long>();
+    if (numParticles != context.getSystem().getNumParticles())
+        throw OpenMMException("LBMForce: " + path + " was written for a System with a different number of particles");
+    vector<Vec3> positions(numParticles), velocities(numParticles);
+    reader.read(positions.data(), numParticles*sizeof(Vec3));
+    reader.read(velocities.data(), numParticles*sizeof(Vec3));
+    int numParameters = reader.get<int>();
+    map<string, double> parameters;
+    for (int i = 0; i < numParameters; i++) {
+        string name = reader.getString();
+        parameters[name] = reader.get<double>();
+    }
+    int start[3], count[3];
+    decomposition.getLocalDomain(start, count);
+    vector<double> populations(((size_t) Q)*count[0]*count[1]*count[2]);
+    file.readDomain(fluidOffset, populations.data(), sizeof(double), Q, true);
+    file.close();
+    Context& owner = context.getOwner();
+    owner.setTime(time);
+    owner.setStepCount(stepCount);
+    owner.setPeriodicBoxVectors(box[0], box[1], box[2]);
+    owner.setPositions(positions);
+    owner.setVelocities(velocities);
+    for (auto& parameter : parameters)
+        owner.setParameter(parameter.first, parameter.second);
+    lbm.setFluidState(context, populations);
+    lbm.resetRankState(context);
+}
+
+void LBMForceImpl::writeFluidFile(ContextImpl& context, const string& path, const string& head, const string& tail,
+        const string& arrays, bool doublePrecision) {
+    // The arrays of the fluid of the whole lattice, each after its length in bytes, between a head and a tail that
+    // rank 0 writes: every rank writes the nodes of its domain.
+    vector<string> names;
+    stringstream list(arrays);
+    string name;
+    while (list >> name) {
+        if (name != "density" && name != "velocity" && name != "solid")
+            throw OpenMMException("LBMForce: unknown array of the fluid: " + name);
+        names.push_back(name);
+    }
+    vector<double> density;
+    vector<Vec3> velocity;
+    kernel.getAs<CalcLBMForceKernel>().getFluidFields(context, density, velocity, false);
+    int start[3], count[3];
+    decomposition.getLocalDomain(start, count);
+    size_t numLocal = density.size();
+    long long numNodes = lattice.getNumNodes();
+    int realSize = (doublePrecision ? 8 : 4);
+    LBMParallelFile file(decomposition, path, true);
+    file.writeOnRoot(0, head);
+    long long offset = head.size();
+    for (const string& array : names) {
+        int components = (array == "velocity" ? 3 : 1), elementSize = (array == "solid" ? 1 : realSize);
+        vector<char> values(numLocal*components*elementSize, 0);
+        if (array == "solid") {
+            for (int node : lattice.solidNodes) {
+                int i = node%lattice.nx - start[0], j = (node/lattice.nx)%lattice.ny - start[1];
+                int k = node/(lattice.nx*lattice.ny) - start[2];
+                if (i >= 0 && i < count[0] && j >= 0 && j < count[1] && k >= 0 && k < count[2])
+                    values[i + count[0]*(j + count[1]*k)] = 1;
+            }
+        }
+        else
+            for (size_t l = 0; l < numLocal; l++)
+                for (int c = 0; c < components; c++) {
+                    double value = (array == "density" ? density[l] : velocity[l][c]);
+                    char* target = &values[(l*components + c)*elementSize];
+                    if (doublePrecision)
+                        memcpy(target, &value, 8);
+                    else {
+                        float single = (float) value;
+                        memcpy(target, &single, 4);
+                    }
+                }
+        string length;
+        writeInt64(length, numNodes*components*elementSize);
+        file.writeOnRoot(offset, length);
+        file.writeDomain(offset + 8, values.data(), elementSize, components, false);
+        offset += 8 + numNodes*components*elementSize;
+    }
+    file.writeOnRoot(offset, tail);
+    file.close();
 }
 
 double LBMForceImpl::getFluidMachNumber(ContextImpl& context) {

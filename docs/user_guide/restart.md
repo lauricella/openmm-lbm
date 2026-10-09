@@ -282,6 +282,15 @@ dependency: `sbatch --dependency=afterany:<number of the previous job> job.sh`.
   checkpoints as bytes, and `context.loadCheckpoint(data)` and `force.loadCheckpoint(context, data)` load
   them; `saveCheckpoint()` and `loadCheckpoint()` only add the file around them. In C++ the methods take
   binary streams.
+- **Several MPI ranks.** With the domain decomposition (`setDomainDecomposition()`) every rank runs the same script,
+  so every rank calls `saveCheckpoint()` and `loadCheckpoint()`, or has the `LBMCheckpointReporter`. The file is then
+  the one of `force.saveCheckpointFile()`: one file for all the ranks, each writing the fluid of its domain, and it can
+  be continued with any decomposition, also with another number of ranks or with one domain. With the same
+  decomposition the restart is exact, bit for bit; with another one the fluid and the particles are exact, and the
+  random numbers continue from the generators of the new run, so choose a new seed or 0
+  ([api_reference.md](api_reference.md#savecheckpointfilecontext-file-loadcheckpointfilecontext-file)). The file of
+  `saveCheckpoint()` with one domain loads only with one domain: to continue a run of one GPU on several, save its
+  checkpoint with `force.saveCheckpointFile(simulation.context, 'run.chk')` instead.
 
 ## Finding the force of a System
 

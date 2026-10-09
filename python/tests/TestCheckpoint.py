@@ -88,6 +88,40 @@ def test_restart_is_exact(tmp_path, boundaries):
     assert restartedForce.getWallForce(restarted.context) == wall
 
 
+@pytest.mark.parametrize('boundaries', [False, True], ids=['wall', 'fluctuations-faces'])
+def test_checkpoint_file(tmp_path, boundaries):
+    """The file of LBMForce.saveCheckpointFile(), which a run with any domain decomposition can load, continues a run
+    of one domain exactly, loaded with loadCheckpointFile() or with openmmlbm.loadCheckpoint()."""
+    file = str(tmp_path/'run.chk')
+    simulation, force = create_simulation(boundaries=boundaries)
+    simulation.context.setPositions(np.random.default_rng(1).uniform(0.6, 3.4, (8, 3)))
+    simulation.context.setVelocities(np.random.default_rng(2).normal(0, 0.3, (8, 3)))
+    simulation.reporters.append(app.StateDataReporter(io.StringIO(), 5, step=True, temperature=True))
+    simulation.step(20)
+    force.saveCheckpointFile(simulation.context, file)
+    wall = force.getWallForce(simulation.context)
+    simulation.step(15)
+    positions = simulation.context.getState(getPositions=True).getPositions(asNumpy=True)._value
+    fluid = np.array(force.getFluidState(simulation.context))
+    assert open(file, 'rb').read(23) == b'OPENMMLBM-CHECKPOINT-2\n'
+    for helper in (False, True):
+        restarted, restartedForce = create_simulation(seed=99, boundaries=boundaries)
+        if helper:
+            openmmlbm.loadCheckpoint(file, restarted.context, restartedForce)
+        else:
+            restartedForce.loadCheckpointFile(restarted.context, file)
+        assert restarted.currentStep == 20
+        assert restartedForce.getWallForce(restarted.context) == wall
+        restarted.reporters.append(app.StateDataReporter(io.StringIO(), 5, step=True, temperature=True))
+        restarted.step(15)
+        assert np.array_equal(positions, restarted.context.getState(getPositions=True).getPositions(asNumpy=True)._value)
+        assert np.array_equal(fluid, np.array(restartedForce.getFluidState(restarted.context)))
+    with open(file, 'r+b') as out:
+        out.truncate(1000)
+    with pytest.raises(Exception, match='truncated|damaged'):
+        restartedForce.loadCheckpointFile(restarted.context, file)
+
+
 def test_save_and_load_functions(tmp_path):
     file = str(tmp_path/'state.chk')
     simulation, force = create_simulation()

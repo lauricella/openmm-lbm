@@ -29,8 +29,7 @@ versions the API may still change.
   only on request (`gather=True`, `scatter=True`); `getFluidFields(halo=True)` adds a layer one node thick around the
   domain, filled for the fields whose halo is exchanged at the end of every step (`setDensityHaloExchange()`,
   `setVelocityHaloExchange()`, off by default, serialized in version 8) and NaN otherwise. With one domain the new
-  arguments change nothing, and the halo comes from the lattice across the periodic boundaries. Not yet: checkpoints
-  and `LBMVTKReporter` with more than one domain.
+  arguments change nothing, and the halo comes from the lattice across the periodic boundaries.
 - CUDA, OpenCL and HIP platforms: the fluid, the walls and the open faces with more than one domain, one GPU per rank.
   Each rank stores only its block and a layer of halo nodes along the divided axes; the populations pushed into the
   halo are packed on the device, sent through the host with non-blocking MPI calls while the interior of the block
@@ -48,6 +47,23 @@ versions the API may still change.
   of the fluctuations as with one domain, no difference at the planes of the borders of the blocks (within 2e-4 of
   their value), independent random numbers on the ranks, and the temperature of coupled particles that cross the
   domains unchanged. `python/tests/mpi_decomposition.py` checks the independence of the ranks.
+- Checkpoint files that any decomposition can load: `saveCheckpointFile()` and `loadCheckpointFile()`. One file for all
+  the ranks, written and read with collective MPI-IO, each rank the populations of its domain at their place in the
+  lattice, with the particles and, for every rank, its OpenMM checkpoint and its part of the state of the force.
+  Loaded with the same decomposition the run continues bit for bit; with another one, another number of ranks or one
+  domain, the fluid and the particles are restored exactly and the random numbers continue from the generators of the
+  new Context. With one domain no MPI is needed, and the file can be continued with several domains.
+  `openmmlbm.saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter` use it with more than one domain; with
+  one domain they write and read the same files as before. `LBMForce.createCheckpoint()` (the state of one domain)
+  gives an error with more than one domain.
+- `LBMVTKReporter` with more than one domain: the files of the fluid are the same as with one domain, written together
+  by all the ranks with MPI-IO (`writeFluidFile()`), and rank 0 writes the particles and the list of files.
+
+### Changed (in development for 0.4.0)
+- `LBMVTKReporter` writes the density and the velocity of the fluid in two files, `<prefix>_density_<step>.vti` and
+  `<prefix>_velocity_<step>.vti` (each with the solid nodes, so that it opens alone), instead of one
+  `<prefix>_fluid_<step>.vti`; `density=False` or `velocity=False` leaves one of them out (`fluid=False` both). The
+  values are the same as before, byte for byte.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations

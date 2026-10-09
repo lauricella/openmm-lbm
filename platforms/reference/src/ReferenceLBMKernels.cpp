@@ -1129,10 +1129,23 @@ void ReferenceCalcLBMForceKernel::setFluidState(ContextImpl& context, const vect
 
 void ReferenceCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream& stream) {
     if (decomposition.isDecomposed())
-        throw OpenMMException("LBMForce: checkpoints with the domain decomposition are not available yet");
+        throw OpenMMException("LBMForce: with the domain decomposition the checkpoints are written to a file, with "
+                "saveCheckpointFile() (openmmlbm.saveCheckpoint() in Python)");
     // The populations, the random numbers drawn for the next step, the state of the generator of the force
     // (not part of OpenMM checkpoints on this platform) and the momentum given to the walls in the last step.
     stream.write((const char*) populations.data(), sizeof(double)*populations.size());
+    createRankCheckpoint(context, stream);
+}
+
+void ReferenceCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& stream) {
+    if (decomposition.isDecomposed())
+        throw OpenMMException("LBMForce: with the domain decomposition the checkpoints are read from a file, with "
+                "loadCheckpointFile() (openmmlbm.loadCheckpoint() in Python)");
+    stream.read((char*) populations.data(), sizeof(double)*populations.size());
+    loadRankCheckpoint(context, stream);
+}
+
+void ReferenceCalcLBMForceKernel::createRankCheckpoint(ContextImpl& context, ostream& stream) {
     int drawn = noiseDrawn;
     stream.write((const char*) &drawn, sizeof(int));
     for (const Vec3& xi : noise)
@@ -1150,10 +1163,7 @@ void ReferenceCalcLBMForceKernel::createCheckpoint(ContextImpl& context, ostream
     }
 }
 
-void ReferenceCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& stream) {
-    if (decomposition.isDecomposed())
-        throw OpenMMException("LBMForce: checkpoints with the domain decomposition are not available yet");
-    stream.read((char*) populations.data(), sizeof(double)*populations.size());
+void ReferenceCalcLBMForceKernel::loadRankCheckpoint(ContextImpl& context, istream& stream) {
     stepForcesCurrent = false;
     int drawn;
     stream.read((char*) &drawn, sizeof(int));
@@ -1168,4 +1178,10 @@ void ReferenceCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& 
     stream.read((char*) &storedGaussian, sizeof(double));
     for (int k = 0; k < 3; k++)
         stream.read((char*) &wallMomentum[k], sizeof(double));
+}
+
+void ReferenceCalcLBMForceKernel::resetRankState(ContextImpl& context) {
+    stepForcesCurrent = false;
+    noiseDrawn = false;
+    wallMomentum = Vec3();
 }

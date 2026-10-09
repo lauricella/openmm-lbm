@@ -37,7 +37,7 @@ T, production.  Files written, with the prefix given by --output (default <prese
                              input of msd.py, which computes the diffusion coefficient
   <prefix>_final.xml, <prefix>_fluid.npz   final state of the particles and of the fluid
   <prefix>.chk               checkpoint of the whole run, fluid included, every --checkpoint steps
-  <prefix>_fluid_<step>.vti, <prefix>_particles_<step>.vtp, <prefix>.pvd
+  <prefix>_density_<step>.vti, <prefix>_velocity_<step>.vti, <prefix>_particles_<step>.vtp, <prefix>.pvd
                              with --vtk N, every N steps, the fluid and the beads in VTK files for ParaView,
                              in OpenMM units (openmmlbm.LBMVTKReporter); open <prefix>.pvd for the series
 

@@ -638,7 +638,8 @@ equal blocks along x would be identical if two ranks drew the same numbers; thei
 -0.09 and 0.01 on every platform (the statistics of the fluctuations with the decomposition are in the next
 subsection). The checks that must stop every rank together all do (150 of 150): copies of the particles that differ
 ($`10^{-12}`$ in the velocities, $`10^{-6}`$ in single precision, where the velocities are stored as float), an
-`AndersenThermostat`, `DeterministicForces` off on CUDA, and checkpoints. Without the decomposition nothing changes on
+`AndersenThermostat`, `DeterministicForces` off on CUDA, and `LBMForce.createCheckpoint()`, which holds the state of
+one domain (the checkpoint files are below). Without the decomposition nothing changes on
 these platforms: the regression cases of the walls and the open faces (7 cases, with and without coupled particles and
 fluctuations) are identical bit for bit to the previous version on CUDA and OpenCL in the three precisions.
 
@@ -673,6 +674,46 @@ An exception in the script on one rank only cannot be made collective: `python/t
 while rank 0 waits in the check made when the Context is created. With the `excepthook` of `openmmlbm` the job stops
 after 3 s with exit code 1 (`MPI_Abort`); with the default one of Python it hangs, and was killed by a timeout after
 60 s.
+
+### Checkpoint files and VTK files across the domains (all platforms)
+
+The last part of `python/tests/mpi_decomposition.py` checks the files written by all the ranks with MPI-IO
+(`saveCheckpointFile()`, `LBMVTKReporter`), in a folder of the working directory shared by the ranks. For three cases
+with the coupled particles above (centred drag with regularized walls and with open faces, at $`T = 0`$; centred drag
+with the fluctuating fluid at 300 K) a run of 60 steps is interrupted after 30 by `openmmlbm.saveCheckpoint()` and
+continued in new Contexts with the same decomposition, with another one (the ranks along one axis) and with one domain
+on every rank (each rank reading the whole file):
+
+| Loaded with | Restored state (rank 0, gathered) | Continued run against the uninterrupted one |
+|---|---|---|
+| the same decomposition | fluid and particles identical bit for bit | identical bit for bit, also with the fluctuating fluid |
+| another decomposition, or one domain | fluid identical bit for bit; particles identical bit for bit in double precision, positions to float rounding in mixed and single precision | without random numbers: identical bit for bit in double precision, to rounding in mixed and single precision (fluid within $`1.4 \cdot 10^{-9}`$, particles within $`9 \cdot 10^{-8}`$ nm and nm/ps); with the fluctuating fluid it continues with the new random numbers of the ranks |
+
+In mixed and single precision OpenMM keeps the positions in float, wrapped into the box, while the State gives them
+unwrapped: a particle that has crossed a periodic boundary is set again at a position rounded to float (seen on two
+nodes in single precision, in the fluctuating case), and the float representation of the positions is rebuilt, which
+changes the rounding of the steps that follow. The same decomposition loads the OpenMM checkpoint of each rank instead,
+which restores that representation. A file written by `saveCheckpointFile()` with one domain loads with the
+decomposition, and the run continues as the uninterrupted one in the same way; a file written by
+`openmmlbm.saveCheckpoint()` with one domain is refused, with an error on every rank. The VTK files of the density, the
+velocity and the particles written with the decomposition are identical, byte for byte, to those of one domain, in
+single and double precision. Runs: on the login node the Reference platform with $`2 \times 1 \times 1`$,
+$`2 \times 2 \times 1`$, $`1 \times 2 \times 2`$ and $`2 \times 2 \times 2`$, OpenCL on the CPU (pocl) in double
+precision with $`2 \times 1 \times 1`$ and $`1 \times 2 \times 2`$, in mixed precision with $`1 \times 2 \times 1`$ and
+in single precision with $`2 \times 2 \times 1`$; on one node with four A100 GPUs CUDA in double precision with
+$`2 \times 1 \times 1`$, $`1 \times 2 \times 2`$ and $`4 \times 1 \times 1`$, in mixed and single precision with
+$`2 \times 1 \times 1`$ and $`2 \times 2 \times 1`$, OpenCL in the three precisions; on two nodes (8 ranks, one file
+on the parallel file system written from both nodes) CUDA in double precision with $`2 \times 2 \times 2`$, in mixed
+precision with $`2 \times 2 \times 2`$ and in single precision with $`4 \times 2 \times 1`$, OpenCL in double precision
+with $`2 \times 2 \times 2`$ and in single precision with $`4 \times 2 \times 1`$. All passed.
+
+`TestMPIReferenceLBMForce` (CTest, two ranks) continues the run of two domains from a checkpoint file with two domains
+and with one domain, bit for bit. Without MPI the C++ tests continue a run with the fluctuating fluid, regularized walls
+and open faces from a file of `saveCheckpointFile()` bit for bit on every platform, and `test_checkpoint_file` does the
+same in Python; the files of `openmmlbm.saveCheckpoint()` with one domain are those of version 0.3, byte for byte (the
+part of the force; the OpenMM checkpoint inside them is not reproducible from one run to the next on OpenCL with pocl,
+with any version), and the arrays of the VTK files are those of version 0.3, byte for byte, on the Reference platform
+and on CUDA and OpenCL in the three precisions.
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 

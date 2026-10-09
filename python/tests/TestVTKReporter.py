@@ -93,23 +93,25 @@ def test_vtk_reporter(tmp_path, double):
     simulation.step(10)
     tolerance = 0 if double else 1e-6
     for step in (5, 10):
-        assert os.path.exists('%s_fluid_%010d.vti' % (prefix, step))
-    # fluid at step 10: the same fields as getFluidFields(), node (i, j, k) at (i dx, j dx, k dx)
-    root, arrays = read_vtk('%s_fluid_%010d.vti' % (prefix, 10))
-    image = root.find('ImageData')
-    assert image.get('WholeExtent') == '0 5 0 4 0 3'
-    assert [float(x) for x in image.get('Spacing').split()] == pytest.approx([0.5]*3, rel=1e-15)
-    assert [float(x) for x in image.get('Origin').split()] == [0, 0, 0]
+        assert os.path.exists('%s_density_%010d.vti' % (prefix, step))
+        assert os.path.exists('%s_velocity_%010d.vti' % (prefix, step))
+    # fluid at step 10: the same fields as getFluidFields(), node (i, j, k) at (i dx, j dx, k dx), density and velocity
+    # in two files, each with the solid nodes
     density, velocity = force.getFluidFields(simulation.context)
     density = np.array(density.value_in_unit(unit.dalton/unit.nanometer**3))
     velocity = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))
-    assert np.allclose(arrays['density'], density, rtol=tolerance, atol=0)
-    assert np.allclose(arrays['velocity'], velocity, rtol=tolerance, atol=tolerance*np.abs(velocity).max())
     assert np.abs(velocity).max() > 0
-    assert list(np.nonzero(arrays['solid'])[0]) == [0, 7]
-    assert arrays['units'] == ['Origin, Spacing: nm', 'density: Da/nm^3', 'velocity: nm/ps',
-                               'solid: 1 for a solid node, 0 for a fluid node']
-    assert b'OpenMM units' in open('%s_fluid_%010d.vti' % (prefix, 10), 'rb').read(200)
+    for field, expected, unitLine in (('density', density, 'density: Da/nm^3'), ('velocity', velocity, 'velocity: nm/ps')):
+        root, arrays = read_vtk('%s_%s_%010d.vti' % (prefix, field, 10))
+        image = root.find('ImageData')
+        assert image.get('WholeExtent') == '0 5 0 4 0 3'
+        assert [float(x) for x in image.get('Spacing').split()] == pytest.approx([0.5]*3, rel=1e-15)
+        assert [float(x) for x in image.get('Origin').split()] == [0, 0, 0]
+        assert sorted(arrays) == sorted([field, 'solid', 'units'])
+        assert np.allclose(arrays[field], expected, rtol=tolerance, atol=tolerance*np.abs(expected).max())
+        assert list(np.nonzero(arrays['solid'])[0]) == [0, 7]
+        assert arrays['units'] == ['Origin, Spacing: nm', unitLine, 'solid: 1 for a solid node, 0 for a fluid node']
+        assert b'OpenMM units' in open('%s_%s_%010d.vti' % (prefix, field, 10), 'rb').read(200)
     # particles at step 10: positions wrapped into the box, velocities of the State, masses, indices, coupling
     root, arrays = read_vtk('%s_particles_%010d.vtp' % (prefix, 10))
     state = simulation.context.getState(getPositions=True, getVelocities=True, enforcePeriodicBox=True)
@@ -123,11 +125,11 @@ def test_vtk_reporter(tmp_path, double):
     assert list(arrays['coupled']) == [1, 1, 0, 1]
     assert list(arrays['connectivity']) == [0, 1, 2, 3] and list(arrays['offsets']) == [1, 2, 3, 4]
     assert arrays['units'][:3] == ['Points: nm', 'velocity: nm/ps, at the half step of the leapfrog', 'mass: Da']
-    # the series: two reports, fluid and particles each, at 0.05 and 0.1 ps
+    # the series: two reports, density, velocity and particles each, at 0.05 and 0.1 ps
     collection = ET.parse(prefix + '.pvd').getroot()
-    datasets = [(float(d.get('timestep')), d.get('file')) for d in collection.iter('DataSet')]
-    assert datasets == [(pytest.approx(0.05), 'run_fluid_0000000005.vti'), (pytest.approx(0.05), 'run_particles_0000000005.vtp'),
-                        (pytest.approx(0.1), 'run_fluid_0000000010.vti'), (pytest.approx(0.1), 'run_particles_0000000010.vtp')]
+    datasets = [(float(d.get('timestep')), d.get('part'), d.get('file')) for d in collection.iter('DataSet')]
+    assert datasets == [(pytest.approx(0.05*(1 + i//3)), str(i%3), 'run_%s_%010d.%s' % (name, 5*(1 + i//3), kind))
+                        for i, (name, kind) in enumerate([('density', 'vti'), ('velocity', 'vti'), ('particles', 'vtp')]*2)]
 
 
 def test_vtk_reporter_does_not_change_the_run(tmp_path):
@@ -145,17 +147,22 @@ def test_vtk_reporter_does_not_change_the_run(tmp_path):
 
 
 def test_vtk_reporter_parts(tmp_path):
-    # Only the fluid, or only the particles (not wrapped).
+    # Only the fluid, or only the particles (not wrapped), or only the density or the velocity of the fluid.
     simulation, force = create_simulation()
     simulation.reporters.append(LBMVTKReporter(str(tmp_path/'fluid'), 2, force, particles=False))
     simulation.reporters.append(LBMVTKReporter(str(tmp_path/'particles'), 2, force, fluid=False, wrap=False))
     simulation.step(2)
-    files = sorted(os.listdir(tmp_path))
-    assert files == ['fluid.pvd', 'fluid_fluid_0000000002.vti', 'particles.pvd', 'particles_particles_0000000002.vtp']
     root, arrays = read_vtk(str(tmp_path/'particles_particles_0000000002.vtp'))
     positions = simulation.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
     assert np.allclose(arrays['Points'], positions, rtol=1e-6, atol=1e-6)
     assert arrays['Points'][2, 0] > 3.0
+    simulation.reporters = [LBMVTKReporter(str(tmp_path/'density'), 2, force, particles=False, velocity=False),
+                            LBMVTKReporter(str(tmp_path/'velocity'), 2, force, particles=False, density=False)]
+    simulation.step(2)
+    files = sorted(os.listdir(tmp_path))
+    assert files == ['density.pvd', 'density_density_0000000004.vti', 'fluid.pvd', 'fluid_density_0000000002.vti',
+                     'fluid_velocity_0000000002.vti', 'particles.pvd', 'particles_particles_0000000002.vtp',
+                     'velocity.pvd', 'velocity_velocity_0000000004.vti']
 
 
 def test_vtk_reporter_append(tmp_path):
@@ -167,4 +174,4 @@ def test_vtk_reporter_append(tmp_path):
     simulation.reporters = [LBMVTKReporter(prefix, 2, force, particles=False, append=True)]
     simulation.step(2)
     files = [d.get('file') for d in ET.parse(prefix + '.pvd').getroot().iter('DataSet')]
-    assert files == ['run_fluid_%010d.vti' % step for step in (2, 4, 6)]
+    assert files == ['run_%s_%010d.vti' % (field, step) for step in (2, 4, 6) for field in ('density', 'velocity')]

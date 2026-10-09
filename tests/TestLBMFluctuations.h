@@ -224,15 +224,17 @@ void testFluctuationsReproducible(Platform& platform) {
  * identical, bit for bit, to the uninterrupted run.  The seed is 0, so the two Contexts choose different seeds:
  * the checkpoint restores the generator.  With boundaries the fluid also has a wall (the plane j = 0, with the
  * given wall scheme), open faces along x (a Velocity inlet and a Density outlet, whose time filter is part of the
- * populations) and a body force; the force on the walls of the last step is restored as well.
+ * populations) and a body force; the force on the walls of the last step is restored as well.  With useFile the
+ * checkpoint is a file of LBMForce::saveCheckpointFile(), the one that a run with any domain decomposition can load.
  */
 void testFluctuationsRestart(Platform& platform, bool boundaries=false, LBMForce::WallScheme wallScheme=LBMForce::BounceBack,
-        LBMForce::DragScheme drag=LBMForce::Explicit) {
+        LBMForce::DragScheme drag=LBMForce::Explicit, bool useFile=false) {
     int numSteps = 23, split = 9;
     vector<double> fluid[2];
     vector<Vec3> velocities[2];
     Vec3 wallForce[2];
     stringstream openmmCheckpoint, forceCheckpoint;
+    string file = "TestLBMCheckpointFile_" + platform.getName() + ".chk";
     for (int run = 0; run < 2; run++) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 3, 5.0, 300.0);
@@ -254,8 +256,16 @@ void testFluctuationsRestart(Platform& platform, bool boundaries=false, LBMForce
             context.setPositions({Vec3(0.3, 0.8, 0.5), Vec3(1.3, 1.4, 1.5), Vec3(2.3, 2.4, 2.5)});
             integrator.step(split);
             context.getState(State::Forces);
-            context.createCheckpoint(openmmCheckpoint);
-            force->createCheckpoint(context, forceCheckpoint);
+            if (useFile)
+                force->saveCheckpointFile(context, file);
+            else {
+                context.createCheckpoint(openmmCheckpoint);
+                force->createCheckpoint(context, forceCheckpoint);
+            }
+        }
+        else if (useFile) {
+            force->loadCheckpointFile(context, file);
+            remove(file.c_str());
         }
         else {
             context.loadCheckpoint(openmmCheckpoint);
@@ -472,6 +482,7 @@ void runFluctuationTests(Platform& platform) {
     testFluctuationsRestart(platform, true, LBMForce::Regularized, LBMForce::Explicit);
     testFluctuationsRestart(platform, true, LBMForce::Regularized, LBMForce::Centered);
     testFluctuationsRestart(platform, true, LBMForce::BounceBack, LBMForce::Centered);
+    testFluctuationsRestart(platform, true, LBMForce::Regularized, LBMForce::Centered, true);
     testFluctuationsWithNVE(platform);
     testFluctuationsParameters(platform);
     testFluctuationDragWarning(platform);

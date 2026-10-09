@@ -1075,7 +1075,7 @@ $`[\lfloor nc/p\rfloor, \lfloor n(c + 1)/p\rfloor)`$, so blocks differ by at mos
 `openmmapi/src/LBMDecomposition.cpp`, compiled only with the CMake option `OPENMM_LBM_MPI`; without it, or with one
 domain, nothing changes.
 
-**Reference platform** (the fluid, walls, open faces and coupled particles; not yet the checkpoints).
+**Reference platform** (the fluid, walls, open faces and coupled particles).
 - The arrays cover the whole lattice on every rank, and each rank advances only the nodes it owns: moments,
   collision and streaming, bounce-back, rebuilt boundary nodes. The Reference platform is the platform of
   correctness, so it keeps the global indices, the periodic wrap and the arithmetic of one domain; the GPU
@@ -1195,7 +1195,30 @@ domain, nothing changes.
   halo wraps; beyond open faces it does not exist (NaN). The fields between steps are those of the populations at the
   end of the step, which are also those the next step starts from. With one domain the halo comes from the lattice
   itself. No observable of the plugin uses the halo yet.
-- For now a Context with more than one domain refuses checkpoints and `LBMVTKReporter` cannot write its fluid.
+- **Checkpoints and files of the fluid.** The files are independent of the decomposition: an array of the lattice is
+  stored in the order of the node index $`i + n_x(j + n_y k)`$, and each rank writes or reads the nodes of its domain
+  at their place in the one file, with collective MPI-IO (`LBMParallelFile` in `LBMDecomposition.cpp`: the file is
+  seen through an `MPI_Type_create_subarray` of the domain, so that the rows of the domain along $`x`$ are contiguous
+  both in the file and in memory); rank 0 writes the parts that every rank has, such as a header. Nothing is gathered
+  on one rank, so the files work for lattices that do not fit in the memory of one rank. With one domain the same code
+  writes with the standard library. A checkpoint file (`saveCheckpointFile()`) holds the populations (doubles, value
+  by value: $`f_q`$ of every node, then $`f_{q+1}`$), the particles, which are the same on every rank (time, step
+  count, box, positions, velocities, global parameters), and for every rank its OpenMM checkpoint and its own part of
+  the state of the force: the random numbers already drawn for the next step, the force on the walls of the last step
+  and, on the Reference platform, the state of the generator of the force. The random number generators belong to
+  the Context of each rank and cannot be divided among the domains of another decomposition: OpenMM's generator on the
+  GPU platforms keeps one state per thread, sized by the number of nodes of the domain, and can be seeded only once.
+  So a checkpoint loaded with the same decomposition continues the run bit for bit, rank by rank; with another
+  decomposition the populations are restored exactly, the particles from their State, which needs no generator
+  (exactly in double precision; in mixed and single precision a position outside the box is rounded to float when it
+  is set again), every rank keeps the generator of its new Context, and the run continues with new random numbers.
+  Without random numbers (no fluctuations, temperature zero) the run does not depend on the decomposition, so it
+  continues as the uninterrupted one: exactly in double precision; in mixed and single precision to rounding, because
+  OpenMM keeps the positions in float wrapped into the box (with a correction in mixed precision) and rebuilds that
+  representation from the positions it is given, so its last bits may differ from those of the uninterrupted run. The slots of the solid nodes are not saved beyond what the owner of
+  each node holds: as above, they are not part of the state of the fluid. The VTK files of `LBMVTKReporter` follow the
+  same scheme (`writeFluidFile()`): the head and the tail of the XML from rank 0, the arrays of the density, the
+  velocity and the solid nodes from every rank, so they are the same files, byte for byte, as with one domain.
 
 ## References
 

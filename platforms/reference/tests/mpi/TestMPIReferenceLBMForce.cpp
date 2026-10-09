@@ -10,8 +10,11 @@
  * OPENMM_LBM_MPI and run by CTest under mpiexec with 2 ranks.  Every rank runs the same System twice, with one domain
  * and with two domains along x, and compares: the populations of the fluid nodes of its domain, the state gathered
  * on rank 0, the fields of its domain with the exchanged halo, and the positions and velocities of the coupled
- * particles, which must all be identical bit for bit without the removal of the fluid momentum.  The more complete
- * script python/tests/mpi_decomposition.py runs the same comparisons on every platform and decomposition.
+ * particles, which must all be identical bit for bit without the removal of the fluid momentum.  The run with two
+ * domains also writes a checkpoint file after half of the steps (LBMForce::saveCheckpointFile(), with MPI-IO), from
+ * which the run is continued with two domains and with one domain on each rank: both must give the same result.  The
+ * more complete script python/tests/mpi_decomposition.py runs the same comparisons on every platform and
+ * decomposition.
  */
 
 #include "LBMForce.h"
@@ -24,6 +27,7 @@
 #include "openmm/internal/AssertionUtilities.h"
 #include <cmath>
 #include <iostream>
+#include <string>
 #include <vector>
 
 using namespace LBMPlugin;
@@ -40,7 +44,7 @@ struct Result {
     int start[3], count[3];
 };
 
-static Result run(int px) {
+static Result run(int px, const string& saveFile="", const string& loadFile="") {
     System system;
     system.setDefaultPeriodicBoxVectors(Vec3(4, 0, 0), Vec3(0, 3, 0), Vec3(0, 0, 3));
     LBMForce* force = new LBMForce();
@@ -78,9 +82,16 @@ static Result run(int px) {
         x.push_back(Vec3(positions[i][0], positions[i][1], positions[i][2]));
         v.push_back(Vec3(velocities[i][0], velocities[i][1], velocities[i][2]));
     }
-    context.setPositions(x);
-    context.setVelocities(v);
-    integrator.step(40);
+    if (loadFile.empty()) {
+        context.setPositions(x);
+        context.setVelocities(v);
+        integrator.step(20);
+    }
+    else
+        force->loadCheckpointFile(context, loadFile);
+    if (!saveFile.empty())
+        force->saveCheckpointFile(context, saveFile);
+    integrator.step(20);
     Result result;
     force->getFluidState(context, result.state);
     force->getFluidState(context, result.gathered, true);
@@ -98,7 +109,16 @@ int main(int argc, char* argv[]) {
         int rank = LBMForce::getMPIRank(), size = LBMForce::getMPISize();
         if (size != 2)
             throw OpenMMException("this test runs with 2 MPI ranks (mpiexec -n 2)");
-        Result single = run(1), split = run(2);
+        string file = "TestMPIReferenceLBMForce.chk";
+        Result single = run(1), split = run(2, file), restartedSplit = run(2, "", file), restartedSingle = run(1, "", file);
+        // The continued runs are the uninterrupted ones.
+        ASSERT(restartedSplit.state == split.state && restartedSplit.positions == split.positions &&
+               restartedSplit.velocities == split.velocities);
+        for (int node = 0; node < NX*NY*NZ; node++)
+            if ((node/NX)%NY != 0)
+                for (int q = 0; q < 19; q++)
+                    ASSERT(restartedSingle.state[q*NX*NY*NZ + node] == single.state[q*NX*NY*NZ + node]);
+        ASSERT(restartedSingle.positions == single.positions && restartedSingle.velocities == single.velocities);
         const int Q = 19;
         int numNodes = NX*NY*NZ, numLocal = split.count[0]*split.count[1]*split.count[2];
         ASSERT_EQUAL(NX/2*NY*NZ, numLocal);

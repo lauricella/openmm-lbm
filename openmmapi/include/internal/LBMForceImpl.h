@@ -55,6 +55,12 @@ public:
     void getLocalDomain(int start[3], int count[3]) const;
     void createCheckpoint(OpenMM::ContextImpl& context, std::ostream& stream);
     void loadCheckpoint(OpenMM::ContextImpl& context, std::istream& stream);
+    /** The checkpoint files (LBMForce::saveCheckpointFile(), openmmlbm.saveCheckpoint()). */
+    void saveCheckpointFile(OpenMM::ContextImpl& context, const std::string& path);
+    void loadCheckpointFile(OpenMM::ContextImpl& context, const std::string& path);
+    /** The arrays of the fluid in a file (LBMForce::writeFluidFile()). */
+    void writeFluidFile(OpenMM::ContextImpl& context, const std::string& path, const std::string& head,
+            const std::string& tail, const std::string& arrays, bool doublePrecision);
     double getFluidMachNumber(OpenMM::ContextImpl& context);
     OpenMM::Vec3 getWallForce(OpenMM::ContextImpl& context);
     void getLatticeParameters(double& dx, double& dt, double& tau) const;
@@ -64,6 +70,8 @@ public:
      */
     static LBMLatticeParameters computeLatticeParameters(const LBMForce& force, const OpenMM::System& system, double stepSize);
 private:
+    void writeCheckpointHeader(OpenMM::ContextImpl& context, std::ostream& stream) const;
+    void readCheckpointHeader(OpenMM::ContextImpl& context, std::istream& stream) const;
     const LBMForce& owner;
     OpenMM::Kernel kernel;
     LBMLatticeParameters lattice;

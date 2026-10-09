@@ -532,6 +532,50 @@ public:
      */
     void loadCheckpoint(OpenMM::Context& context, std::istream& stream);
     /**
+     * Write a checkpoint of the whole run to a file, which can be continued with any domain decomposition
+     * (setDomainDecomposition()), also with another number of MPI ranks or with one domain.  The file holds the
+     * populations of the whole lattice in the order of the node index, written by every rank for its domain (with
+     * MPI-IO), the particles, and for every rank its OpenMM checkpoint and the part of the state of the force that
+     * belongs to it (the random numbers already drawn, the force on the walls of the last step and, on the Reference
+     * platform, the state of the random number generator of the force).  Loaded with the same decomposition it
+     * continues the run exactly, bit for bit, like createCheckpoint(); with another one the fluid and the particles
+     * are restored exactly and the random number generators of the new Context are used, so a run with fluctuations
+     * continues with new random numbers (choose a new seed, or 0), and getWallForce() gives zero until the next step.
+     * Every rank must call it.  The data are written to file + ".tmp", then renamed.  Like OpenMM checkpoints, it
+     * is specific to the platform, the precision and the System.  With one domain openmmlbm.saveCheckpoint() in
+     * Python writes the format of createCheckpoint() instead, which only a Context with one domain can load.
+     *
+     * @param context    the Context of which to write the checkpoint
+     * @param file       the path of the file
+     */
+    void saveCheckpointFile(OpenMM::Context& context, const std::string& file) const;
+    /**
+     * Load a checkpoint file written by saveCheckpointFile() or by openmmlbm.saveCheckpoint() in Python (the latter
+     * with one domain only if it was written with one domain).  It restores the OpenMM state of the Context
+     * (positions, velocities, box, time, step count; with the same decomposition everything an OpenMM checkpoint
+     * holds) as well as the fluid.  Every rank must call it.
+     *
+     * @param context    the Context in which to load the checkpoint
+     * @param file       the path of the file
+     */
+    void loadCheckpointFile(OpenMM::Context& context, const std::string& file);
+    /**
+     * Write arrays of the fluid of the whole lattice to a file, for the VTK files of openmmlbm.LBMVTKReporter: the
+     * text head, then each array after its size in bytes (8-byte integer), with the values of every node in the order
+     * of the node index (the three components of a vector together), then the text tail.  Every rank must call it:
+     * with the domain decomposition each one writes the nodes of its domain (with MPI-IO), and rank 0 the rest.
+     *
+     * @param context          the Context of which to write the fluid
+     * @param file             the path of the file
+     * @param head             the bytes before the arrays
+     * @param tail             the bytes after the arrays
+     * @param arrays           the names of the arrays, separated by spaces, in order: "density" (Da/nm^3),
+     *                         "velocity" (nm/ps, three components), "solid" (one byte, 1 for a solid node)
+     * @param doublePrecision  write the density and the velocity in double precision instead of single
+     */
+    void writeFluidFile(OpenMM::Context& context, const std::string& file, const std::string& head,
+            const std::string& tail, const std::string& arrays, bool doublePrecision) const;
+    /**
      * Get the largest Mach number of the fluid in a Context, Ma = max |u|/c_s over the lattice nodes,
      * with u = j/rho and c_s = 1/sqrt(3) in lattice units.
      *
