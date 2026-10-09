@@ -500,17 +500,22 @@ centred drag $`y`$ is positive at every $`\tau`$, but $`y\,\eta\,\Delta x`$ grow
 self-mobility independent of $`\tau`$.
 
 With the centred drag the particle sees, in the steady state, the velocity of its node, so $`y`$ is the velocity of
-the node per unit point force: a steady solution of the lattice Boltzmann equation. For a two-relaxation-time
-collision such solutions depend on $`\tau`$ only through the viscosity and
-$`\Lambda = (\tau^+ - 1/2)(\tau^- - 1/2)`$ [8], where $`\tau^-`$ is the relaxation time of the odd moments,
-non-hydrodynamic ones included. The regularized collision relaxes those with rate 1 at every $`\tau`$, so
-$`\Lambda = (\tau - 1/2)/2`$ grows with $`\tau`$; the bounce-back walls show it exactly (the Poiseuille flow is exact
-at $`\tau = 7/8`$, $`\Lambda = 3/16`$, `docs/validation.md`). A self-mobility independent of $`\tau`$ would therefore
-need the odd non-hydrodynamic moments to relax with a rate tied to $`\tau`$, keeping $`\Lambda`$ fixed, as a two- or
-multiple-relaxation-time collision allows. The regularized collision, which removes those moments at every step, and
-the fluctuating model built on it (section 7) cannot do this. This is a hypothesis, not tested. Without fluid
-fluctuations $`y`$ does not enter the diffusion coefficient, which is $`k_BT/(m\gamma)`$, but only the response to
-forces and the temperature of the particles; with them the Einstein relation holds with this same $`y`$
+the node per unit point force: a steady solution of the lattice Boltzmann equation, a property of the fluid solver
+alone. A Fourier calculation of the linearized collision (unit force at one node of a periodic lattice of $`16^3`$
+nodes, the mean force removed) gives $`y\,\eta\,\Delta x`$ = 0.0815, 0.1443 and 0.3591 at $`\tau`$ = 0.62, 1.1 and
+3.51, close to the values measured with the particle, without any particle or friction. For a two-relaxation-time
+collision, in which all the even non-conserved moments relax with $`\tau^+ = \tau`$ and all the odd ones with
+$`\tau^-`$, such solutions depend on $`\tau`$ only through the viscosity and
+$`\Lambda = (\tau^+ - 1/2)(\tau^- - 1/2)`$ [8]: in the same calculation, with $`\tau^-`$ chosen to keep $`\Lambda`$
+fixed, $`y\,\eta\,\Delta x`$ is the same at every $`\tau`$ (0.1215 for $`\Lambda = 3/16`$, 0.1328 for
+$`\Lambda = 1/4`$). The regularized collision is not of that kind: it removes the even and the odd non-hydrodynamic
+moments at every step, and relaxing only the odd ones with a rate that keeps $`\Lambda`$ fixed still leaves
+$`y\,\eta\,\Delta x`$ dependent on $`\tau`$ (0.106 to 0.152 between $`\tau`$ = 0.62 and 3.51). A self-mobility
+independent of $`\tau`$ would therefore need a two-relaxation-time collision in place of the regularized one, and
+with it a fluctuating model other than the one of section 7, which filters those moments. It is not implemented, and
+the measurement with the plugin itself (a constant force on a node, without a particle) is still to be done. Without
+fluid fluctuations $`y`$ does not enter the diffusion coefficient, which is $`k_BT/(m\gamma)`$, but only the response
+to forces and the temperature of the particles; with them the Einstein relation holds with this same $`y`$
 (`docs/validation.md`), and the diffusion coefficient keeps its dependence on $`\tau`$.
 
 **Kinetic temperature.** OpenMM's leapfrog stores the velocities at half steps. This paragraph is about
