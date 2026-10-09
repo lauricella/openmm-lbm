@@ -496,8 +496,9 @@ In development for version 0.5.0. How the drag takes the fluid velocity at a cou
   the particle; the nodes receive the reaction with the same weights, so the momentum is conserved exactly. A solid
   node of the stencil counts as a wall at rest: zero velocity, and its share of the reaction goes to the wall.
 
-For now the stencils other than `NearestNode` work only on the Reference platform, with the explicit drag, one
-domain and periodic faces; the other combinations stop with an error. The stencil is fixed when the Context is
+For now the stencils other than `NearestNode` work only on the Reference platform, with both drag schemes and the
+domain decomposition, and periodic faces; the other platforms and open faces stop with an error. With the centred drag
+the particles whose stencils share nodes are solved together by conjugate gradients. The stencil is fixed when the Context is
 created and saved with the force by `XmlSerializer`; a checkpoint can only be loaded in a Context with the same
 stencil.
 

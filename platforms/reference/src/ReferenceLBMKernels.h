@@ -64,6 +64,11 @@ private:
     void couple(OpenMM::ContextImpl& context, bool isStep);
     void coupleParticles(OpenMM::ContextImpl& context, bool isStep);
     void coupleParticlesCentered(OpenMM::ContextImpl& context, bool isStep);
+    void coupleParticlesCenteredStencil(OpenMM::ContextImpl& context, bool isStep);
+    void coupleParticlesStencil(OpenMM::ContextImpl& context, bool isStep);
+    /** With the domain decomposition and an interpolation stencil: send the moments of the nodes of the rank (density,
+        momentum) to the ranks whose coupling halo contains them, and receive those of its own (collective). */
+    void exchangeCouplingHalo();
     void drawNoise();
     void applyReaction();
     int nearestNode(const OpenMM::Vec3& position) const;
@@ -115,6 +120,11 @@ private:
         in lattice units (density, and velocity with 3 values per node, over the whole lattice, NaN outside the
         halo), empty when not exchanged. */
     std::vector<std::vector<int> > haloSendNodes, haloReceiveNodes;
+    /** With the decomposition and an interpolation stencil, the coupling halo: the nodes of other ranks within the reach
+        of the stencils of the particles that the rank couples (one node from its nodes, two with Keys), for each
+        rank r the nodes of this rank in the coupling halo of r and the nodes of r in the coupling halo of this rank,
+        in index order.  Their moments are exchanged before every coupling. */
+    std::vector<std::vector<int> > couplingHaloSend, couplingHaloReceive;
     std::vector<double> haloDensity, haloVelocity;
     /** True once the copies of the particles have been compared (checkReplicas()). */
     bool replicasChecked;

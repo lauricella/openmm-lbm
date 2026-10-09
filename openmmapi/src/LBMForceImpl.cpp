@@ -198,16 +198,10 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
         lattice.particles.push_back(particle);
     }
 
-    // The interpolation stencils are in development for version 0.5.0 (docs/theory.md, section 9): for now with the
-    // explicit drag, one domain and periodic faces.
+    // The interpolation stencils are in development for version 0.5.0 (docs/theory.md, section 9): for now with
+    // periodic faces.
 
     if (lattice.interpolationStencil != LBMForce::NearestNode) {
-        if (lattice.dragScheme == LBMForce::Centered)
-            throw OpenMMException("LBMForce: the Centered drag scheme with an interpolation stencil other than "
-                    "NearestNode is not available yet (in development for version 0.5.0)");
-        if (lattice.isDecomposed())
-            throw OpenMMException("LBMForce: the domain decomposition with an interpolation stencil other than "
-                    "NearestNode is not available yet (in development for version 0.5.0)");
         if (lattice.hasOpenFaces())
             throw OpenMMException("LBMForce: open faces with an interpolation stencil other than NearestNode are not "
                     "available yet (in development for version 0.5.0)");
@@ -268,9 +262,11 @@ void LBMForceImpl::initialize(ContextImpl& context) {
 
     // With the explicit drag at the nearest node, the hydrodynamic part of the self-mobility of a coupled particle
     // decreases as tau grows and becomes negative at tau = 1.79 (docs/theory.md, section 2).  With the centred drag
-    // it stays positive.
+    // it stays positive, and so it does with the three-point stencil (section 9, measured up to tau = 3.51); the
+    // trilinear and Keys stencils give the nearest node when the particle is at a node.
 
-    if (warn && !lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.tau > 1.7)
+    if (warn && !lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.tau > 1.7 &&
+            lattice.interpolationStencil != LBMForce::ThreePoint)
         cerr << "Warning: LBMForce: tau = " << lattice.tau << " > 1.7: with the explicit drag at the nearest node "
              << "the hydrodynamic self-mobility of a coupled particle is small, and negative above tau = 1.79, so "
              << "particles move less than they should. Reduce the viscosity or the time step, or use a coarser "
@@ -288,7 +284,8 @@ void LBMForceImpl::initialize(ContextImpl& context) {
     // With the fluctuating fluid the explicit drag makes the coupled particles too hot, by about
     // gamma dt m/(2 m_c (1 + zeta y)), because it misses the response of the cell within the step; the centred drag
     // gives the right temperature (docs/theory.md, section 7).  The warning gives the bound gamma dt m/(2 m_c) for the
-    // heaviest coupled particle.
+    // heaviest coupled particle, times the largest self weight sum_j xi_j^2 of the stencil: 1, or 1/8 for the
+    // three-point stencil (section 9).
 
     if (warn && !lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.fluidFluctuations &&
             lattice.kT > 0 && gammaDt > 0) {
@@ -296,8 +293,10 @@ void LBMForceImpl::initialize(ContextImpl& context) {
         double maxMass = 0;
         for (int particle : lattice.particles)
             maxMass = max(maxMass, context.getSystem().getParticleMass(particle));
+        double selfWeight = (lattice.interpolationStencil == LBMForce::ThreePoint ? 0.125 : 1.0);
         cerr << "Warning: LBMForce: with fluid fluctuations the explicit drag makes the coupled particles hotter than "
-             << "the set temperature, by about friction*dt*m/(2 m_c) = " << 100.0*gammaDt*maxMass/(2.0*cellMass)
+             << "the set temperature, by about friction*dt*m" << (selfWeight < 1.0 ? "/8" : "") << "/(2 m_c) = "
+             << 100.0*gammaDt*maxMass*selfWeight/(2.0*cellMass)
              << "% for the heaviest one (m_c = " << cellMass << " Da is the mass of fluid in a cell). Use the Centered "
              << "drag scheme with fluid fluctuations." << endl;
     }

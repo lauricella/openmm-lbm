@@ -1345,10 +1345,10 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
 ## 9. Interpolation stencils (in development for version 0.5.0)
 
 Version 0.5.0 will couple a particle to several nodes around it, as in Ahlrichs and Dünweg [5] and in the immersed
-boundary method [30]. This section gives the model and its derivation. The explicit drag with the three kernels is
-implemented on the Reference platform, with one domain and periodic faces (`setInterpolationStencil()`); the rest is
-in development. The coupling of sections 2 and 8 uses the nearest node, which remains the default. The properties
-stated below were checked
+boundary method [30]. This section gives the model and its derivation. Both drags with the three kernels are
+implemented on the Reference platform, also with the domain decomposition, with periodic faces
+(`setInterpolationStencil()`); the CUDA, OpenCL and HIP platforms and the open faces are in development. The coupling
+of sections 2 and 8 uses the nearest node, which remains the default. The properties stated below were checked
 with linear models of the lattice (the fluid of section 1 linearized about rest, on a periodic lattice, with the
 particles at fixed positions); the measurements with the plugin will replace the predictions.
 
@@ -1364,7 +1364,9 @@ $`\mathbf x_j`$ around it, and the reaction of its drag is spread on the same no
 where $`\mathbf G_j`$ is the force on node $`j`$ and $`\xi_{jk}`$ the weight of node $`j`$ for particle $`k`$. The
 velocity of a node is the one that the drag uses today at the nearest node: $`\mathbf u_j = \mathbf j_j/\rho_j`$ for
 the explicit drag and $`\mathbf u_j = (\mathbf j_j + \mathbf G_j/2)/\rho_j`$ for the centred drag (section 2, Drag
-schemes). The nearest node is the kernel $`\phi(r) = 1`$ for $`-1/2 \le r < 1/2`$ and 0 elsewhere. Three kernels are
+schemes). A solid node of a stencil is a wall at rest of infinite mass: its velocity is zero and its share of the
+reaction goes to the wall, which extends the rule of the nearest node (section 2, Walls). The nearest node is the
+kernel $`\phi(r) = 1`$ for $`-1/2 \le r < 1/2`$ and 0 elsewhere. Three kernels are
 selected with `setInterpolationStencil()` (`internal/LBMStencils.h`, the same on every platform):
 
 | Stencil | Nodes | $`\phi(r)`$, with $`s = \lvert r\rvert`$, and 0 elsewhere | Kernel |
@@ -1459,14 +1461,19 @@ $`\mathbf u_j(t) = \tilde{\mathbf u}_j - h\sum_l \xi_{jl}\mathbf F_l/\rho_j`$, s
   nearest node.
 - With the nearest node $`K_{kl} = 1/\rho_c`$ for the particles of the same node and 0 otherwise, and the solution is
   the closed form of section 2 (checked to rounding).
-- Particles whose stencils share nodes are coupled through $`K_{kl}`$ and are solved together.
+- Particles whose stencils share nodes are coupled through $`K_{kl}`$ and are solved together, by conjugate
+  gradients with the diagonal of the matrix as preconditioner, starting from the solution of the diagonal. The matrix
+  is not formed: a product spreads the vector on the nodes and interpolates it back, as the coupling does. The
+  iterations stop when the residual of each Cartesian component is 1e-13 of its right-hand side; an isolated particle
+  needs none. The forces agree with a solution by Gaussian elimination to 1e-10 (`testCenteredStencilSolve`).
 
-**Self-mobility (prediction).** The calculation of section 2 (Self-mobility and relaxation time: linearized
-collision, unit force on a periodic lattice of $`16^3`$ nodes) gives, with the force spread by the stencil and the
-velocity interpolated by it, $`y_{\mathrm{centred}}\,\eta\,\Delta x`$ below. The explicit drag misses half of the
-reaction of the step, $`y_{\mathrm{explicit}} = y_{\mathrm{centred}} - K(\tau - 1/2)/6`$ in units of
-$`1/(\eta\,\Delta x)`$ (section 2, with the self weight); the values for the nearest node are those measured in
-section 2 within 0.002.
+**Self-mobility.** The calculation of section 2 (Self-mobility and relaxation time: linearized collision, unit
+force on a periodic lattice of $`16^3`$ nodes) gives, with the force spread by the stencil and the velocity
+interpolated by it, $`y_{\mathrm{centred}}\,\eta\,\Delta x`$ below. The explicit drag misses half of the reaction of
+the step, $`y_{\mathrm{explicit}} = y_{\mathrm{centred}} - K(\tau - 1/2)/6`$ in units of $`1/(\eta\,\Delta x)`$
+(section 2, with the self weight). The plugin gives the same values within 0.0004 with both drags, every kernel,
+position and $`\tau`$ (Reference platform, a particle held almost at its place by a small constant force,
+`docs/validation.md`, Interpolation stencils).
 
 | Stencil | Position in the cell | $`\sum_j \xi_j^2`$ | centred, $`\tau`$ = 0.62 / 1.1 / 3.51 | explicit, $`\tau`$ = 0.62 / 1.1 / 3.51 |
 |---|---|---|---|---|
@@ -1495,11 +1502,17 @@ section 2 within 0.002.
   the Oseen tensor for $`\tau \le 1.1`$; the stencils change the near field, where the nearest node gives a mobility
   that jumps from cell to cell.
 
-**Domain decomposition** (section 8). The rank that owns the nearest node of a particle will compute its coupling, as
-now. From the nearest node the stencil reaches one node in each direction with the trilinear and three-point kernels
-and two with Keys, so the velocity halo needs one or two layers, and the reactions spread on halo nodes go to the
-ranks that own them, as the populations streamed across the borders. How a stencil that covers solid nodes or lies
-across an open face is treated will be defined with the implementation.
+**Domain decomposition** (section 8; Reference platform). The rank that owns the nearest node of a particle computes
+its coupling, as with the nearest node. From the nearest node the stencil reaches one node in each direction with the
+trilinear and three-point kernels and two with Keys: before the coupling the ranks exchange the density and the
+momentum of the nodes within that distance of their blocks (the coupling halo, after the removal of the fluid
+momentum). The coupling forces are summed over the ranks, as with the nearest node, and then every rank adds to its
+own nodes the reactions of all the particles, in particle order, so that the sums are those of one domain. With the
+centred drag the right-hand sides, the diagonal and every product of the conjugate gradients are summed over the
+ranks in the same way (one `MPI_Allreduce` of $`3N_p`$ numbers per iteration), and all the ranks run the same
+iterations. Without random numbers fluid and particles are identical, bit for bit, to one domain (2 to 8 ranks,
+`python/tests/mpi_decomposition.py`). A stencil across an open face is not defined yet: open faces with a stencil
+stop with an error.
 
 ## References
 

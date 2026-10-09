@@ -25,7 +25,9 @@ together: copies of the particles that differ between the ranks, an AndersenTher
 (the state of one domain), and (with the optional argument OpenCL) rank 0 on the Reference platform and the others on
 OpenCL.  Last, the checkpoint files and the VTK files written by all the ranks with MPI-IO, in the folder
 mpi_decomposition_files of the working directory: a run continued from a checkpoint with the same decomposition, with
-another one and with one domain, and VTK files against those of one domain.  A line with FAILED marks a failure."""
+another one and with one domain, and VTK files against those of one domain.  On the Reference platform the particle
+cases run also with the interpolation stencils (explicit and centred drag, Trilinear, ThreePoint and Keys), and the
+fluctuating case with Keys.  A line with FAILED marks a failure."""
 import hashlib
 import os
 import sys
@@ -181,6 +183,10 @@ def particle_context(case, decomposition, platform='Reference', thermostat=False
         system.addForce(mm.AndersenThermostat(300.0, 1.0))
     force.setFriction(10.0)
     force.setFluidMomentumRemovalFrequency(0)
+    # A case 'drag_Stencil' couples the particles with an interpolation stencil (docs/theory.md, section 9).
+    case, _, stencil = case.partition('_')
+    if stencil:
+        force.setInterpolationStencil(getattr(LBMForce, stencil))
     force.setDragScheme(LBMForce.Centered if case in ('centered', 'faces', 'thermal') else LBMForce.Explicit)
     if case == 'thermal':
         force.setTemperature(300.0)
@@ -316,7 +322,9 @@ if PLATFORM in ('CUDA', 'HIP'):
 expect_error('checkpoint', 'checkpoints are written to a file', case='fluid', density_halo=False, velocity_halo=False,
              checkpoint=True, **ON)
 
-for case in ('explicit', 'centered', 'faces'):
+# The interpolation stencils run on the Reference platform for now (in development for version 0.5.0).
+STENCIL_CASES = [drag + '_' + stencil for drag in ('explicit', 'centered') for stencil in ('Trilinear', 'ThreePoint', 'Keys')]
+for case in ['explicit', 'centered', 'faces'] + (STENCIL_CASES if reference else []):
     single, wall1, solid, particles1, _ = run_particles(case, (1, 1, 1), **ON)
     split, wall2, _, particles2, domain = run_particles(case, (px, py, pz), **ON)
     fluid = fluid_of_block(solid, domain)
@@ -324,7 +332,7 @@ for case in ('explicit', 'centered', 'faces'):
     pdiff = np.abs(particles2 - particles1).max()
     absdiff = np.abs(wall2 - wall1).max()
     ok = diff == 0 and pdiff == 0 and absdiff < (1e-6 if single_precision else 1e-12)*PRESSURE_FORCE
-    print('rank %d/%d %s particles_%-9s fluid %s, particles %s; wall force %.3e, difference %.1e = %.1e of the '
+    print('rank %d/%d %s particles_%-19s fluid %s, particles %s; wall force %.3e, difference %.1e = %.1e of the '
           'pressure force%s' % (rank, size, (px, py, pz), case,
                                 'bitwise identical' if diff == 0 else 'max difference %.1e' % diff,
                                 'bitwise identical' if pdiff == 0 else 'max difference %.1e' % pdiff,
@@ -334,9 +342,10 @@ for case in ('explicit', 'centered', 'faces'):
 # With the fluctuating fluid the ranks draw different random numbers, so the run differs from that of one domain; the
 # copies of the particles must stay identical (the plugin compares them every 10 steps here, and the hash printed by
 # every rank must be the same).
-_, _, _, particles, _ = run_particles('thermal', (px, py, pz), steps=50, **ON)
-print('rank %d/%d %s thermal      runs; hash of the particles %s'
-      % (rank, size, (px, py, pz), hashlib.md5(particles.tobytes()).hexdigest()[:16]), flush=True)
+for case in ['thermal'] + (['thermal_Keys'] if reference else []):
+    _, _, _, particles, _ = run_particles(case, (px, py, pz), steps=50, **ON)
+    print('rank %d/%d %s %-12s runs; hash of the particles %s'
+          % (rank, size, (px, py, pz), case, hashlib.md5(particles.tobytes()).hexdigest()[:16]), flush=True)
 
 expect_error('copies', 'differ between the MPI ranks', perturb=True, **ON)
 # With the check off (setParticleCopiesCheck(False)) the same copies run without an error.

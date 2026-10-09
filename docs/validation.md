@@ -197,6 +197,57 @@ samples of the same system (seed 7) it gives 293.98 K, the same as the full-step
 forces between steps to be those of the next step, as for every force of OpenMM: with those of the step just done it
 read 359 K.
 
+## Interpolation stencils (`tests/TestLBMStencils.h`, Reference platform)
+
+In development for version 0.5.0 (`docs/theory.md`, section 9); the other platforms check that a stencil other than
+`NearestNode` stops with an error.
+- `testStencilWeights`: along an axis, at 1001 positions in a cell, the weights sum to one and have a zero first
+  moment (1e-14); the second moment is 0 to 1/4 (trilinear), 1/4 to 1/3 (three-point) and 0 (Keys); the squares of the
+  three-point weights sum to 1/2.
+- `testStencilLinearField`: fluid at equilibrium with a velocity and a density that vary linearly in space: the
+  first step gives a particle at rest $`\gamma\Delta t\,\mathbf u(\mathbf X)`$ with the linear field at the particle,
+  to 1e-12, with every stencil.
+- `testStencilAtNode`: the trilinear kernel and Keys at a node give the first step of the nearest node, bit for bit,
+  for the particle and the fluid.
+- `testStencilMomentumConservation`: total momentum conserved to 1e-11 over 50 steps with the random force,
+  overlapping stencils and a particle crossing the periodic boundary, and with the solid plane $`j = 0`$ covered by
+  the stencils, including the momentum given to the wall; with both drags.
+- `testCenteredStencilSolve`: the forces of the centred drag (conjugate gradients) against a solution by Gaussian
+  elimination of the same system, built from the fluid state, positions, velocities and the other forces: three
+  particles with overlapping stencils near a wall, one isolated, masses 100 to 1000 Da, to 1e-10.
+- `testStencilTranslation`: particles and fluid moved by one node along each axis move the run by one node, to 1e-12.
+- `testStencilErrors`: a different stencil in `updateParametersInContext()` or in a checkpoint, an unknown stencil
+  and open faces stop with an error.
+- `testStencilWarnings`: with the explicit drag at $`\tau = 1.75`$ the warning on the self-mobility is printed with the
+  trilinear and Keys stencils, not with the three-point one.
+- The nearest node is unchanged: 64 arrays (fluid state, positions, velocities, forces) of 16 runs with both drags,
+  both coupling schemes, with and without fluid fluctuations, with bounce-back and regularized walls, identical bit
+  for bit to version 0.4.0.
+
+**Self-mobility.** Reference platform, $`16^3`$ nodes, $`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 0.01 ps, $`T = 0`$, one
+particle of 1000 Da with $`\gamma`$ = 5/ps held almost at its place by a constant force along x (velocity
+$`10^{-5}`$ nm/ps: it moves less than 0.3% of a cell), fluid momentum removed at every step (a uniform compensation,
+as in the Fourier calculation of `docs/theory.md`, section 2), $`y = V/F - 1/(m\gamma)`$ averaged over the last 2000
+of 4000 to 6500 steps. Positions in units of $`\Delta x`$ from a node; $`y\,\eta\,\Delta x`$ at $`\tau`$ = 0.62 / 1.1
+/ 3.51:
+
+| Stencil | Position | centred | explicit |
+|---|---|---|---|
+| nearest node | any | 0.0815 / 0.1443 / 0.3592 | 0.0615 / 0.0443 / -0.1425 |
+| `Trilinear` | node | 0.0813 / 0.1442 / 0.3588 | 0.0614 / 0.0444 / -0.1422 |
+| `Trilinear` | centre | 0.0387 / 0.0471 / 0.0787 | 0.0362 / 0.0346 / 0.0160 |
+| `Trilinear` | (0.25, 0.1, 0.4) | 0.0480 / 0.0654 / 0.1280 | 0.0427 / 0.0388 / -0.0056 |
+| `ThreePoint` | node | 0.0362 / 0.0445 / 0.0755 | 0.0337 / 0.0320 / 0.0128 |
+| `ThreePoint` | centre | 0.0387 / 0.0471 / 0.0787 | 0.0362 / 0.0346 / 0.0160 |
+| `ThreePoint` | (0.25, 0.1, 0.4) | 0.0372 / 0.0455 / 0.0767 | 0.0347 / 0.0330 / 0.0140 |
+| `Keys` | node | 0.0815 / 0.1443 / 0.3592 | 0.0615 / 0.0443 / -0.1425 |
+| `Keys` | centre | 0.0543 / 0.0715 / 0.1347 | 0.0490 / 0.0452 / 0.0028 |
+| `Keys` | (0.25, 0.1, 0.4) | 0.0647 / 0.0975 / 0.2126 | 0.0543 / 0.0454 / -0.0488 |
+
+All 60 values agree with the linearized calculation of `docs/theory.md`, section 9, within 0.0004, which checks the
+interpolation, the spreading and both drags independently of the tests above. The nearest node agrees with section 2
+within 0.002: there the particle moved across the cells at 0.05 nm/ps.
+
 ## Fluctuating fluid (`tests/TestLBMFluctuations.h`, all platforms)
 
 The platforms draw different random numbers (the generator of the force on the Reference platform, OpenMM's on the
@@ -632,6 +683,13 @@ The seventh case is identical bit for bit on the Reference platform ($`2 \times 
 $`1 \times 2 \times 2`$), on OpenCL on the CPU and on CUDA and OpenCL with A100 GPUs (in double and single
 precision). With one domain `test_local_fields_halo_and_gather` checks the same rules (pytest, with and without open
 faces).
+
+**Interpolation stencils** (Reference platform, in development for version 0.5.0; `docs/theory.md`, section 9). The
+particle case with the walls, with the explicit and the centred drag and each of the three stencils (`Trilinear`,
+`ThreePoint`, `Keys`): fluid and particles identical bit for bit to one domain on every rank, with
+$`2 \times 1 \times 1`$, $`1 \times 2 \times 2`$, $`2 \times 2 \times 1`$ and $`2 \times 2 \times 2`$ domains (the
+particles share nodes, cross the borders of the blocks and reach the solid nodes with their stencils). With the
+fluctuating fluid and `Keys` the copies of the particles stay identical on every rank.
 
 **CUDA and OpenCL platforms.** All the cases of this section, the fluid ones with the exchange of the halo and the
 coupled particles, on one node with four A100 GPUs, one GPU per rank, against one domain on the same platform and

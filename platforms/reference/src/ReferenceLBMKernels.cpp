@@ -225,6 +225,40 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
             if (lattice.velocityHaloExchange)
                 haloVelocity.assign(3*numNodes, nan);
         }
+
+        // The coupling halo of an interpolation stencil (docs/theory.md, section 9): the rank couples the particles
+        // whose nearest node it owns, and their stencils reach the nodes within one node of that node, or two with
+        // Keys.  The faces are periodic with a stencil.
+        couplingHaloSend.clear();
+        couplingHaloReceive.clear();
+        if (lattice.interpolationStencil != LBMForce::NearestNode) {
+            int reach = (lattice.interpolationStencil == LBMForce::Keys ? 2 : 1);
+            vector<set<int> > haloSend(numRanks), haloReceive(numRanks);
+            for (int node = 0; node < numNodes; node++) {
+                if (!owned[node])
+                    continue;
+                int index[3] = {node%lattice.nx, (node/lattice.nx)%lattice.ny, node/(lattice.nx*lattice.ny)};
+                for (int dz = -reach; dz <= reach; dz++)
+                    for (int dy = -reach; dy <= reach; dy++)
+                        for (int dx = -reach; dx <= reach; dx++) {
+                            int d[3] = {dx, dy, dz}, target[3];
+                            for (int a = 0; a < 3; a++)
+                                target[a] = ((index[a] + d[a])%size[a] + size[a])%size[a];
+                            int t = target[0] + lattice.nx*(target[1] + lattice.ny*target[2]);
+                            if (owned[t])
+                                continue;
+                            int r = decomposition.ownerOfNode(t);
+                            haloSend[r].insert(node);
+                            haloReceive[r].insert(t);
+                        }
+            }
+            couplingHaloSend.resize(numRanks);
+            couplingHaloReceive.resize(numRanks);
+            for (int r = 0; r < numRanks; r++) {
+                couplingHaloSend[r].assign(haloSend[r].begin(), haloSend[r].end());
+                couplingHaloReceive[r].assign(haloReceive[r].begin(), haloReceive[r].end());
+            }
+        }
     }
 
     // Coupled particles: masses in units of the mass of a cell, m_c = rho0 dx^3.  The coupling force is zero
@@ -352,6 +386,8 @@ void ReferenceCalcLBMForceKernel::computeNextStepForces(ContextImpl& context) {
 }
 
 void ReferenceCalcLBMForceKernel::couple(ContextImpl& context, bool isStep) {
+    if (!couplingHaloSend.empty())
+        exchangeCouplingHalo();
     if (lattice.dragScheme == LBMForce::Centered)
         coupleParticlesCentered(context, isStep);
     else
@@ -450,7 +486,12 @@ void ReferenceCalcLBMForceKernel::removeFluidMomentum() {
 }
 
 void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isStep) {
-    // Explicit Euler-Maruyama coupling at the nearest node (with a stencil, below), in lattice units (time step 1):
+    if (lattice.interpolationStencil != LBMForce::NearestNode) {
+        coupleParticlesStencil(context, isStep);
+        return;
+    }
+    // Explicit Euler-Maruyama coupling at the nearest node (with a stencil, coupleParticlesStencil()), in lattice units
+    // (time step 1):
     //   F = -gamma m (v - j/rho) + sqrt(2 gamma m kT) xi,
     // with xi three independent N(0,1) numbers.  v is the velocity of OpenMM's leapfrog, v(t - dt/2), and j is
     // the momentum of the fluid before the force of this step, j(t - dt/2).  In a lattice step (isStep) the
@@ -471,32 +512,8 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
         drawNoise();
     if (isStep)
         fill(reaction.begin(), reaction.end(), 0.0);
-    vector<int> nodes;
-    vector<double> weights;
     for (int i = 0; i < (int) lattice.particles.size(); i++) {
         int particle = lattice.particles[i];
-        if (lattice.interpolationStencil != LBMForce::NearestNode) {
-            // With a stencil (docs/theory.md, section 9) the particle sees u = sum_j xi_j j_j/rho_j, a solid node
-            // being a wall at rest, and node j receives -xi_j F; one domain only, for now.
-            stencilNodes(positions[particle], nodes, weights);
-            Vec3 u;
-            for (int n = 0; n < (int) nodes.size(); n++) {
-                int node = nodes[n];
-                if (rho[node] > 0)
-                    u += Vec3(momentum[3*node], momentum[3*node+1], momentum[3*node+2])*(weights[n]/rho[node]);
-            }
-            Vec3 v = velocities[particle]*(1.0/velocityScale);
-            double m = particleMass[i];
-            Vec3 f = (v-u)*(-gamma*m);
-            if (randomForce)
-                f += noise[i]*sqrt(2.0*gamma*m*kT);
-            particleForces[i] = f*forceScale;
-            if (isStep)
-                for (int n = 0; n < (int) nodes.size(); n++)
-                    for (int k = 0; k < 3; k++)
-                        reaction[3*nodes[n]+k] -= weights[n]*f[k];
-            continue;
-        }
         int node = nearestNode(positions[particle]);
         if (!isOwned(node)) {
             particleForces[i] = Vec3();
@@ -521,6 +538,10 @@ void ReferenceCalcLBMForceKernel::coupleParticles(ContextImpl& context, bool isS
 }
 
 void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, bool isStep) {
+    if (lattice.interpolationStencil != LBMForce::NearestNode) {
+        coupleParticlesCenteredStencil(context, isStep);
+        return;
+    }
     // Centred drag at the nearest node (docs/theory.md, section 2), in lattice units (time step 1, h = 1/2):
     //   F_k = -gamma m_k [v_k(t) - u_c(t)] + sqrt(2 gamma m_k kT) xi_k,
     // with v_k(t) = v_k(t - h) + h (Fc_k + F_k)/m_k the velocity of particle k at the time of the force, Fc_k the
@@ -600,6 +621,266 @@ void ReferenceCalcLBMForceKernel::coupleParticlesCentered(ContextImpl& context, 
         first = end;
     }
     sumParticleForces();
+    if (isStep)
+        applyReaction();
+}
+
+void ReferenceCalcLBMForceKernel::coupleParticlesStencil(ContextImpl& context, bool isStep) {
+    // Explicit drag with an interpolation stencil (docs/theory.md, section 9): the particle sees
+    // u = sum_j xi_j j_j/rho_j, a solid node being a wall at rest, and node j receives -xi_j F.  With the domain
+    // decomposition the rank that owns the nearest node computes the force, from the moments of its nodes and of its
+    // coupling halo, and the forces are summed over the ranks; then every rank adds the reactions on its own nodes, from
+    // all the particles in particle order, so that the sums are those of one domain.
+    vector<Vec3>& positions = extractPositions(context);
+    vector<Vec3>& velocities = extractVelocities(context);
+    int numParticles = lattice.particles.size();
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    double gamma = lattice.friction*lattice.dt;
+    double kT = lattice.kT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
+    double velocityScale = lattice.getVelocityScale();
+    double forceScale = cellMass*lattice.dx/(lattice.dt*lattice.dt);
+    bool randomForce = (kT > 0 && gamma > 0);
+    if (randomForce)
+        drawNoise();
+    vector<vector<int> > nodes(numParticles);
+    vector<vector<double> > weights(numParticles);
+    vector<double> latticeForces(3*numParticles, 0.0);
+    for (int i = 0; i < numParticles; i++) {
+        int particle = lattice.particles[i];
+        stencilNodes(positions[particle], nodes[i], weights[i]);
+        if (!isOwned(nearestNode(positions[particle])))
+            continue;
+        Vec3 u;
+        for (int n = 0; n < (int) nodes[i].size(); n++) {
+            int node = nodes[i][n];
+            if (rho[node] > 0)
+                u += Vec3(momentum[3*node], momentum[3*node+1], momentum[3*node+2])*(weights[i][n]/rho[node]);
+        }
+        Vec3 v = velocities[particle]*(1.0/velocityScale);
+        double m = particleMass[i];
+        Vec3 f = (v-u)*(-gamma*m);
+        if (randomForce)
+            f += noise[i]*sqrt(2.0*gamma*m*kT);
+        for (int k = 0; k < 3; k++)
+            latticeForces[3*i+k] = f[k];
+    }
+    if (decomposition.isDecomposed())
+        decomposition.sum(latticeForces.data(), 3*numParticles);
+    if (isStep)
+        fill(reaction.begin(), reaction.end(), 0.0);
+    for (int i = 0; i < numParticles; i++) {
+        Vec3 f(latticeForces[3*i], latticeForces[3*i+1], latticeForces[3*i+2]);
+        particleForces[i] = f*forceScale;
+        if (isStep)
+            for (int n = 0; n < (int) nodes[i].size(); n++)
+                if (isOwned(nodes[i][n]))
+                    for (int k = 0; k < 3; k++)
+                        reaction[3*nodes[i][n]+k] -= weights[i][n]*f[k];
+    }
+    if (isStep)
+        applyReaction();
+}
+
+void ReferenceCalcLBMForceKernel::exchangeCouplingHalo() {
+    // The density and momentum of the nodes of the coupling halo, after the removal of the fluid momentum, and the
+    // force density of the body force that follows from them, computed as by their owners.  Collective.
+    int numRanks = decomposition.getSize();
+    vector<vector<double> > send(numRanks), receive(numRanks);
+    for (int r = 0; r < numRanks; r++) {
+        for (int node : couplingHaloSend[r]) {
+            send[r].push_back(rho[node]);
+            for (int k = 0; k < 3; k++)
+                send[r].push_back(momentum[3*node+k]);
+        }
+        receive[r].resize(4*couplingHaloReceive[r].size());
+    }
+    decomposition.exchange(send, receive);
+    for (int r = 0; r < numRanks; r++) {
+        int k = 0;
+        for (int node : couplingHaloReceive[r]) {
+            double rhoNode = receive[r][k++];
+            rho[node] = rhoNode;
+            for (int a = 0; a < 3; a++) {
+                momentum[3*node+a] = receive[r][k++];
+                forceDensity[3*node+a] = (rhoNode > 0 ? rhoNode*lattice.bodyAcceleration[a] : 0.0);
+            }
+        }
+    }
+}
+
+void ReferenceCalcLBMForceKernel::coupleParticlesCenteredStencil(ContextImpl& context, bool isStep) {
+    // Centred drag with an interpolation stencil (docs/theory.md, section 9), in lattice units (time step 1, h = 1/2,
+    // a = gamma h).  Particle k sees v_k(t) = v~_k + h F_k/m_k and the interpolated velocity of the nodes at the time
+    // of the force, u_j(t) = u~_j - h sum_l xi_jl F_l/rho_j, with v~_k = v_k(t - h) + h Fc_k/m_k and
+    // u~_j = (j_j + h Fbody_j)/rho_j; a solid node is a wall at rest (u = 0, no 1/rho term).  This gives the linear system
+    //   (1 + a) F_k + a m_k sum_l K_kl F_l = b_k,   K_kl = sum_j xi_jk xi_jl/rho_j,
+    //   b_k = -gamma m_k (v~_k - sum_j xi_jk u~_j) + sqrt(2 gamma m_k kT) xi_k,
+    // which, divided by m_k, is symmetric positive definite.  It is solved by conjugate gradients with the diagonal as
+    // preconditioner, without forming K: a product spreads the vector on the nodes and interpolates it back.  An
+    // isolated particle is solved in one iteration.  The three components have the same matrix and are solved together,
+    // each with its own coefficients.  The reaction on node j is -sum_l xi_jl F_l, summed in particle order.  With the
+    // domain decomposition the rank that owns the nearest node of a particle computes its right-hand side, its diagonal
+    // and its rows of the products, from its nodes and its coupling halo, and they are summed over the ranks; every rank
+    // then runs the same iterations, and adds the reactions on its own nodes, so that the result is that of one domain.
+    int numParticles = lattice.particles.size();
+    vector<Vec3>& positions = extractPositions(context);
+    vector<Vec3>& velocities = extractVelocities(context);
+    vector<Vec3>& forces = extractForces(context);
+    double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+    double gamma = lattice.friction*lattice.dt;
+    double kT = lattice.kT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
+    double velocityScale = lattice.getVelocityScale();
+    double forceScale = cellMass*lattice.dx/(lattice.dt*lattice.dt);
+    double h = 0.5, a = gamma*h;
+    bool randomForce = (kT > 0 && gamma > 0);
+    if (randomForce)
+        drawNoise();
+    vector<vector<int> > nodes(numParticles);
+    vector<vector<double> > weights(numParticles);
+    vector<Vec3> rhs(numParticles);
+    vector<double> diagonal(numParticles, 0.0);
+    vector<char> mine(numParticles);
+    for (int i = 0; i < numParticles; i++) {
+        int particle = lattice.particles[i];
+        double m = particleMass[i];
+        stencilNodes(positions[particle], nodes[i], weights[i]);
+        mine[i] = isOwned(nearestNode(positions[particle]));
+        if (!mine[i])
+            continue;
+        Vec3 known = velocities[particle]*(1.0/velocityScale) + forces[particle]*(h/(m*forceScale));
+        Vec3 u;
+        double self = 0;
+        for (int n = 0; n < (int) nodes[i].size(); n++) {
+            int node = nodes[i][n];
+            if (rho[node] > 0) {
+                const double* j = &momentum[3*node];
+                const double* F = &forceDensity[3*node];
+                u += Vec3(j[0] + h*F[0], j[1] + h*F[1], j[2] + h*F[2])*(weights[i][n]/rho[node]);
+                self += weights[i][n]*weights[i][n]/rho[node];
+            }
+        }
+        Vec3 b = (known-u)*(-gamma*m);
+        if (randomForce)
+            b += noise[i]*sqrt(2.0*gamma*m*kT);
+        rhs[i] = b*(1.0/m);
+        diagonal[i] = (1.0+a)/m + a*self;
+    }
+    bool decomposed = decomposition.isDecomposed();
+    if (decomposed) {
+        vector<double> values(4*numParticles);
+        for (int i = 0; i < numParticles; i++) {
+            for (int k = 0; k < 3; k++)
+                values[4*i+k] = rhs[i][k];
+            values[4*i+3] = diagonal[i];
+        }
+        decomposition.sum(values.data(), 4*numParticles);
+        for (int i = 0; i < numParticles; i++) {
+            rhs[i] = Vec3(values[4*i], values[4*i+1], values[4*i+2]);
+            diagonal[i] = values[4*i+3];
+        }
+    }
+
+    // The product of the matrix (1 + a)/m_k + a K with a vector, through the nodes.
+
+    vector<double> spread(3*lattice.getNumNodes(), 0.0);
+    auto multiply = [&](const vector<Vec3>& p, vector<Vec3>& result) {
+        for (int i = 0; i < numParticles; i++)
+            for (int n = 0; n < (int) nodes[i].size(); n++)
+                for (int k = 0; k < 3; k++)
+                    spread[3*nodes[i][n]+k] += weights[i][n]*p[i][k];
+        for (int i = 0; i < numParticles; i++) {
+            if (!mine[i]) {
+                result[i] = Vec3();
+                continue;
+            }
+            Vec3 sum;
+            for (int n = 0; n < (int) nodes[i].size(); n++) {
+                int node = nodes[i][n];
+                if (rho[node] > 0)
+                    sum += Vec3(spread[3*node], spread[3*node+1], spread[3*node+2])*(weights[i][n]/rho[node]);
+            }
+            result[i] = p[i]*((1.0+a)/particleMass[i]) + sum*a;
+        }
+        if (decomposed) {
+            vector<double> values(3*numParticles);
+            for (int i = 0; i < numParticles; i++)
+                for (int k = 0; k < 3; k++)
+                    values[3*i+k] = result[i][k];
+            decomposition.sum(values.data(), 3*numParticles);
+            for (int i = 0; i < numParticles; i++)
+                result[i] = Vec3(values[3*i], values[3*i+1], values[3*i+2]);
+        }
+        for (int i = 0; i < numParticles; i++)
+            for (int n = 0; n < (int) nodes[i].size(); n++)
+                for (int k = 0; k < 3; k++)
+                    spread[3*nodes[i][n]+k] = 0.0;
+    };
+
+    // Preconditioned conjugate gradients, starting from the solution of the diagonal, until the residual of each
+    // component is 1e-13 of its right-hand side.
+
+    vector<Vec3> F(numParticles), r(numParticles), z(numParticles), p(numParticles), Ap(numParticles);
+    Vec3 rz, norm;
+    for (int i = 0; i < numParticles; i++)
+        F[i] = rhs[i]*(1.0/diagonal[i]);
+    multiply(F, Ap);
+    for (int i = 0; i < numParticles; i++) {
+        r[i] = rhs[i]-Ap[i];
+        z[i] = r[i]*(1.0/diagonal[i]);
+        p[i] = z[i];
+        for (int k = 0; k < 3; k++) {
+            rz[k] += r[i][k]*z[i][k];
+            norm[k] += rhs[i][k]*rhs[i][k];
+        }
+    }
+    const double tolerance = 1e-13;
+    const int maxIterations = 1000;
+    for (int iteration = 0; ; iteration++) {
+        Vec3 residual;
+        for (int i = 0; i < numParticles; i++)
+            for (int k = 0; k < 3; k++)
+                residual[k] += r[i][k]*r[i][k];
+        bool converged = true;
+        for (int k = 0; k < 3; k++)
+            if (residual[k] > tolerance*tolerance*norm[k])
+                converged = false;
+        if (converged)
+            break;
+        if (iteration == maxIterations)
+            throw OpenMMException("LBMForce: the centred drag with the interpolation stencil did not converge in 1000 "
+                    "iterations of the conjugate gradients");
+        multiply(p, Ap);
+        Vec3 pAp, rzNew;
+        for (int i = 0; i < numParticles; i++)
+            for (int k = 0; k < 3; k++)
+                pAp[k] += p[i][k]*Ap[i][k];
+        Vec3 alpha;
+        for (int k = 0; k < 3; k++)
+            alpha[k] = (pAp[k] > 0 ? rz[k]/pAp[k] : 0.0);
+        for (int i = 0; i < numParticles; i++) {
+            for (int k = 0; k < 3; k++) {
+                F[i][k] += alpha[k]*p[i][k];
+                r[i][k] -= alpha[k]*Ap[i][k];
+            }
+            z[i] = r[i]*(1.0/diagonal[i]);
+            for (int k = 0; k < 3; k++)
+                rzNew[k] += r[i][k]*z[i][k];
+        }
+        for (int i = 0; i < numParticles; i++)
+            for (int k = 0; k < 3; k++)
+                p[i][k] = z[i][k] + (rz[k] > 0 ? rzNew[k]/rz[k] : 0.0)*p[i][k];
+        rz = rzNew;
+    }
+    if (isStep)
+        fill(reaction.begin(), reaction.end(), 0.0);
+    for (int i = 0; i < numParticles; i++) {
+        particleForces[i] = F[i]*forceScale;
+        if (isStep)
+            for (int n = 0; n < (int) nodes[i].size(); n++)
+                if (isOwned(nodes[i][n]))
+                    for (int k = 0; k < 3; k++)
+                        reaction[3*nodes[i][n]+k] -= weights[i][n]*F[i][k];
+    }
     if (isStep)
         applyReaction();
 }

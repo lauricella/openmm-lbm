@@ -8,9 +8,14 @@ versions the API may still change.
 ### Added (in development)
 - Interpolation stencils of the coupling, `setInterpolationStencil()`/`getInterpolationStencil()` with
   `NearestNode` (the default, unchanged bit for bit), `Trilinear`, `ThreePoint` and `Keys` (`docs/theory.md`,
-  section 9): for now the explicit drag on the Reference platform, with one domain and periodic faces; the other
-  combinations stop with an error. Solid nodes of a stencil count as a wall at rest. Serialization version 9 and
-  checkpoint version 6 with the stencil (older ones load with the nearest node).
+  section 9): for now on the Reference platform, with both drag schemes and the domain decomposition, and periodic
+  faces; the other platforms and open faces stop with an error. Solid nodes of a stencil count as a wall at rest.
+  With the centred drag, particles whose stencils share nodes are solved together by conjugate gradients. With the
+  decomposition the ranks exchange a coupling halo of one or two layers, and the result is that of one domain bit for
+  bit. The self-mobility of every stencil agrees with the linearized calculation within 0.0004. Serialization version
+  9 and checkpoint version 6 with the stencil (older ones load with the nearest node). The warning for
+  $`\tau > 1.7`$ with the explicit drag is not printed with the three-point stencil, whose self-mobility stays
+  positive, and the warning on the temperature with fluid fluctuations uses its self weight 1/8.
 
 ### Fixed
 - Tests: a range-based `for` loop read the velocities of a temporary `State` already destroyed

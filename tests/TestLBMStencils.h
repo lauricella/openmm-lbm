@@ -145,11 +145,12 @@ void testStencilAtNode(Platform& platform) {
  * stencils and a particle crossing the periodic boundary; with walls, the momentum given to the solid nodes of the
  * stencils (a wall at rest) closes the balance.
  */
-void testStencilMomentumConservation(Platform& platform) {
+void testStencilMomentumConservation(Platform& platform, LBMForce::DragScheme drag) {
     for (LBMForce::InterpolationStencil stencil : allStencils) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 4, 10.0, 300.0);
         force->setInterpolationStencil(stencil);
+        force->setDragScheme(drag);
         VerletIntegrator integrator(fluidDt);
         Context context(*system, integrator, platform);
         vector<Vec3> positions = {Vec3(1.02, 2.01, 0.98), Vec3(1.27, 1.79, 1.13), Vec3(3.98, 0.02, 3.96), Vec3(2.3, 1.1, 0.6)};
@@ -171,6 +172,7 @@ void testStencilMomentumConservation(Platform& platform) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 3, 10.0, 300.0);
         force->setInterpolationStencil(stencil);
+        force->setDragScheme(drag);
         force->setSolidNodes(wallPlane(8, 8, 8));
         VerletIntegrator integrator(fluidDt);
         Context context(*system, integrator, platform);
@@ -203,6 +205,149 @@ void testStencilMomentumConservation(Platform& platform) {
         ASSERT(wall.dot(wall) > 0);
         ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, getCouplingTolerance(platform, 1e-11));
         delete system;
+    }
+}
+
+/**
+ * The centred drag with a stencil solves a linear system for the particles whose stencils overlap (docs/theory.md,
+ * section 9).  The forces of the first step are compared with the solution computed here by Gaussian elimination from
+ * the fluid state, the positions, the velocities and the other forces: three particles with overlapping stencils, one
+ * of them near a wall (the plane j = 0), an isolated one, different masses, a field acting on the particles.
+ */
+void testCenteredStencilSolve(Platform& platform) {
+    int n = 8, numNodes = n*n*n, numParticles = 4;
+    double friction = 20.0, h = 0.5;
+    double masses[] = {100.0, 300.0, 1000.0, 150.0};
+    vector<Vec3> positions = {Vec3(1.13, 0.62, 1.71), Vec3(1.37, 0.81, 1.52), Vec3(1.02, 1.04, 1.93), Vec3(3.1, 2.9, 0.4)};
+    vector<Vec3> velocities = {Vec3(0.5, -0.2, 0.3), Vec3(-0.4, 0.1, 0.2), Vec3(0.2, -0.5, 0.1), Vec3(0.3, 0.3, -0.6)};
+    vector<double> state(19*numNodes);
+    for (int node = 0; node < numNodes; node++) {
+        vector<double> one = uniformState(1, 1.0 + 0.002*(node%5), Vec3(0.01*sin(node), 0.01*cos(node), 0.005*sin(3.0*node)));
+        for (int q = 0; q < 19; q++)
+            state[q*numNodes + node] = one[q];
+    }
+    vector<int> solid = wallPlane(n, n, n);
+    for (LBMForce::InterpolationStencil stencil : allStencils) {
+        System system;
+        system.setDefaultPeriodicBoxVectors(Vec3(n*fluidDx, 0, 0), Vec3(0, n*fluidDx, 0), Vec3(0, 0, n*fluidDx));
+        CustomExternalForce* field = new CustomExternalForce("-3*x+2*y-z");
+        system.addForce(field);
+        LBMForce* force = new LBMForce();
+        force->setGridSize(n, n, n);
+        force->setFluidDensity(fluidDensity);
+        force->setKinematicViscosity((0.8-0.5)/3.0*fluidDx*fluidDx/fluidDt);
+        force->setFluidMomentumRemovalFrequency(0);
+        force->setFriction(friction);
+        force->setTemperature(0.0);
+        force->setDragScheme(LBMForce::Centered);
+        force->setInterpolationStencil(stencil);
+        force->setSolidNodes(solid);
+        force->setForceGroup(1);
+        for (int i = 0; i < numParticles; i++) {
+            system.addParticle(masses[i]);
+            field->addParticle(i);
+            force->addParticle(i);
+        }
+        system.addForce(force);
+        VerletIntegrator integrator(fluidDt);
+        Context context(system, integrator, platform);
+        context.setPositions(positions);
+        context.setVelocities(velocities);
+        force->setFluidState(context, state);
+
+        // The fluid before the step, in lattice units, and the system of the centred drag.
+
+        int cx[19] = {0, 1, -1, 0,  0, 0,  0, 1, -1,  1, -1, 0,  0,  0,  0, 1, -1, -1,  1};
+        int cy[19] = {0, 0,  0, 1, -1, 0,  0, 1, -1, -1,  1, 1, -1,  1, -1, 0,  0,  0,  0};
+        int cz[19] = {0, 0,  0, 0,  0, 1, -1, 0,  0,  0,  0, 1, -1, -1,  1, 1, -1,  1, -1};
+        vector<double> rho(numNodes, 0.0);
+        vector<Vec3> u(numNodes);
+        vector<char> isSolid(numNodes, 0);
+        for (int node : solid)
+            isSolid[node] = 1;
+        for (int node = 0; node < numNodes; node++) {
+            if (isSolid[node])
+                continue;
+            double r = 1.0;
+            Vec3 j;
+            for (int q = 0; q < 19; q++) {
+                double f = state[q*numNodes + node];
+                r += f;
+                j += Vec3(cx[q], cy[q], cz[q])*f;
+            }
+            rho[node] = r;
+            u[node] = j*(1.0/r);
+        }
+        double cellMass = fluidDensity*fluidDx*fluidDx*fluidDx;
+        double forceScale = cellMass*fluidDx/(fluidDt*fluidDt), gamma = friction*fluidDt, a = gamma*h;
+        vector<vector<double> > weight(numParticles, vector<double>(numNodes, 0.0));
+        int w = LBMStencils::width(stencil);
+        for (int i = 0; i < numParticles; i++) {
+            int index[3][LBMStencils::maxWidth];
+            double axis[3][LBMStencils::maxWidth];
+            for (int k = 0; k < 3; k++)
+                LBMStencils::axisWeights(stencil, positions[i][k]/fluidDx, n, index[k], axis[k]);
+            for (int c = 0; c < w; c++)
+                for (int b = 0; b < w; b++)
+                    for (int aa = 0; aa < w; aa++)
+                        weight[i][index[0][aa] + n*(index[1][b] + n*index[2][c])] += axis[0][aa]*axis[1][b]*axis[2][c];
+        }
+        State before = context.getState(State::Forces, false, 1);        // the field alone (force group 0 is the field)
+        vector<double> matrix(numParticles*numParticles);
+        vector<Vec3> rhs(numParticles);
+        for (int i = 0; i < numParticles; i++) {
+            double m = masses[i]/cellMass;
+            Vec3 Fc = before.getForces()[i]*(1.0/forceScale);
+            Vec3 known = velocities[i]*(fluidDt/fluidDx) + Fc*(h/m);
+            Vec3 U;
+            for (int node = 0; node < numNodes; node++)
+                if (rho[node] > 0)
+                    U += u[node]*weight[i][node];
+            rhs[i] = (known-U)*(-gamma*m);
+            for (int l = 0; l < numParticles; l++) {
+                double K = 0;
+                for (int node = 0; node < numNodes; node++)
+                    if (rho[node] > 0)
+                        K += weight[i][node]*weight[l][node]/rho[node];
+                matrix[i*numParticles + l] = (i == l ? 1.0+a : 0.0) + a*m*K;
+            }
+        }
+        // Gaussian elimination with partial pivoting, the three components at once.
+        vector<int> order(numParticles);
+        for (int i = 0; i < numParticles; i++)
+            order[i] = i;
+        for (int col = 0; col < numParticles; col++) {
+            int pivot = col;
+            for (int row = col+1; row < numParticles; row++)
+                if (fabs(matrix[row*numParticles+col]) > fabs(matrix[pivot*numParticles+col]))
+                    pivot = row;
+            for (int k = 0; k < numParticles; k++)
+                swap(matrix[col*numParticles+k], matrix[pivot*numParticles+k]);
+            swap(rhs[col], rhs[pivot]);
+            for (int row = col+1; row < numParticles; row++) {
+                double factor = matrix[row*numParticles+col]/matrix[col*numParticles+col];
+                for (int k = col; k < numParticles; k++)
+                    matrix[row*numParticles+k] -= factor*matrix[col*numParticles+k];
+                rhs[row] -= rhs[col]*factor;
+            }
+        }
+        vector<Vec3> expected(numParticles);
+        for (int row = numParticles-1; row >= 0; row--) {
+            Vec3 sum = rhs[row];
+            for (int k = row+1; k < numParticles; k++)
+                sum -= expected[k]*matrix[row*numParticles+k];
+            expected[row] = sum*(1.0/matrix[row*numParticles+row]);
+        }
+
+        // The coupling force of the step, from the change of the velocities.
+
+        integrator.step(1);
+        State after = context.getState(State::Velocities);
+        for (int i = 0; i < numParticles; i++) {
+            Vec3 coupling = (after.getVelocities()[i]-velocities[i])*(masses[i]/fluidDt) - before.getForces()[i];
+            Vec3 F = expected[i]*forceScale;
+            ASSERT_EQUAL_VEC(F, coupling, 1e-10*sqrt(F.dot(F)));
+        }
     }
 }
 
@@ -258,7 +403,7 @@ void testStencilTranslation(Platform& platform) {
 
 /**
  * The stencil is fixed when a Context is created and must match the checkpoints; what is not available yet stops with
- * an error: the centred drag, open faces and, on the GPU platforms, every stencil other than NearestNode.
+ * an error: open faces and, on the GPU platforms, every stencil other than NearestNode.
  */
 void testStencilErrors(Platform& platform) {
     auto fails = [&](function<void(LBMForce*)> setup) {
@@ -282,7 +427,7 @@ void testStencilErrors(Platform& platform) {
         return;
     }
     ASSERT(!fails([](LBMForce* f) {}));
-    ASSERT(fails([](LBMForce* f) {f->setDragScheme(LBMForce::Centered);}));
+    ASSERT(!fails([](LBMForce* f) {f->setDragScheme(LBMForce::Centered);}));
     ASSERT(fails([](LBMForce* f) {
         f->setFaceBoundary(LBMForce::XMin, LBMForce::Velocity);
         f->setFaceBoundary(LBMForce::XMax, LBMForce::Velocity);
@@ -323,6 +468,34 @@ void testStencilErrors(Platform& platform) {
     delete system2;
 }
 
+/**
+ * With the explicit drag the warning for tau > 1.7 (self-mobility small or negative) is printed with the trilinear and
+ * Keys stencils, which give the nearest node at a node, and not with the three-point stencil, whose self-mobility stays
+ * positive (docs/theory.md, section 9).
+ */
+void testStencilWarnings(Platform& platform) {
+    for (LBMForce::InterpolationStencil stencil : allStencils) {
+        LBMForce* force;
+        System* system = createCoupledSystem(force, 1, 1.0, 0.0);
+        force->setKinematicViscosity((1.75-0.5)/3.0*fluidDx*fluidDx/fluidDt);
+        force->setInterpolationStencil(stencil);
+        VerletIntegrator integrator(fluidDt);
+        stringstream captured;
+        streambuf* original = cerr.rdbuf(captured.rdbuf());
+        try {
+            Context context(*system, integrator, platform);
+        }
+        catch (...) {
+            cerr.rdbuf(original);
+            throw;
+        }
+        cerr.rdbuf(original);
+        bool warned = (captured.str().find("> 1.7") != string::npos);
+        ASSERT(warned == (stencil != LBMForce::ThreePoint));
+        delete system;
+    }
+}
+
 void runStencilTests(Platform& platform) {
     testStencilErrors(platform);
     if (platform.getName() != "Reference")
@@ -330,6 +503,9 @@ void runStencilTests(Platform& platform) {
     testStencilWeights();
     testStencilLinearField(platform);
     testStencilAtNode(platform);
-    testStencilMomentumConservation(platform);
+    testStencilMomentumConservation(platform, LBMForce::Explicit);
+    testStencilMomentumConservation(platform, LBMForce::Centered);
+    testCenteredStencilSolve(platform);
     testStencilTranslation(platform);
+    testStencilWarnings(platform);
 }
