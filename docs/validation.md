@@ -718,6 +718,53 @@ part of the force; the OpenMM checkpoint inside them is not reproducible from on
 with any version), and the arrays of the VTK files are those of version 0.3, byte for byte, on the Reference platform
 and on CUDA and OpenCL in the three precisions.
 
+### Performance of the domain decomposition (CUDA, NVIDIA A100)
+
+Time per step of the fluid alone (`devtools/benchmark_decomposition.py`: periodic box, body force, one uncoupled
+particle, no removal of the fluid momentum; 200 steps timed after 20), CUDA platform, OpenMM 8.6.1, Open MPI 4.1.6
+with UCX 1.16, one A100 (64 GB) per rank, four per node, NVLink between the GPUs of a node, InfiniBand between nodes
+(one port of UCX, `UCX_NET_DEVICES=mlx5_0:1`). In milliseconds per step; "before" is the exchange of the first
+version (through the host, in double precision, with copies on the host), "host" the exchange through the host in the
+precision of the populations, "device" the exchange from GPU to GPU between the ranks of a node (CUDA-aware MPI) and
+through the host between nodes, the default.
+
+| Lattice | GPUs | Mixed: before | host | device | Single: before | host | device |
+|---|---|---|---|---|---|---|---|
+| $`128^3`$ | 1 | 0.87 | | | 0.48 | | |
+| $`256 \times 128 \times 128`$ | 2 ($`2 \times 1 \times 1`$) | 1.68 | 1.43 | 1.19 | 1.17 | 0.89 | 0.73 |
+| $`256 \times 256 \times 128`$ | 4 ($`2 \times 2 \times 1`$) | 2.24 | 1.75 | 1.20 | 2.12 | 1.07 | 0.75 |
+| $`512 \times 128 \times 128`$ | 4 ($`4 \times 1 \times 1`$) | 1.72 | 1.45 | 1.19 | 1.17 | 0.87 | 0.73 |
+| $`256^3`$ | 1 | fails | | 7.42 | 4.18 | | 4.18 |
+| $`256^3`$ | 2 ($`2 \times 1 \times 1`$) | 6.76 | 5.92 | 5.14 | 4.96 | 3.70 | 3.30 |
+| $`256^3`$ | 4 ($`2 \times 2 \times 1`$) | 4.59 | 3.42 | 2.50 | 4.90 | 2.02 | 1.58 |
+| $`256^3`$ | 4 ($`4 \times 1 \times 1`$) | 4.84 | 3.63 | 2.78 | 4.91 | 2.44 | 1.89 |
+
+On two nodes (8 GPUs, mixed precision; single precision in brackets), host and device as above: $`256^3`$ with
+$`2 \times 2 \times 2`$ 2.10 and 1.82 ms (1.43 and 1.17), $`512 \times 256 \times 256`$ with $`2 \times 2 \times 2`$
+4.98 and 3.30 ms (2.28 and 1.95), $`1024 \times 128 \times 128`$ with $`8 \times 1 \times 1`$ 1.50 and 1.43 ms (0.88 and
+0.91). The network is shared with other jobs, and between nodes the times vary from one job to another by about as much
+as these differences: $`512 \times 256 \times 256`$ through the host took 3.7 ms in another job. Sending from GPU to GPU
+also between the nodes (GPUDirect over the one port) took 3.8 ms for $`256^3`$, against 2.1 ms through the host, a
+difference larger than that variation, and was faster only with long interiors that hide the transfer
+($`512 \times 256 \times 256`$, 2.3 ms in that job): so between nodes the default goes through the host. The ports of
+UCX and the transfers between nodes are to be measured again on more nodes.
+A fluctuating fluid adds the same time as with one domain: $`256 \times 256 \times 128`$ on four
+GPUs 1.58 ms in mixed precision and 1.06 ms in single (1.21 and 0.75 ms for $`128^3`$ on one GPU).
+
+With the exchange from GPU to GPU the time of the transfers no longer grows with the faces: what remains is a cost
+that grows with the nodes of the block. In mixed precision a block takes 0.57 to 0.61 ms per million nodes against
+0.44 ms with one domain, 30% to 40% more, and in single precision 0.38 against 0.25 ms: the kernels of the
+decomposition (the collision of a list of nodes, the indices with the layer of halo nodes) are slower per node than
+those of one domain. So four GPUs of a node run $`128^3`$ per GPU with 73% of the speed of one GPU in mixed precision
+(64% in single precision), and $`256^3`$ 3.0 times faster than one GPU (2.6 times in single precision). Making those
+kernels as fast as those of one domain is the next optimization.
+
+Before, a lattice of $`256^3`$ nodes on one GPU failed in mixed and double precision (the upload of more than 2 GB,
+fixed in this version); in single precision it ran, and it ran with two or more GPUs. Every rank computes all the forces
+of OpenMM on all the particles (the particles are replicated), so a step takes about
+$`T_{\mathrm{LB}}/P + T_{\mathrm{MD}} + T_{\mathrm{comm}}`$ with $`P`$ ranks: the decomposition divides only the time
+of the fluid, and pays where the fluid takes most of a step.
+
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
 With a fluctuating fluid every rank draws its own random numbers, so a run with the decomposition differs from one with

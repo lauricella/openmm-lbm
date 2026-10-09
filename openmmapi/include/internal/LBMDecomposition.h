@@ -127,6 +127,21 @@ public:
         caller can compute meanwhile; finishExchange() waits for them.  The vectors must not change in between. */
     void startExchange(const std::vector<std::vector<double> >& send, std::vector<std::vector<double> >& receive);
     void finishExchange();
+    /**
+     * The same exchange without blocking, for buffers of bytes: sendBytes[r] bytes at send[r] go to rank r, and
+     * receiveBytes[r] bytes from rank r go to receive[r]; empty parts are not sent.  The buffers may be in device memory
+     * if isDeviceMPIAvailable() is true.  finishExchange() waits for it.
+     */
+    void startExchange(const std::vector<const char*>& send, const std::vector<int>& sendBytes,
+            const std::vector<char*>& receive, const std::vector<int>& receiveBytes);
+    /** For every rank, 1 if it runs on the same node as this one (MPI_COMM_TYPE_SHARED), this one included.  Collective. */
+    std::vector<char> getRanksOnThisNode() const;
+    /**
+     * True if the MPI library can send and receive buffers in the memory of CUDA devices (CUDA-aware MPI), as it reports
+     * at run time (MPIX_Query_cuda_support() of Open MPI and MPICH), unless the environment variable
+     * OPENMM_LBM_DEVICE_MPI is 0.  The same on every rank is not guaranteed: the caller decides collectively.
+     */
+    static bool isDeviceMPIAvailable();
 private:
     int n[3], procs[3], coords[3], rank, size;
     std::vector<char> requests;         // the MPI_Request of the pending exchange (mpi.h is not included here)

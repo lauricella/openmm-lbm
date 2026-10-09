@@ -13,6 +13,11 @@
 #include <sstream>
 #ifdef OPENMM_LBM_MPI
 #include <mpi.h>
+#if defined(__has_include)
+#if __has_include(<mpi-ext.h>)
+#include <mpi-ext.h>
+#endif
+#endif
 #endif
 
 using namespace LBMPlugin;
@@ -390,6 +395,54 @@ void LBMDecomposition::startExchange(const vector<vector<double> >& send, vector
     for (int r = 0; r < size; r++)
         if (!send[r].empty())
             MPI_Isend(send[r].data(), (int) send[r].size(), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, &request[numRequests++]);
+#endif
+}
+
+void LBMDecomposition::startExchange(const vector<const char*>& send, const vector<int>& sendBytes,
+        const vector<char*>& receive, const vector<int>& receiveBytes) {
+    numRequests = 0;
+    if (size == 1)
+        return;
+#ifdef OPENMM_LBM_MPI
+    requests.resize(2*size*sizeof(MPI_Request));
+    MPI_Request* request = (MPI_Request*) requests.data();
+    for (int r = 0; r < size; r++)
+        if (receiveBytes[r] > 0)
+            MPI_Irecv(receive[r], receiveBytes[r], MPI_BYTE, r, 1, MPI_COMM_WORLD, &request[numRequests++]);
+    for (int r = 0; r < size; r++)
+        if (sendBytes[r] > 0)
+            MPI_Isend((void*) send[r], sendBytes[r], MPI_BYTE, r, 1, MPI_COMM_WORLD, &request[numRequests++]);
+#endif
+}
+
+vector<char> LBMDecomposition::getRanksOnThisNode() const {
+    vector<char> same(size, 0);
+    same[rank] = 1;
+#ifdef OPENMM_LBM_MPI
+    if (size > 1) {
+        MPI_Comm local;
+        MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local);
+        int localSize;
+        MPI_Comm_size(local, &localSize);
+        vector<int> ranks(localSize);
+        MPI_Allgather(&rank, 1, MPI_INT, ranks.data(), 1, MPI_INT, local);
+        MPI_Comm_free(&local);
+        for (int r : ranks)
+            same[r] = 1;
+    }
+#endif
+    return same;
+}
+
+bool LBMDecomposition::isDeviceMPIAvailable() {
+    const char* setting = getenv("OPENMM_LBM_DEVICE_MPI");
+    if (setting != NULL && string(setting) == "0")
+        return false;
+#if defined(OPENMM_LBM_MPI) && defined(MPIX_CUDA_AWARE_SUPPORT) && MPIX_CUDA_AWARE_SUPPORT
+    ensureMPI();
+    return MPIX_Query_cuda_support() == 1;
+#else
+    return false;
 #endif
 }
 

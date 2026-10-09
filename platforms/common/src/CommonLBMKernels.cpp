@@ -285,7 +285,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         boundaryExchange.upload(vector<double>(3*numBoundaryNodes, 0.0), true);
         faceParameters.initialize(cc, 24, elementSize, "lbmFaceParameters");
     }
-    populations.upload(f, true);
+    uploadPopulations(f);
     isFluid.initialize<int>(cc, numStored, "lbmIsFluid");
     isFluid.upload(isFluidStored);
     vector<int> wallNodesHost, wallLinksHost, wallNodesLocal, wallLinksLocal;
@@ -354,8 +354,6 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         vector<int> sendSlotsHost, receiveSlotsHost;
         sendCounts.assign(numRanks, 0);
         receiveCounts.assign(numRanks, 0);
-        sendBuffers.resize(numRanks);
-        receiveBuffers.resize(numRanks);
         for (int r = 0; r < numRanks; r++) {
             std::sort(send[r].begin(), send[r].end());
             std::sort(receive[r].begin(), receive[r].end());
@@ -365,8 +363,16 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
                 receiveSlotsHost.push_back(link.second);
             sendCounts[r] = send[r].size();
             receiveCounts[r] = receive[r].size();
-            sendBuffers[r].resize(sendCounts[r]);
-            receiveBuffers[r].resize(receiveCounts[r]);
+        }
+        sendBytes.resize(numRanks);
+        receiveBytes.resize(numRanks);
+        sendOffsets.resize(numRanks);
+        receiveOffsets.resize(numRanks);
+        for (int r = 0; r < numRanks; r++) {
+            sendBytes[r] = sendCounts[r]*elementSize;
+            receiveBytes[r] = receiveCounts[r]*elementSize;
+            sendOffsets[r] = (r == 0 ? 0 : sendOffsets[r-1] + sendBytes[r-1]);
+            receiveOffsets[r] = (r == 0 ? 0 : receiveOffsets[r-1] + receiveBytes[r-1]);
         }
         numFrameNodes = frameHost.size();
         numInteriorNodes = interiorHost.size();
@@ -376,6 +382,35 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         receiveSlots.initialize<int>(cc, max<int>(1, receiveSlotsHost.size()), "lbmReceiveSlots");
         sendBuffer.initialize(cc, max<int>(1, sendSlotsHost.size()), elementSize, "lbmSendBuffer");
         receiveBuffer.initialize(cc, max<int>(1, receiveSlotsHost.size()), elementSize, "lbmReceiveBuffer");
+        hostSend.resize(sendBuffer.getSize()*elementSize);
+        hostReceive.resize(receiveBuffer.getSize()*elementSize);
+        // The populations go from device to device between the ranks of the same node if the MPI library of every rank
+        // can read device memory: within a node over NVLink.  Between nodes they go through the host, which was faster
+        // on Leonardo (InfiniBand, one port of UCX) for blocks of 128^3 nodes; the transfer from the device was faster
+        // only for larger blocks, whose interior collides long enough to hide it.  The library (UCX, under Open MPI)
+        // binds its transfers between devices to the CUDA context of the first one, while OpenMM gives every Context its
+        // own CUDA context and destroys it with the Context: so only the first Context of the process that exchanges
+        // device memory does so, and later ones go through the host (with them the library failed, "context is
+        // destroyed").
+        static bool deviceMPIClaimed = false;
+        bool device = (!deviceMPIClaimed && getDeviceAddress(sendBuffer) != NULL && LBMDecomposition::isDeviceMPIAvailable());
+        deviceMPI = (decomposition.maximum(device ? 0.0 : 1.0) == 0.0);
+        vector<char> sameNode = decomposition.getRanksOnThisNode();
+        if (deviceMPI) {
+            deviceMPIClaimed = true;
+            packedEvent = cc.createEvent();
+        }
+        deviceRank.assign(numRanks, 0);
+        sendData.resize(numRanks);
+        receiveData.resize(numRanks);
+        hostSends = hostReceives = false;
+        for (int r = 0; r < numRanks; r++) {
+            deviceRank[r] = (deviceMPI && sameNode[r]);
+            sendData[r] = (deviceRank[r] ? getDeviceAddress(sendBuffer) : hostSend.data()) + sendOffsets[r];
+            receiveData[r] = (deviceRank[r] ? getDeviceAddress(receiveBuffer) : hostReceive.data()) + receiveOffsets[r];
+            hostSends |= (!deviceRank[r] && sendBytes[r] > 0);
+            hostReceives |= (!deviceRank[r] && receiveBytes[r] > 0);
+        }
         if (numFrameNodes > 0)
             frameNodes.upload(frameHost);
         if (numInteriorNodes > 0)
@@ -971,41 +1006,99 @@ void CommonCalcLBMForceKernel::collideAndStream() {
     }
 
     // With the domain decomposition: the frame of the block first; then its populations that went into the halo are
-    // copied to the host and sent while the interior collides, and those received are copied into the block.  The
-    // kernels run in order on the device, and the downloads and uploads wait for them.
+    // packed and sent while the interior collides, and those received are unpacked into the block.  Through the host
+    // the kernels run in order on the device, and the downloads and uploads wait for them; with an MPI library that
+    // reads device memory (deviceMPI) the buffers of the device are sent and received directly.
     int listArgument = (lattice.fluidFluctuations ? 14 : 10);
     if (numFrameNodes > 0) {
         collideKernel->setArg(listArgument, frameNodes);
         collideKernel->setArg(listArgument+1, numFrameNodes);
         collideKernel->execute(numFrameNodes);
     }
-    int numRanks = decomposition.getSize();
     int numSent = accumulate(sendCounts.begin(), sendCounts.end(), 0);
-    if (numSent > 0) {
-        vector<double> buffer;
+    int numReceived = accumulate(receiveCounts.begin(), receiveCounts.end(), 0);
+    if (numSent > 0)
         packKernel->execute(numSent);
-        downloadAsDouble(sendBuffer, buffer);
-        int offset = 0;
-        for (int r = 0; r < numRanks; r++) {
-            copy(buffer.begin()+offset, buffer.begin()+offset+sendCounts[r], sendBuffers[r].begin());
-            offset += sendCounts[r];
-        }
+    if (hostSends) {
+        // Some ranks receive through the host: the download waits for the packing, and the populations for the ranks of
+        // the same node, with deviceMPI, are sent from the device meanwhile.
+        sendBuffer.download(hostSend.data());
+        decomposition.startExchange(sendData, sendBytes, receiveData, receiveBytes);
+        runInterior(listArgument);
     }
-    decomposition.startExchange(sendBuffers, receiveBuffers);
+    else {
+        // Only from device to device (or nothing to send): the interior collides while the packing ends.
+        if (deviceMPI)
+            packedEvent->enqueue();
+        runInterior(listArgument);
+        if (deviceMPI)
+            packedEvent->wait();
+        decomposition.startExchange(sendData, sendBytes, receiveData, receiveBytes);
+    }
+    decomposition.finishExchange();
+    if (hostReceives) {
+        if (!deviceMPI)
+            receiveBuffer.upload(hostReceive.data());
+        else
+            for (int r = 0; r < (int) deviceRank.size(); r++)
+                if (!deviceRank[r] && receiveCounts[r] > 0)
+                    receiveBuffer.uploadSubArray(receiveData[r], (int) (receiveOffsets[r]/receiveBuffer.getElementSize()),
+                            receiveCounts[r]);
+    }
+    if (numReceived > 0)
+        unpackKernel->execute(numReceived);
+}
+
+void CommonCalcLBMForceKernel::runInterior(int listArgument) {
     if (numInteriorNodes > 0) {
         collideKernel->setArg(listArgument, interiorNodes);
         collideKernel->setArg(listArgument+1, numInteriorNodes);
         collideKernel->execute(numInteriorNodes);
     }
-    decomposition.finishExchange();
-    int numReceived = accumulate(receiveCounts.begin(), receiveCounts.end(), 0);
-    if (numReceived > 0) {
-        vector<double> buffer;
-        buffer.reserve(numReceived);
-        for (int r = 0; r < numRanks; r++)
-            buffer.insert(buffer.end(), receiveBuffers[r].begin(), receiveBuffers[r].end());
-        receiveBuffer.upload(buffer, true);
-        unpackKernel->execute(numReceived);
+}
+
+void CommonCalcLBMForceKernel::uploadPopulations(const vector<double>& values) {
+    if (populations.getElementSize() == sizeof(double))
+        uploadPopulations(values.data());
+    else {
+        vector<float> single(values.begin(), values.end());
+        uploadPopulations(single.data());
+    }
+}
+
+void CommonCalcLBMForceKernel::uploadPopulations(const void* data) {
+    // OpenMM computes the number of bytes of an upload as an int (ComputeArray::upload() and uploadSubArray() in OpenMM
+    // 8.3 to 8.6), which overflows beyond 2 GB: 14.1 million nodes in mixed and double precision.  A larger array is
+    // uploaded in parts into a smaller array, and each part copied into its place on the device.
+    long long elementSize = populations.getElementSize(), size = populations.getSize();
+    if (size*elementSize < (1LL << 31)) {
+        populations.upload(data);
+        return;
+    }
+    int partSize = (int) ((1LL << 28)/elementSize);
+    if (!copyPartKernel) {
+        uploadStaging.initialize(cc, partSize, elementSize, "lbmUploadStaging");
+        ComputeProgram program = cc.compileProgram(
+            "KERNEL void copyPart(GLOBAL const mixed* RESTRICT part, GLOBAL mixed* RESTRICT target, int start, int count) {\n"
+            "    for (int i = GLOBAL_ID; i < count; i += GLOBAL_SIZE)\n"
+            "        target[start+i] = part[i];\n"
+            "}\n");
+        copyPartKernel = program->createKernel("copyPart");
+        copyPartKernel->addArg(uploadStaging);
+        copyPartKernel->addArg(populations);
+        copyPartKernel->addArg();
+        copyPartKernel->addArg();
+    }
+    ComputeEvent copied = cc.createEvent();
+    for (long long start = 0; start < size; start += partSize) {
+        int count = (int) min((long long) partSize, size-start);
+        uploadStaging.uploadSubArray((const char*) data + start*elementSize, 0, count);
+        copyPartKernel->setArg(2, (int) start);
+        copyPartKernel->setArg(3, count);
+        copyPartKernel->execute(count);
+        // The next part overwrites the smaller array only after this one is copied.
+        copied->enqueue();
+        copied->wait();
     }
 }
 
@@ -1259,7 +1352,7 @@ void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<
     if (state.size() != D3Q19::numVelocities*numLocal)
         throw OpenMMException("LBMForce: setFluidState() was called with a state of the wrong size");
     if (!decomposition.isDecomposed())
-        populations.upload(state, true);
+        uploadPopulations(state);
     else {
         vector<double> stored;
         downloadAsDouble(populations, stored);
@@ -1268,7 +1361,7 @@ void CommonCalcLBMForceKernel::setFluidState(ContextImpl& context, const vector<
             for (int q = 0; q < D3Q19::numVelocities; q++)
                 stored[q*numStored+s] = state[q*numLocal+n];
         }
-        populations.upload(stored, true);
+        uploadPopulations(stored);
     }
     stepForcesCurrent = false;
     if (packFieldsKernel)
@@ -1327,7 +1420,10 @@ void CommonCalcLBMForceKernel::loadCheckpoint(ContextImpl& context, istream& str
     noiseDrawn = (flags[0] != 0);
     hasAdvanced = (flags[1] != 0);
     stepForcesCurrent = false;
-    readArray(populations, stream);
+    vector<char> buffer(populations.getSize()*populations.getElementSize());
+    stream.read(buffer.data(), buffer.size());
+    if (stream)
+        uploadPopulations(buffer.data());
     readArray(noise, stream);
     readArray(particleWallMomentum, stream);
     readArray(wallExchange, stream);

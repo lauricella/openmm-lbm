@@ -86,6 +86,15 @@ set to `"true"`, so that every rank computes the same forces on its copies of th
 passes to the processes of the other nodes only the environment variables named with `-x`: pass those of the
 environment of OpenMM (for example `-x PATH -x LD_LIBRARY_PATH -x PYTHONPATH`, and for OpenCL the variables of its
 loader, such as `OCL_ICD_VENDORS`).
+On the CUDA platform, with an MPI library built with CUDA support (CUDA-aware MPI, as Open MPI with UCX), the
+populations exchanged between the ranks of the same node go from GPU to GPU (over NVLink where the GPUs have it),
+and those between nodes through the host; without that support, and on OpenCL and HIP, all of them go through the
+host. Only the first Context of each process exchanges from GPU to GPU (the MPI library binds these transfers to its
+CUDA context); the environment variable `OPENMM_LBM_DEVICE_MPI=0` makes every Context go through the host. Measured
+times per step are in [validation.md](../validation.md#performance-of-the-domain-decomposition-cuda-nvidia-a100); the
+script `devtools/benchmark_decomposition.py` measures them on another machine. Every rank computes all the forces of
+OpenMM on all the particles, so the decomposition divides the time of the fluid only: it pays where the fluid takes
+most of the time of a step.
 `getFluidFields()`, `getFluidState()` and `setFluidState()` work on the domain of each rank, or gather the whole
 lattice on rank 0 ([reading and writing the fluid](#reading-and-writing-the-fluid-of-a-context)).
 `getWallForce()`, `getFluidMachNumber()`, `getState(getForces=True)`, `setFluidState()` and the calls with `gather`

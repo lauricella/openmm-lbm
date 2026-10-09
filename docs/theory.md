@@ -919,6 +919,33 @@ $`\sum_q w_q\, e_k(\mathbf c_q)\, e_l(\mathbf c_q) = b_k\,\delta_{kl}`$:
 | 17 | $`\tfrac27 c_x^2 c_y^2 + c_x^2 c_z^2 - \tfrac37 c_x^2 + c_y^2/14 - \tfrac27 c_z^2 + 1/14`$ | 5/126 |
 | 18 | $`\tfrac25 c_x^2 c_y^2 + \tfrac25 c_x^2 c_z^2 + c_y^2 c_z^2 - c_x^2/10 - \tfrac25 c_y^2 - \tfrac25 c_z^2 + 1/10`$ | 1/30 |
 
+The same polynomials, written with the Hermite polynomials of the lattice velocities ($`c_s^2 = 1/3`$; for
+$`a \ne b`$, without sums over repeated indices):
+$`H^{(1)}_a = c_a`$, $`H^{(2)}_{aa} = c_a^2 - c_s^2`$, $`H^{(2)}_{ab} = c_a c_b`$,
+$`H^{(3)}_{aab} = (c_a^2 - c_s^2)\,c_b`$ and $`H^{(4)}_{aabb} = (c_a^2 - c_s^2)(c_b^2 - c_s^2)`$:
+
+| $`k`$ | Sector | $`e_k`$ with Hermite polynomials | $`b_k`$ |
+|---|---|---|---|
+| 0 | density | $`1`$ | 1 |
+| 1-3 | momentum | $`H^{(1)}_x`$, $`H^{(1)}_y`$, $`H^{(1)}_z`$ | 1/3 |
+| 4-6 | stress | $`H^{(2)}_{xx}`$, $`H^{(2)}_{yy}`$, $`H^{(2)}_{zz}`$ | 2/9 |
+| 7-9 | stress | $`H^{(2)}_{xy}`$, $`H^{(2)}_{xz}`$, $`H^{(2)}_{yz}`$ | 1/9 |
+| 10-12 | ghost | $`H^{(3)}_{xxy}`$, $`H^{(3)}_{xxz}`$, $`H^{(3)}_{yyx}`$ | 2/27 |
+| 13 | ghost | $`\tfrac12 H^{(3)}_{yyx} + H^{(3)}_{zzx}`$ | 1/18 |
+| 14 | ghost | $`\tfrac12 H^{(3)}_{xxy} + H^{(3)}_{zzy}`$ | 1/18 |
+| 15 | ghost | $`\tfrac12 H^{(3)}_{xxz} + H^{(3)}_{yyz}`$ | 1/18 |
+| 16 | ghost | $`H^{(4)}_{xxyy} + \tfrac16 H^{(2)}_{zz}`$ | 7/162 |
+| 17 | ghost | $`\tfrac27 H^{(4)}_{xxyy} + H^{(4)}_{xxzz} + \tfrac16 H^{(2)}_{yy} + \tfrac1{21} H^{(2)}_{zz}`$ | 5/126 |
+| 18 | ghost | $`\tfrac25 H^{(4)}_{xxyy} + \tfrac25 H^{(4)}_{xxzz} + H^{(4)}_{yyzz} + \tfrac16 H^{(2)}_{xx} + \tfrac1{15} H^{(2)}_{yy} + \tfrac1{15} H^{(2)}_{zz}`$ | 1/30 |
+
+The two tables give the same values on the 19 velocities (checked in exact rational arithmetic, with the norms
+$`b_k`$ and the orthogonality). Up to $`k = 12`$ each polynomial is one component of a Hermite tensor; from
+$`k = 13`$ they are combinations orthogonalized on the lattice, because the Hermite polynomials of third and fourth
+order are not all orthogonal to each other on D3Q19, and $`H^{(3)}_{xyz} = c_x c_y c_z`$ vanishes on every D3Q19
+velocity. So the norms must be computed from the discrete scalar product: $`b_k = n!\,c_s^{2n}/\mu`$ (order
+$`n`$, multiplicity $`\mu`$ of the component) holds up to $`k = 12`$, not for the combinations ($`b_{13} = 1/18`$,
+where one cubic component with multiplicity 3 would have $`2/27`$). All the third-order modes are ghost modes.
+
 Each moment $`m_k = \sum_q e_k(\mathbf c_q)\, f_q`$ receives $`\phi_k r_k`$. The polynomials are evaluated on the
 velocities, so they do not depend on the ordering of the populations (`D3Q19::mode()` and `D3Q19::fluctuation()` in
 `openmmapi/include/internal/D3Q19.h`).
@@ -1115,14 +1142,28 @@ domain, nothing changes.
   the block is the whole axis and the streaming wraps around within it, as with one domain. The memory of the fluid
   is divided among the ranks, and each node is computed with the arithmetic of one domain.
 - The streaming pushes the populations that leave the block into the halo. After the collision of the frame of the
-  block a kernel packs those that go to fluid nodes of other ranks into a buffer, which is copied to the host and
-  sent (`MPI_Isend`); the interior of the block collides on the device meanwhile, and after `MPI_Waitall` the
-  populations received are copied to the device and unpacked at their slots, before the walls and the boundary
-  nodes. The slots are listed in the order of (node, $`q`$) of the Reference platform, with the same rules for the
+  block a kernel packs those that go to fluid nodes of other ranks into a buffer, in the precision of the populations
+  (4 bytes each in single precision, 8 in mixed and double precision). On the CUDA platform, when the MPI library
+  reads and writes the memory of the devices (CUDA-aware MPI, which it reports with `MPIX_Query_cuda_support()`), the
+  buffer is sent from the device (`MPI_Isend`) as soon as it is packed, while the interior of the block collides, and
+  the populations of the other ranks are received into a buffer of the device: within a node they go from GPU to GPU
+  over NVLink. Otherwise the buffer is copied to the host and sent, the interior collides meanwhile, and after
+  `MPI_Waitall` the populations received are copied to the device. They are then unpacked at their slots, before the
+  walls and the boundary nodes. The MPI library (UCX, under Open MPI) binds its transfers between devices to the CUDA
+  context of the first one, while OpenMM gives every Context its own CUDA context and destroys it with the Context;
+  with a second Context the transfers failed ("context is destroyed"). So only the first Context of a process that
+  exchanges device memory does so, and the later ones go through the host, which a run with one Simulation never
+  needs. The environment variable `OPENMM_LBM_DEVICE_MPI=0` makes every Context go through the host; OpenCL and HIP
+  always do. The slots are listed in the order of (node, $`q`$) of the Reference platform, with the same rules for the
   solid nodes and the open faces: a population pushed into a solid node of the halo stays there, where the
   bounce-back of the node reads it. A rank sends one message to each rank it shares links with, at most 18 (6 faces
   and 12 edges: the D3Q19 lattice has no velocity along the diagonals of the cube), rather than exchanging along
   $`x`$, $`y`$ and $`z`$ in turn and forwarding the populations of the edges; the volume is the same.
+- OpenMM computes the size in bytes of an upload to the device as an `int` (`ComputeArray::upload()` and
+  `uploadSubArray()`, OpenMM 8.3 to 8.6), which overflows beyond 2 GB: with one domain or with the decomposition, the
+  populations of more than 14.1 million nodes per GPU in mixed and double precision (28.3 million in single
+  precision) could not be uploaded, and the Context failed with `CUDA_ERROR_INVALID_VALUE`. They are now uploaded in
+  parts of 256 MB into a smaller array of the device, and each part copied into its place by a kernel.
 - The sums of the removal of the fluid momentum and of the force on the walls, and the Mach number, are reduced on
   the device over the block and then over the ranks as on the Reference platform. A fluctuating fluid draws its
   numbers from OpenMM's generator of the Context of each rank, seeded with the seed of rank 0 plus $`1000003\,r`$.
@@ -1224,8 +1265,8 @@ domain, nothing changes.
 
 1. J. Latt and B. Chopard, Math. Comput. Simul. 72, 165 (2006): regularized collision.
 2. Z. Guo, C. Zheng and B. Shi, Phys. Rev. E 65, 046308 (2002): forcing scheme.
-3. accLB, arXiv:2505.01126 (2025), eq. 6: $`f = f^{\mathrm{eq}} + (1 - \omega)\, f^{\mathrm{neq}} + S/2`$.
-4. LBFAST, arXiv:2609.09160 (2026), eq. 3.
+3. accLB, Procedia Comput. Sci. 267, 40-51 (2025), doi:10.1016/j.procs.2025.08.231, eq. 6: $`f = f^{\mathrm{eq}} + (1 - \omega)\, f^{\mathrm{neq}} + S/2`$.
+4. LBFAST, Procedia Comput. Sci. 286, 34-47 (2026), doi:10.1016/j.procs.2026.08.017, eq. 3.
 5. P. Ahlrichs and B. Dünweg, J. Chem. Phys. 111, 8225 (1999): frictional particle-fluid coupling.
 6. B. Dünweg and A. J. C. Ladd, Adv. Polym. Sci. 221, 89 (2009): review of lattice Boltzmann for soft matter.
 7. J. Latt, Choice of units in lattice Boltzmann simulations, LBMethod.org (2008).

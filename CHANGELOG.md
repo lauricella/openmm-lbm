@@ -59,6 +59,13 @@ versions the API may still change.
 - `LBMVTKReporter` with more than one domain: the files of the fluid are the same as with one domain, written together
   by all the ranks with MPI-IO (`writeFluidFile()`), and rank 0 writes the particles and the list of files.
 
+- CUDA platform with more than one domain: with an MPI library that reads and writes device memory (CUDA-aware MPI)
+  the populations exchanged between the ranks go from device to device, over NVLink within a node, while the
+  interior of the block collides; `OPENMM_LBM_DEVICE_MPI=0` makes them go through the host. Only the first Context of
+  a process uses it (the MPI library binds these transfers to the CUDA context of the first one). The populations
+  exchanged through the host are in their own precision (4 bytes in single precision instead of 8) and without
+  copies on the host. `devtools/benchmark_decomposition.py` measures the time per step (`docs/validation.md`).
+
 ### Changed (in development for 0.4.0)
 - `LBMVTKReporter` writes the density and the velocity of the fluid in two files, `<prefix>_density_<step>.vti` and
   `<prefix>_velocity_<step>.vti` (each with the solid nodes, so that it opens alone), instead of one
@@ -66,6 +73,10 @@ versions the API may still change.
   values are the same as before, byte for byte.
 
 ### Fixed
+- CUDA, OpenCL and HIP platforms: a lattice whose populations take more than 2 GB on one GPU (more than 14.1 million
+  nodes in mixed and double precision, 28.3 million in single precision, for example $`256^3`$) failed when the
+  Context was created, with `CUDA_ERROR_INVALID_VALUE` on CUDA: OpenMM computes the size of an upload as an `int`.
+  The populations are now uploaded in parts. Affected since version 0.1.0.
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations
   (along the face, and in the time filter across it) included the reaction of the coupled particles whose nearest
   node is a face node, while the CUDA, OpenCL and HIP platforms use $`(\mathbf j + \rho\mathbf g/2)/\rho`$, the

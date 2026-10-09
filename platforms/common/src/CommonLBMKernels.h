@@ -14,6 +14,7 @@
 #include "internal/LBMDecomposition.h"
 #include "openmm/common/ComputeArray.h"
 #include "openmm/common/ComputeContext.h"
+#include "openmm/common/ComputeEvent.h"
 #include "openmm/common/ComputeKernel.h"
 #include <map>
 
@@ -78,6 +79,14 @@ protected:
     virtual bool hasFloatForceBuffers() const {
         return false;
     }
+    /**
+     * The address of an array in the memory of the device, which an MPI library that reads and writes device memory
+     * (CUDA-aware MPI) can use directly, or NULL if the platform does not give one (then the populations exchanged
+     * between the ranks go through the host).
+     */
+    virtual char* getDeviceAddress(OpenMM::ComputeArray& array) {
+        return NULL;
+    }
 private:
     class CenteredDragPostComputation;
     double evaluate(long long stepCount, bool includeForces);
@@ -89,6 +98,9 @@ private:
     double computeMachNumber();
     void removeFluidMomentum();
     void collideAndStream();
+    void runInterior(int listArgument);
+    void uploadPopulations(const std::vector<double>& values);
+    void uploadPopulations(const void* data);
     /** With the domain decomposition: sum the coupling forces over the ranks, and check that the copies of the
         particles are the same on every rank (collective). */
     void sumParticleForces();
@@ -159,11 +171,23 @@ private:
         reflection of the particles at the walls (every rank reflects all of them). */
     OpenMM::ComputeArray globalIsFluid;
     /** With the domain decomposition: the fluid nodes of the frame and of the interior of the block; the slots of the
-        populations to send (in the halo) and to receive (in the block), rank after rank; the buffers of the device; and
-        the number of slots for each rank and the buffers of the host. */
+        populations to send (in the halo) and to receive (in the block), rank after rank; the buffers of the device; the
+        number of slots for each rank, the offsets and sizes in bytes of the part of each rank in the buffers, and the
+        buffers of the host, in the precision of the populations.  With deviceMPI the MPI library reads and writes the
+        buffers of the device (getDeviceAddress()) for the ranks on the same node (deviceRank), and packedEvent marks
+        the end of the packing; sendData and receiveData point to the part of each rank, on the device or on the host. */
     OpenMM::ComputeArray frameNodes, interiorNodes, sendSlots, receiveSlots, sendBuffer, receiveBuffer;
-    std::vector<int> sendCounts, receiveCounts;
-    std::vector<std::vector<double> > sendBuffers, receiveBuffers;
+    std::vector<int> sendCounts, receiveCounts, sendBytes, receiveBytes;
+    std::vector<long long> sendOffsets, receiveOffsets;
+    std::vector<char> hostSend, hostReceive, deviceRank;
+    std::vector<const char*> sendData;
+    std::vector<char*> receiveData;
+    bool deviceMPI = false, hostSends = false, hostReceives = false;
+    OpenMM::ComputeEvent packedEvent;
+    /** An array of the device and the kernel that copies it into a part of another, for the uploads of more than 2 GB
+        (uploadPopulations()). */
+    OpenMM::ComputeArray uploadStaging;
+    OpenMM::ComputeKernel copyPartKernel;
     /** The halo of the rank (setDensityHaloExchange(), setVelocityHaloExchange()), as on the Reference platform: for each
         rank r, the nodes of the block in the halo of r and the nodes of r in the halo of the block, in index order; the
         storage indices of the first, rank after rank, and the buffer of their moments; and the fields of the nodes of
