@@ -1371,7 +1371,7 @@ planned, selected with `setInterpolationStencil()`:
 | `ThreePoint` | $`3^3`$ | $`\bigl(1 + \sqrt{1 - 3s^2}\bigr)/3`$ for $`s \le 1/2`$, $`\bigl(5 - 3s - \sqrt{1 - 3(1 - s)^2}\bigr)/6`$ for $`1/2 < s < 3/2`$ | Roma, Peskin and Berger [28, 30] |
 | `Keys` | $`4^3`$ | $`1 - 5s^2/2 + 3s^3/2`$ for $`s \le 1`$, $`2 - 4s + 5s^2/2 - s^3/2`$ for $`1 < s < 2`$ | cubic convolution with $`a = -1/2`$ [29] |
 
-The same three kernels are the stencils 2, 3 and 4 of the `lb/fluid` fix of LAMMPS [31]; here they are implemented
+The same three kernels are the stencils 2, 3 and 4 of the `lb/fluid` fix of LAMMPS [31]; here they will be written
 from the formulas of the papers. Their properties, along each axis and for every position $`r`$ of the particle
 (checked numerically):
 - The weights sum to one, $`\sum_j \phi(r - j) = 1`$, and their first moment vanishes,
