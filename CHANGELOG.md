@@ -121,6 +121,10 @@ the ranks together. Without the decomposition the algorithm is that of version 0
   (every test file, the command lines of the MPI scripts, the cost of dividing x and of the coupled particles
   explained); the environment set up on the compute node after the session or the job has started; references to
   intermediate versions removed.
+- `docs/theory.md` section 2: why the self-mobility of a coupled particle depends on the relaxation time. With the
+  centred drag it is a steady solution of the lattice Boltzmann equation, which for a two-relaxation-time collision
+  depends on the combination of the relaxation times of the even and odd moments; the regularized collision fixes the
+  odd ones at rate 1. The fluctuating fluid does not change the self-mobility. A hypothesis, not tested.
 - The regularized walls and the open faces are the thread-safe boundary condition of M. Lauricella et al.,
   Phys. Fluids 37, 072111 (2025), appendix (introduced by A. Montessori et al., Phys. Fluids 36, 035171, 2024), a
   non-equilibrium extrapolation of Guo, Zheng and Shi written for the post-collision populations: cited in

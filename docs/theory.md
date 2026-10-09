@@ -495,10 +495,23 @@ in units of $`1/(\eta\,\Delta x)`$. The same protocol, run with both drags, give
 | $`y\,\eta\,\Delta x`$, centred | 0.0808 | 0.1077 | 0.1443 | 0.1868 | 0.2160 | 0.2346 | 0.3611 |
 | explicit + $`(\tau - 1/2)/6`$ | 0.0809 | 0.1077 | 0.1443 | 0.1868 | 0.2160 | 0.2346 | 0.3611 |
 
-($`m`$ = 1000 Da, $`\gamma`$ = 5/ps; $`m`$ = 100 Da, $`\gamma`$ = 10/ps gives the same values within 0.003.) With
-the centred drag $`y`$ is positive at every $`\tau`$, but $`y\,\eta\,\Delta x`$ grows with $`\tau`$: neither drag
-gives a self-mobility independent of $`\tau`$. A relaxation of the ghost moments independent of $`\tau`$ is the next
-candidate correction.
+($`m`$ = 1000 Da, $`\gamma`$ = 5/ps; $`m`$ = 100 Da, $`\gamma`$ = 10/ps gives the same values within 0.003.) With the
+centred drag $`y`$ is positive at every $`\tau`$, but $`y\,\eta\,\Delta x`$ grows with $`\tau`$: neither drag gives a
+self-mobility independent of $`\tau`$.
+
+With the centred drag the particle sees, in the steady state, the velocity of its node, so $`y`$ is the velocity of
+the node per unit point force: a steady solution of the lattice Boltzmann equation. For a two-relaxation-time
+collision such solutions depend on $`\tau`$ only through the viscosity and
+$`\Lambda = (\tau^+ - 1/2)(\tau^- - 1/2)`$ [8], where $`\tau^-`$ is the relaxation time of the odd moments,
+non-hydrodynamic ones included. The regularized collision relaxes those with rate 1 at every $`\tau`$, so
+$`\Lambda = (\tau - 1/2)/2`$ grows with $`\tau`$; the bounce-back walls show it exactly (the Poiseuille flow is exact
+at $`\tau = 7/8`$, $`\Lambda = 3/16`$, `docs/validation.md`). A self-mobility independent of $`\tau`$ would therefore
+need the odd non-hydrodynamic moments to relax with a rate tied to $`\tau`$, keeping $`\Lambda`$ fixed, as a two- or
+multiple-relaxation-time collision allows. The regularized collision, which removes those moments at every step, and
+the fluctuating model built on it (section 7) cannot do this. This is a hypothesis, not tested. Without fluid
+fluctuations $`y`$ does not enter the diffusion coefficient, which is $`k_BT/(m\gamma)`$, but only the response to
+forces and the temperature of the particles; with them the Einstein relation holds with this same $`y`$
+(`docs/validation.md`), and the diffusion coefficient keeps its dependence on $`\tau`$.
 
 **Kinetic temperature.** OpenMM's leapfrog stores the velocities at half steps. This paragraph is about
 the explicit drag; for the centred drag see Which velocity has the right temperature, below.
