@@ -81,7 +81,7 @@ def run(case, decomposition, steps=60, density_halo=True, velocity_halo=True, pl
     force.setBodyAcceleration(mm.Vec3(0.5, -0.2, 0.1))
     force.setInitialFluidVelocity(mm.Vec3(0.5, 0.2, -0.3))
     force.setFluidMomentumRemovalFrequency(3 if case == 'removal' else 0)
-    if case == 'fluctuating':
+    if case in ('fluctuating', 'noise'):
         force.setTemperature(300.0)
         force.setFluidFluctuations(True)
         force.setRandomNumberSeed(1234)
@@ -110,7 +110,7 @@ def run(case, decomposition, steps=60, density_halo=True, velocity_halo=True, pl
     # Populations perturbed by up to 1e-3 as a function of the global index: rank 0 gathers the state of the lattice,
     # changes it and scatters it (with one domain, gather and scatter change nothing).
     state = np.array(force.getFluidState(context, gather=True))
-    if len(state) > 0:
+    if len(state) > 0 and case != 'noise':
         state += 1e-3*np.sin(1.3*np.arange(len(state)))
     force.setFluidState(context, state if len(state) > 0 else None, scatter=True)
     integrator.step(steps)
@@ -278,6 +278,20 @@ if rank == 0:
     ok = abs(mass2 - mass1) < (1e-3 if single_precision else 1e-10) and changed > 0
     print('rank %d/%d %s fluctuating  runs; mass deviation %.3e against %.3e with one domain, populations differ by '
           '%.1e%s' % (rank, size, (px, py, pz), mass2, mass1, changed, '' if ok else '  FAILED'), flush=True)
+
+# The ranks draw independent random numbers.  A fluctuating fluid without walls and without the initial perturbation is
+# invariant under translations, apart from the noise: the fluctuations of corresponding nodes of two equal blocks along
+# x would be identical if two ranks drew the same numbers, and are uncorrelated otherwise.
+if px in (2, 4) and N[0] % px == 0:
+    noise = run('noise', (px, py, pz), steps=100, density_halo=False, velocity_halo=False, **ON)
+    if rank == 0:
+        f = noise['gathered'].reshape((19,) + N[::-1])
+        f = f - f.reshape(19, -1).mean(1)[:, None, None, None]
+        width = N[0]//px
+        a, b = f[..., :width], f[..., width:2*width]
+        corr = (a*b).sum()/np.sqrt((a*a).sum()*(b*b).sum())
+        print('rank %d/%d %s independence  correlation of the fluctuations of two blocks %.3f (identical noise: 1)%s'
+              % (rank, size, (px, py, pz), corr, '' if abs(corr) < 0.3 else '  FAILED'), flush=True)
 
 if not reference:
     # Not available yet on this platform with the decomposition: every rank must stop with the error.

@@ -1104,7 +1104,9 @@ domain, nothing changes.
 - Without the removal of the fluid momentum the fluid nodes are identical, bit for bit, to those of one domain, for
   any decomposition (`docs/validation.md`, Domain decomposition). With the removal they agree to rounding, because
   the sum over the nodes is added in another order; with fluctuations the random numbers differ, so the agreement
-  is statistical.
+  is statistical: the variances and spectra of the fluctuations, the planes at the borders of the blocks, the
+  independence of the ranks and the temperature of particles that cross the domains agree with one domain within the
+  statistical errors (`docs/validation.md`, Fluctuating fluid and particles across the domains).
 
 **CUDA, OpenCL and HIP platforms** (everything that the Reference platform decomposes).
 - Each rank stores only its block, plus one layer of halo nodes on each side along the divided axes: for a block of

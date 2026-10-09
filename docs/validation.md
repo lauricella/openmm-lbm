@@ -632,7 +632,11 @@ network (`UCX_NET_DEVICES`): with the four ports of the nodes the setup of UCX b
 In single precision each rank sums in float the links of a solid node to its own fluid nodes, and one domain sums all
 of them, so the force on the walls agrees to float rounding. With the fluctuating fluid the copies of the particles
 stay identical on every rank (13 of 13 runs), and a fluctuating fluid without particles conserves the mass as one
-domain does. The checks that must stop every rank together all do (150 of 150): copies of the particles that differ
+domain does. The ranks draw independent random numbers: a fluctuating fluid without walls and without the initial
+perturbation is invariant under translations apart from the noise, so the fluctuations of corresponding nodes of two
+equal blocks along x would be identical if two ranks drew the same numbers; their correlation coefficient is between
+-0.09 and 0.01 on every platform (the statistics of the fluctuations with the decomposition are in the next
+subsection). The checks that must stop every rank together all do (150 of 150): copies of the particles that differ
 ($`10^{-12}`$ in the velocities, $`10^{-6}`$ in single precision, where the velocities are stored as float), an
 `AndersenThermostat`, `DeterministicForces` off on CUDA, and checkpoints. Without the decomposition nothing changes on
 these platforms: the regression cases of the walls and the open faces (7 cases, with and without coupled particles and
@@ -669,6 +673,70 @@ An exception in the script on one rank only cannot be made collective: `python/t
 while rank 0 waits in the check made when the Context is created. With the `excepthook` of `openmmlbm` the job stops
 after 3 s with exit code 1 (`MPI_Abort`); with the default one of Python it hangs, and was killed by a timeout after
 60 s.
+
+### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
+
+With a fluctuating fluid every rank draws its own random numbers, so a run with the decomposition differs from one with
+one domain and the agreement is statistical. Three questions: are the fluctuations those of one domain (variances and
+spectra), are the planes at the borders of the blocks like the others, and are the ranks independent? The protocol of
+the equilibrium spectra above ($`64^3`$ nodes, $`k_BT = 1/3000`$, from rest, $`2 \cdot 10^4`$ steps of transient, then
+200 snapshots every 2500 steps, CUDA in mixed precision, one A100 per rank), with the state gathered on rank 0 at every
+snapshot (`getFluidState(gather=True)`). Besides the ER per node and $`\mathrm{ER}(\lvert\mathbf k\rvert)`$ of the four
+observables, the ER of every plane $`i`$, $`j`$, $`k`$ = const, and the correlation coefficient of the observables
+between the corresponding nodes (same index in the block) of the blocks of every pair of ranks, over nodes and
+snapshots, whose spread for independent fields is $`1/\sqrt{\text{nodes} \times \text{snapshots}}`$; if two ranks drew
+the same numbers it would approach 1. Errors from 10 or 40 blocks of snapshots. ER per node of $`\rho`$,
+$`\sum_a j_a`$, $`\sum_a a^{(2)}_{aa}`$, $`\sum_{a<b} a^{(2)}_{ab}`$ (error on the last digit), difference from one
+domain in units of the error, $`\chi^2`$ per shell of $`\mathrm{ER}(\lvert\mathbf k\rvert)`$ against one domain (55
+shells), and the largest correlation between ranks:
+
+| $`\tau`$, domains (ranks, nodes) | ER per node | difference from one domain | $`\chi^2`$ per shell | largest correlation (spread) |
+|---|---|---|---|---|
+| 1, one domain | 1.0009(2) 1.0003(1) 1.0017(2) 1.0012(2) | | | |
+| 1, $`2 \times 2 \times 1`$ (4, one node) | 1.0002(1) 1.0000(3) 1.0016(1) 1.0010(2) | -2.7 -1.0 -0.5 -0.7 | 1.22 1.12 1.21 1.13 | $`6.4 \cdot 10^{-4}`$ ($`2.8 \cdot 10^{-4}`$) |
+| 1, $`4 \times 1 \times 1`$, blocks 16 nodes thick (4, one node) | 1.0006(2) 1.0004(1) 1.0017(2) 1.0012(2) | -0.8 +0.5 -0.3 -0.2 | 0.79 0.88 0.97 0.86 | $`6.8 \cdot 10^{-4}`$ ($`2.8 \cdot 10^{-4}`$) |
+| 1, $`2 \times 2 \times 2`$ (8, two nodes) | 1.0010(2) 1.0003(2) 1.0017(2) 1.0018(2) | +0.4 -0.1 -0.1 +2.2 | 1.07 1.11 1.12 1.32 | $`1.1 \cdot 10^{-3}`$ ($`3.9 \cdot 10^{-4}`$) |
+| 1, another seed, 600 snapshots: one domain | 1.0007(2) 1.0004(1) 1.0018(1) 1.0012(1) | | | |
+| 1, the same, $`2 \times 2 \times 2`$ (8, two nodes) | 1.0006(1) 1.0006(1) 1.0015(1) 1.0011(1) | -0.5 +1.1 -1.8 -1.3 | 1.51 1.17 0.94 1.08 | $`5.6 \cdot 10^{-4}`$ ($`2.3 \cdot 10^{-4}`$) |
+| 0.55, $`2 \times 2 \times 1`$ (4), against one domain of the spectra above | 1.0020(1) 1.0023(2) 1.0049(2) 1.0047(2) | -1.2 -1.6 -1.2 +1.0 | 1.01 1.02 1.16 0.85 | $`6.3 \cdot 10^{-4}`$ ($`2.8 \cdot 10^{-4}`$) |
+| 0.7, Reference, $`16^3`$, $`2 \times 2 \times 2`$ (8), against one domain of the spectra above | 1.0000(11) 1.0025(9) 1.0010(11) 1.0010(14) | +0.6 +1.6 -1.2 +0.4 | 0.49 0.97 0.72 1.25 | $`7.0 \cdot 10^{-3}`$ ($`2.6 \cdot 10^{-3}`$) |
+
+Two runs with one domain and different seeds differ by -0.7 to +0.3 errors in the ER per node and give $`\chi^2`$ per
+shell 0.81 to 1.21, with the largest deviation of a shell at 3.3 errors: the runs with the decomposition differ from one
+domain as much as two runs with one domain differ from each other. The correlations between ranks are compatible with
+zero: $`\chi^2`$ per value 0.99 to 1.15 over the pairs and observables, the largest at 2.9 errors among 112 values. On
+OpenCL ($`2 \times 2 \times 1`$, mixed precision) the results are those of CUDA to all the digits above: the generator
+of OpenMM gives the same numbers on both platforms, as with one domain.
+
+**The borders of the blocks.** In the runs above the planes at the borders of the blocks (the first and last plane of
+every block, along the divided axes) differ from the others by -1.5 to +2.8 errors, and the same planes of the run
+with one domain by -4.0 to +1.5 errors; the errors of plane averages, which are dominated by the slow modes and
+correlated between adjacent planes, are somewhat underestimated. A dedicated run settles it: $`32^3`$ nodes,
+$`4 \times 1 \times 1`$ (8 border planes out of 32), 15000 snapshots every 300 steps, each rank accumulating the ER of
+the planes of its own domain without gathering, errors from 20 blocks of snapshots, and the same with one domain as
+control:
+
+| Observable | border planes minus the others, $`4 \times 1 \times 1`$ | the same planes, one domain |
+|---|---|---|
+| $`\rho`$ | $`-0.7 \cdot 10^{-4} \pm 1.4 \cdot 10^{-4}`$ | $`-1.8 \cdot 10^{-4} \pm 1.8 \cdot 10^{-4}`$ |
+| $`\sum_a j_a`$ | $`+1.7 \cdot 10^{-4} \pm 1.8 \cdot 10^{-4}`$ | $`-1.3 \cdot 10^{-4} \pm 0.9 \cdot 10^{-4}`$ |
+| $`\sum_a a^{(2)}_{aa}`$ | $`-0.3 \cdot 10^{-4} \pm 1.4 \cdot 10^{-4}`$ | $`-0.0 \cdot 10^{-4} \pm 1.7 \cdot 10^{-4}`$ |
+| $`\sum_{a<b} a^{(2)}_{ab}`$ | $`+1.6 \cdot 10^{-4} \pm 1.3 \cdot 10^{-4}`$ | $`+0.9 \cdot 10^{-4} \pm 1.4 \cdot 10^{-4}`$ |
+
+The fluctuations at the borders of the blocks equal the others within $`2 \cdot 10^{-4}`$ of their value, and the mean
+ER of the planes (1.00070, 1.00031, 1.00168, 1.00107) is that of one domain (1.00065, 1.00023, 1.00156, 1.00113).
+
+**Walls.** The plane $`j = 0`$ solid with regularized walls (whose boundary nodes draw random numbers of their own),
+$`64^3`$, $`\tau = 1`$, the axis normal to the wall divided in four ($`1 \times 4 \times 1`$): the ER of every plane
+$`j`$ against the same plane with one domain gives $`\chi^2`$ per plane 0.70 to 1.17, largest deviation 3.4 errors,
+including the deficit of the momentum next to the wall (0.979 and 0.981 in the first fluid plane).
+
+**Particles.** 256 free particles of 100 Da coupled with the centred drag ($`\gamma`$ = 5 ps⁻¹) to the fluctuating fluid
+at 300 K ($`32^3`$ nodes, $`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 10 fs, the viscosity of water, $`\tau = 0.607`$), the
+temperature from the velocities at half step, 20000 samples every 50 steps after $`10^4`$ steps, errors from 20 blocks:
+with $`2 \times 2 \times 2`$ domains on two nodes 300.30 ± 0.08 K, with the particles changing domain 91005 times
+between samples, and 299.8 to 300.8 K (errors 0.23 to 0.36 K) for the particles of each of the 8 domains; with one
+domain 300.11 ± 0.13 K. The decomposition changes the temperature by 0.19 ± 0.15 K.
 
 ## Equivalence with the reference implementation: coupled particles (E0)
 

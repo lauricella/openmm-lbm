@@ -44,6 +44,10 @@ versions the API may still change.
   give the fields and the state of the domain of the rank only (with its halo on request), so a rank holds those of
   the whole lattice only when they are gathered on it.
 - With `OPENMM_LBM_MPI`, the test `TestMPIReferenceLBMForce`, which `ctest` runs under `mpiexec` with two ranks.
+- The fluctuating fluid with more than one domain validated statistically (`docs/validation.md`): variances and spectra
+  of the fluctuations as with one domain, no difference at the planes of the borders of the blocks (within 2e-4 of
+  their value), independent random numbers on the ranks, and the temperature of coupled particles that cross the
+  domains unchanged. `python/tests/mpi_decomposition.py` checks the independence of the ranks.
 
 ### Fixed
 - Reference platform: on the nodes of `Density` faces the velocity of the node used to rebuild the populations
