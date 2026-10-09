@@ -763,7 +763,21 @@ Before, a lattice of $`256^3`$ nodes on one GPU failed in mixed and double preci
 fixed in this version); in single precision it ran, and it ran with two or more GPUs. Every rank computes all the forces
 of OpenMM on all the particles (the particles are replicated), so a step takes about
 $`T_{\mathrm{LB}}/P + T_{\mathrm{MD}} + T_{\mathrm{comm}}`$ with $`P`$ ranks: the decomposition divides only the time
-of the fluid, and pays where the fluid takes most of a step.
+of the fluid, and pays where the fluid takes most of a step. Measured with coupled particles (`--particles`, beads of
+100 Da with a soft repulsion, cutoff 1 nm, mixed precision) on $`256^3`$ nodes:
+
+| Coupled particles | 1 GPU | 4 GPUs ($`2 \times 2 \times 1`$) |
+|---|---|---|
+| 0 | 7.35 ms | 2.50 ms |
+| $`10^4`$ | 8.08 ms | 3.20 ms |
+| $`10^5`$ | 8.48 ms | 8.67 ms |
+
+With $`10^4`$ particles they add 0.7 ms per step with one GPU and with four: the time of OpenMM and of the coupling,
+which every rank spends for all the particles. With $`10^5`$ particles they add 1.1 ms with one GPU but 6.2 ms with
+four, and four GPUs are no faster than one: the coupling forces, computed by the owner of each node, are summed over
+the ranks at every step ($`3 \times 10^5`$ numbers), and the cost of this part is not yet understood (summing the
+array of the device directly with CUDA-aware MPI, instead of through the host, took the same time). It is the second
+optimization to make.
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
