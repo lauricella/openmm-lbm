@@ -22,6 +22,10 @@ random force of the fluid, and the fluid feels it. The other particles do not se
 **Coupling scheme.** How the coupled particles and the fluid exchange forces. `EulerMaruyama` (the default):
 friction and random force; `NVE`: friction only, as at zero temperature ([API](api_reference.md)).
 
+**Domain, domain decomposition.** With `setDomainDecomposition()` the lattice is divided into blocks, the domains,
+one per MPI rank: each rank advances the fluid of its domain, on its own GPU, and every rank holds a copy of all the
+particles ([running on several GPUs](parallel.md)).
+
 **Drag scheme.** How the drag between a particle and the fluid is computed in one time step: `Explicit` (the
 default) or `Centered`, which is stable for any friction and is the one to use with fluid fluctuations
 ([choosing the drag](lattice.md#choosing-the-drag)).
@@ -37,6 +41,10 @@ the centred drag is stable for any friction ([recipe](lattice.md#quick-recipe),
 behind the positions. The velocity at the same time as the positions, the full step, is the mean of two
 consecutive stored velocities. Temperatures computed from the two differ
 ([examples](examples.md#temperature-of-coupled-particles)).
+
+**Halo.** The layer of nodes one node thick around a domain, which belongs to the neighbouring domains: the populations
+that leave a domain are pushed into it and sent to their owners, and on request the density and the velocity of these
+nodes are copied there ([API](api_reference.md#setdensityhaloexchangeexchange-setvelocityhaloexchangeexchange)).
 
 **Kinematic viscosity ($`\nu`$).** The viscosity divided by the density, in nm²/ps; for water about 1 nm²/ps.
 It sets how fast velocity differences in the fluid are smoothed out.
@@ -55,6 +63,10 @@ are 1. You never need them: the API uses OpenMM units ([lattice](lattice.md#unit
 **Mach number ($`\mathrm{Ma}`$).** The speed of the fluid divided by the speed of sound of the lattice. The model is
 accurate only when it is small: below 0.1; above 0.3 (the default limit) the plugin stops
 ([lattice](lattice.md#mach-number-and-stability)).
+
+**MPI, rank.** MPI is the library with which several processes, possibly on several computers, run one program
+together; each process is a rank, numbered from 0. `mpirun -n 4 python run.py` starts four ranks
+([running on several GPUs](parallel.md)).
 
 **Open face.** A face of the box that is not periodic: the fluid beyond it has a velocity or a density that you
 choose, to build inlets, outlets and moving plates. Set with `setFaceBoundary()`
@@ -92,8 +104,11 @@ box, and the forces.
 
 **Temperature of the fluid.** By default the fluid of this plugin has no thermal fluctuations of its own: only
 the coupled particles receive a random force ([limitations](README.md#limitations-of-the-model)). With
-`setFluidFluctuations(True)` the fluid fluctuates at the temperature of
-the force.
+`setFluidFluctuations(True)` the fluid fluctuates at the temperature of the force. The fluctuations of a node must
+stay small for the method to be stable: the Context prints $`k_BT`$ in lattice units,
+$`k_BT\,\Delta t^2/(m_c\Delta x^2)`$, and warns above the validated 1/3000; a larger spacing or a smaller time step
+makes them smaller
+([theory](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms)).
 
 **Time step ($`\Delta t`$).** The step of the integrator, which is also the step of the lattice: the fluid advances
 once per integration step.

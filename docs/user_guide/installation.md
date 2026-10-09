@@ -48,6 +48,9 @@ uname -m          # the processor type
 nvidia-smi        # the NVIDIA GPU and its driver, if there is one
 ```
 
+On a computing cluster the machine you log in to usually has no GPU: run `nvidia-smi` on a compute node, in an
+interactive session ([section 10](#10-on-a-computing-cluster)).
+
 - `uname -m` prints `x86_64` on most computers.
 - If `nvidia-smi` prints `command not found`, there is no NVIDIA GPU (or no driver): you will use
   the `Reference` platform, and you can skip everything about CUDA below.
@@ -149,6 +152,9 @@ OpenMM has a self-test that lists the platforms it can use and compares their fo
 python -m openmm.testInstallation
 ```
 
+On a cluster, run it on a compute node with a GPU, after activating the environment there
+([section 10](#10-on-a-computing-cluster)); on the login node it shows no CUDA platform.
+
 On a computer with an NVIDIA GPU the output looks like this:
 
 ```
@@ -205,15 +211,15 @@ make PythonInstall
 
 What each command does:
 
-1. `cmake` looks for OpenMM, the compiler and SWIG, decides which platforms to build and writes the
-   build instructions. Among its messages it prints the version of OpenMM it found, for example
+1. `cmake` looks for OpenMM, the compiler and SWIG, decides which platforms to build and writes the build instructions.
+   Among its messages it prints the version of OpenMM it found, for example
    `-- OpenMM 8.6.1 in /home/<you>/miniforge3/envs/lbm`, says why it leaves out a platform, for example
    `-- HIP was not found on this system: the HIP plugin of openmm-lbm is not built.`, prints what it builds,
    `-- openmm-lbm 0.3.0: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`, and it ends with
-   `-- Build files have been written to: ...`. A GPU platform is built only if the OpenMM in `OPENMM_DIR` has
-   it (an OpenMM compiled from source may lack OpenCL, CUDA or HIP) and the system can compile it. It stops with an error if OpenMM is older than 8.3 (the
-   message gives the version found), and warns if it is newer than 8.6, the newest tested version. It
-   also stops if the SWIG version is wrong: the message names the version of SWIG (major and minor) that
+   `-- Build files have been written to: ...`. A GPU platform is built only if the OpenMM in `OPENMM_DIR` has it (an
+   OpenMM compiled from source may lack OpenCL, CUDA or HIP) and the system can compile it. It stops with an error if
+   OpenMM is older than 8.3 (the message gives the version found), and warns if it is newer than 8.6, the newest tested
+   version. It also stops if the SWIG version is wrong: the message names the version of SWIG (major and minor) that
    made the OpenMM Python module; install it (for OpenMM 8.6.1 from conda-forge,
    `conda install -c conda-forge swig=4.5.1`) and run `cmake` again.
 2. `make -j4` compiles, using 4 processor cores. It takes a few minutes and ends with
@@ -242,7 +248,8 @@ single, mixed and double precision); they take a few minutes and end with:
 100% tests passed out of 8
 ```
 
-On a computer without a GPU the CUDA tests cannot run. Exclude them:
+On a computer without a GPU the CUDA tests cannot run. Exclude them (on a cluster, run the GPU tests on a compute
+node, [section 10](#10-on-a-computing-cluster)):
 
 ```bash
 ctest --output-on-failure -E Cuda
@@ -255,7 +262,7 @@ cd ~/src/openmm-lbm/python/tests
 python -m pytest
 ```
 
-The last line counts the tests, for example `50 passed, 31 skipped` on a computer without a GPU (the
+The last line counts the tests, for example `77 passed, 33 skipped` on a computer without a GPU (the
 numbers depend on the platforms and packages available). "Skipped" tests are those of
 platforms that are not available on your computer: that is normal. "Failed" is not: see the next
 section.
@@ -299,6 +306,9 @@ examples one by one.
 conda activate lbm
 ```
 
+The same holds in every job script and in every interactive session on a compute node: activate the environment
+there, after the session or the job has started ([section 10](#10-on-a-computing-cluster)).
+
 ### Updating the plugin
 
 ```bash
@@ -321,20 +331,40 @@ The steps are the same, with a few differences.
 - **OpenMM compiled from source.** The plugin can only have the platforms that this OpenMM has: see
   [OpenMM compiled from source](#openmm-compiled-from-source) in section 12.
 - **Login and compute nodes.** The machine you log in to usually has no GPU: build there, but run the
-  GPU tests and the simulations on compute nodes, through the job scheduler (for example `sbatch` with
-  Slurm). On the login node use `ctest -E Cuda`.
+  GPU checks (`nvidia-smi`, the self-test of step 5), the GPU tests and the simulations on compute nodes, in a job
+  script or in an interactive session. On the login node use `ctest -E Cuda`. A job or a session on a compute node
+  does not inherit what you set up on the login node (with Slurm, for example, `sbatch --export=NONE` passes
+  nothing, and modules loaded on the login node may not work there): set up the environment on the compute node,
+  after the session or the job has started. With Slurm, for example:
+
+  ```bash
+  srun --nodes=1 --gres=gpu:1 --time=00:30:00 --pty bash     # an interactive session on a GPU node
+  # from here on, on the compute node:
+  source ~/miniforge3/etc/profile.d/conda.sh
+  conda activate lbm
+  export LD_LIBRARY_PATH=$CONDA_PREFIX/cuda-compat:$LD_LIBRARY_PATH    # only with old drivers, below
+  nvidia-smi
+  cd ~/src/openmm-lbm-build
+  ctest --output-on-failure -R "Cuda|Serialize|Reference"
+  ```
+
+  A job script has the same lines, in the same order, before the commands of the run
+  ([restart](restart.md#one-script-for-the-first-run-and-every-restart),
+  [running on several GPUs](parallel.md)). The options of `srun` (partition, account, GPUs) depend on the
+  cluster.
 - **Old GPU drivers.** If the driver of the compute nodes supports an older CUDA than OpenMM needs
   (see [CUDA errors](#11-when-something-goes-wrong)) and the GPUs are data-centre models (A100, H100,
   ...), NVIDIA's forward-compatibility libraries solve it: install them in the environment with
-  `conda install -c conda-forge cuda-compat=12.9` (the CUDA version of OpenMM) and, in the job script,
-  before running Python:
+  `conda install -c conda-forge cuda-compat=12.9` (the CUDA version of OpenMM) and, in the job script or in the
+  session on the compute node, after `conda activate lbm` (which sets `$CONDA_PREFIX`) and before running Python:
 
   ```bash
   export LD_LIBRARY_PATH=$CONDA_PREFIX/cuda-compat:$LD_LIBRARY_PATH
   ```
 
   Use this only for the CUDA platform: with these libraries in the path, NVIDIA's OpenCL driver can
-  crash while it compiles kernels, so run OpenCL without them.
+  crash while it compiles kernels, so run OpenCL without them, for example the OpenCL tests in another session
+  without this line (`ctest --output-on-failure -R OpenCL`).
 
 ## 11. When something goes wrong
 
@@ -348,7 +378,7 @@ The steps are the same, with a few differences.
 | `cmake` error `LBM_BUILD_OPENCL_LIB is ON, but OpenMM in ... was built without the OpenCL platform` (or CUDA, HIP, the Python wrapper) | the option was set to `ON`, on the command line or by an earlier `cmake` in the same build folder, for a part that this OpenMM or system lacks | configure with `-DLBM_BUILD_OPENCL_LIB=OFF` (or the option named), or use a new build folder |
 | errors that mention NumPy and a folder `~/.local` | Python mixes in packages installed outside conda | `conda env config vars set PYTHONNOUSERSITE=1` and reactivate the environment |
 | CUDA: `Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)` | the driver supports an older CUDA than the OpenMM build | update the NVIDIA driver; on a cluster with data-centre GPUs use `cuda-compat` ([section 10](#10-on-a-computing-cluster)) |
-| `Segmentation fault` with the OpenCL platform on an NVIDIA GPU | `cuda-compat` in `LD_LIBRARY_PATH`, or the `pocl` package exposing a second OpenCL device | remove `cuda-compat` from `LD_LIBRARY_PATH` for OpenCL runs; set `export OCL_ICD_VENDORS=/etc/OpenCL/vendors` to use only NVIDIA's driver |
+| `Segmentation fault` with the OpenCL platform on an NVIDIA GPU | `cuda-compat` in `LD_LIBRARY_PATH`, or the `pocl` package exposing a second OpenCL device | remove `cuda-compat` from `LD_LIBRARY_PATH` for OpenCL runs; set `export OCL_ICD_VENDORS=/etc/OpenCL/vendors` (in the job script or the session on the compute node, before Python) to use only NVIDIA's driver |
 | `cmake` warning `The linker flags (from LDFLAGS) contain ..., which holds another OpenMM library` | the active conda environment has another OpenMM than `OPENMM_DIR` | activate the environment of `OPENMM_DIR`, or configure in a new build folder without these flags ([section 12](#which-openmm-is-used)) |
 | `make: *** No rule to make target 'PythonInstall'` | the Python module is not built: `cmake` printed why (`... the Python wrapper of openmm-lbm is not built.`) | install what is missing ([section 12](#what-is-built)) and run `cmake` again in a new build folder |
 | `ctest` runs fewer tests than expected (5 instead of 8 on a computer with an NVIDIA GPU) | a platform was not built: `cmake` printed why | install what is missing ([section 12](#what-is-built)), or ignore it if that platform is not needed |
@@ -389,10 +419,10 @@ and it ends with the list of what will be built:
 -- openmm-lbm 0.3.0: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no
 ```
 
-The tests of a platform that is not built are not built, so `ctest` runs fewer tests: 2 (serialization and
-Reference), plus 3 for each GPU platform. With `OPENMM_LBM_MPI` there is one more, `TestMPIReferenceLBMForce`, which
-`ctest` runs with `mpiexec -n 2` (the `mpiexec` that CMake found with MPI). Without the Python module, `make PythonInstall` stops with
-`No rule to make target 'PythonInstall'`.
+The tests of a platform that is not built are not built, so `ctest` runs fewer tests: 2 (serialization and Reference),
+plus 3 for each GPU platform. With `OPENMM_LBM_MPI` there is one more, `TestMPIReferenceLBMForce`, which `ctest` runs
+with `mpiexec -n 2` (the `mpiexec` that CMake found with MPI). Without the Python module, `make PythonInstall` stops
+with `No rule to make target 'PythonInstall'`.
 
 ### Choosing the parts
 

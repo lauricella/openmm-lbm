@@ -8,6 +8,8 @@ the plugin converts the parameters to lattice units.
 | Message | Cause and fix |
 |---|---|
 | `the grid size must be set to positive values with setGridSize()` | Call `setGridSize(nx, ny, nz)` before creating the Context. |
+| `the lattice has ... nodes, more than the 2147483647 that the plugin can index` | The nodes are indexed with 32-bit integers; use a coarser lattice ([`setGridSize()`](api_reference.md#setgridsizenx-ny-nz-getgridsize)). |
+| `a domain of the lattice holds up to ... nodes (with its halo), more than the 113025455 whose 19 populations the plugin can index` | Divide the lattice into more domains (`setDomainDecomposition()`, with MPI); with one domain the limit is about $`480^3`$ nodes. |
 | `the periodic box must be rectangular` | The default box vectors of the System are triclinic. The fluid needs a rectangular box. |
 | `the lattice cells must be cubic, but the box and grid sizes give spacings ...` | $`L_x/n_x`$, $`L_y/n_y`$ and $`L_z/n_z`$ differ. Choose the grid so that the three spacings are equal, or adjust the box. |
 | `the integrator step size must be positive` | Set a positive step size on the integrator. |
@@ -21,19 +23,33 @@ the plugin converts the parameters to lattice units.
 | `expected a sequence of integers` (a `TypeError` from `setSolidNodes()`) | Pass the node indices as a list, a range or a NumPy array of integers. |
 | `a coupled particle index is out of range`, `a particle is coupled more than once`, `coupled particles must have a positive mass` | Check the indices passed to `addParticle()` and the masses in the System. Massless particles (virtual sites) cannot be coupled. |
 | `LBMForce requires a VerletIntegrator: drag and random forces are part of the force` | Use `VerletIntegrator`. Langevin and other thermostatted integrators would add a second friction. |
-| `LBMForce does not support running on multiple devices` | Use a single GPU (`DeviceIndex` with one value). |
+| `LBMForce does not support running on multiple devices` | Use a single GPU per Context (`DeviceIndex` with one value). To use several GPUs, divide the lattice into domains, one MPI rank per GPU (`setDomainDecomposition()`, [running on several GPUs](parallel.md)). |
+| `the domain decomposition (setDomainDecomposition()) cannot be negative` | Use positive numbers of domains, or 0 to let MPI choose. |
+| `setDomainDecomposition() asks for more than one domain, but the plugin was built without MPI` | Build the plugin with `-DOPENMM_LBM_MPI=ON` ([installation](installation.md)), or use one domain. A 0 also needs MPI. |
+| `the domain decomposition X x Y x Z (setDomainDecomposition()) does not match the N MPI ranks` | The product of the domains must be the number of processes of `mpirun` or `srun`; check `-n` and the decomposition, or use zeros. |
+| `the domain decomposition has P domains along axis A, more than the N nodes of the lattice` | Each domain needs at least one node along every axis: use fewer domains along that axis. |
+| `with the domain decomposition every MPI rank must use the same platform and precision: rank R has ...` | Every rank must create its Context on the same platform with the same `Precision`. |
+| `with the domain decomposition and coupled particles the platform must compute the forces deterministically ...` | On the CUDA and HIP platforms set the property `DeterministicForces` to `"true"`, so that every rank computes the same forces on its copies of the particles. |
+| `with the domain decomposition (setDomainDecomposition()) the System cannot contain an AndersenThermostat or a Monte Carlo barostat` | Their random numbers would differ between the ranks, which hold copies of the same particles. Remove them: the temperature comes from the coupling to the fluid. |
+| `the positions or velocities of the particles differ between the MPI ranks at lattice step N` | Every rank must set the same positions and velocities: read them from the same file, and draw velocities with a fixed seed (`setVelocitiesToTemperature(T, seed)`). The check can be switched off with `setParticleCopiesCheck(False)` only when the copies are known to be identical. |
+| `getFluidFields() cannot gather the fields and add the halo in the same call` | Use `gather=True` or `halo=True`, not both. |
+| `updateParametersInContext: the domain decomposition cannot be changed`, `... the exchange of the halo cannot be switched on or off` | Create a new Context for another decomposition or another exchange of the halo. |
 | `the integrator step size changed after the Context was created; reinitialize the Context` | The step size is the lattice time step and cannot change. Create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()`. |
 | `the Mach number of the fluid is ... after ... lattice steps, above the limit ...` | The fluid is too fast for the model. Reduce the body acceleration, the forces on the fluid or the velocities of the open faces, or the time step; see [Mach number and stability](lattice.md#mach-number-and-stability). With fluid fluctuations and $`\tau`$ very close to 1/2 (below about 0.502) the fluid can become unstable by itself: keep $`\tau`$ at 0.505 or above ([`setFluidFluctuations()`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)). With fluid fluctuations and two `Density` faces at the same density, without walls along the flow, the mean flow across the faces has nothing that stops it and grows until this error: add walls or use a `Velocity` face ([open faces](api_reference.md#open-faces)). A `Density` face through which the fluid enters can become unstable at small $`\tau`$ (with a difference of density of 1 %, at $`\tau \le 0.55`$): use a `Velocity` inlet. |
-| `setFluidState() was called with a state of the wrong size` | The state comes from a different grid. It must have $`19\,n_xn_yn_z`$ values. |
+| `setFluidState() was called with a state of the wrong size` | The state comes from a different grid or domain. It must have 19 values per node: of the whole lattice, $`19\,n_xn_yn_z`$, with one domain or with `scatter=True` (on rank 0); of the domain of the rank otherwise ([`getLocalDomain()`](api_reference.md#getlocaldomaincontext)). |
 | `the checkpoint was written on the platform X, not on Y`, or OpenMM's `loadCheckpoint: Checkpoint was created with a different Platform: ...` | A checkpoint can only be loaded on the platform where it was written. Use the same platform, or move the run with `saveState()` and `getFluidState()` ([restart](restart.md#moving-a-run-to-another-platform)). |
 | `the checkpoint was written with a different precision`, or OpenMM's `Checkpoint was created with a different numeric precision` | The precision (single, mixed, double) differs from that of the checkpoint. Create the Context with the same `Precision` property. |
 | `Checkpoint was created with a different version of OpenMM` (from OpenMM) | The OpenMM part of the checkpoint was written by another version of OpenMM. Continue the run with the version of OpenMM that wrote it. |
 | `the checkpoint was written for a different grid size or number of coupled particles` | The System built for the restart is not the same as the one of the checkpoint. Build the System exactly as in the first run. |
-| `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by openmmlbm.saveCheckpoint()` | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
+| `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by LBMForce.saveCheckpointFile() or openmmlbm.saveCheckpoint()` | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
+| `... was written in X precision, and this Context uses Y`, `... was written for a System with a different number of particles` | A checkpoint file is loaded into a Context with another precision, or a System with another number of particles. Create the Context with the `Precision` of the first run and build the same System. |
+| `... was written with one domain by openmmlbm.saveCheckpoint(), and only a Context with one domain can load it` | A file written with one domain can be loaded only with one domain. To continue a run with another decomposition, write its checkpoints with `saveCheckpointFile()` ([restart](restart.md)). |
+| `with the domain decomposition the checkpoints are written to a file, with saveCheckpointFile()` (or `read from a file, with loadCheckpointFile()`) | `createCheckpoint()` and `loadCheckpoint()` hold the state of one process; with more than one domain use `saveCheckpointFile()` and `loadCheckpointFile()`, or `openmmlbm.saveCheckpoint()` and `openmmlbm.loadCheckpoint()`. |
+| `cannot open ... to write it`, `cannot open ... to read it`, `cannot rename ... to ...`, `error writing ...`, `... is truncated or cannot be read` | A checkpoint or VTK file could not be written or read: check the path, the permissions and the free space (the checkpoint is written to `<file>.tmp` and then renamed). |
 | `unsupported checkpoint version`, `the checkpoint is damaged`, `the checkpoint is truncated`, `... is truncated or damaged` | The checkpoint was written by a newer version of the plugin, or the file was cut or changed (for example by a job that stopped while writing it). Use the version that wrote it, or an earlier checkpoint. |
 | `error writing the checkpoint` | In C++, the stream passed to `createCheckpoint()` could not be written. Check that it is open, in binary mode, and that the disk is not full. |
 | `the checkpoint must be bytes` | `LBMForce.loadCheckpoint(context, data)` takes the bytes returned by `createCheckpoint()`; to read a file, use `openmmlbm.loadCheckpoint(file, context, force)`. |
-| `Unsupported version number` (from `XmlSerializer.deserialize()`) | The XML was written by a newer version of the plugin: for example, version 0.2 cannot read the XML of this version (XML version 7). Use the newer version. |
+| `Unsupported version number` (from `XmlSerializer.deserialize()`) | The XML was written by a newer version of the plugin: for example, version 0.3 cannot read the XML of this version (XML version 8). Use the newer version. |
 | `the serialized force must have 6 faces` (from `XmlSerializer.deserialize()`) | The XML of the force was changed by hand or is damaged: its `Faces` element must hold one `Face` for each of the six faces. Serialize the force again. |
 | `unknown coupling scheme`, `unknown drag scheme` | `setCouplingScheme()` or `setDragScheme()` received a number that is not a scheme. Use `LBMForce.EulerMaruyama` or `LBMForce.NVE`, and `LBMForce.Explicit` or `LBMForce.Centered`. |
 | `with the Centered drag scheme LBMForce must be the last force of the System; add it after all the other forces` | The centred drag reads the other forces on the particles, which are complete only when `LBMForce` comes last. Call `system.addForce(force)` after adding every other force. |
@@ -74,6 +90,14 @@ does not stop the simulation. See [relaxation time](lattice.md#relaxation-time) 
 into the range.
 
 ## Common pitfalls
+
+**A run with several MPI ranks hangs.** A collective call made on some ranks only waits forever for the others. With
+the domain decomposition every rank must create the Context, evaluate the forces when there are coupled particles
+(`getState()` with forces or with the energy: the `VerletIntegrator` needs the forces for the kinetic energy) and
+call `getWallForce()`, `getFluidMachNumber()`, `setFluidState()`, the calls with `gather=True` and the checkpoints
+and VTK files of the fluid, in the same order. A reporter that makes such a call, such as `StateDataReporter` with
+the temperature, must be on every rank, with its file only on rank 0 (`os.devnull` on the others); see
+[running on several GPUs](parallel.md).
 
 **The fluid does not move under a body force.** The momentum of the fluid is removed at every step by
 default. Call `setFluidMomentumRemovalFrequency(0)` for flows driven by `setBodyAcceleration()`.

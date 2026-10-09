@@ -7,7 +7,9 @@ what to look at and a few exercises: a kicked bead, momentum and energy, tempera
 a protein, and a long run split into several pieces.
 
 Each lesson takes from a few minutes to half an hour. You need a terminal with the environment active
-(`conda activate lbm`) and a working folder:
+(`conda activate lbm`) and a working folder. On a computing cluster, for the lessons on a GPU open an interactive
+session on a GPU node first and activate the environment there, after the session has started
+([installation, section 10](installation.md#10-on-a-computing-cluster)):
 
 ```bash
 mkdir -p ~/lbm-runs
@@ -15,8 +17,9 @@ cd ~/lbm-runs
 export EX=~/src/openmm-lbm/examples      # a short name for the folder of the examples
 ```
 
-The commands below use `--platform Reference`, which works on every computer. With a GPU, leave it
-out: the scripts then take CUDA, or OpenCL if there is no CUDA (on an AMD GPU pass `--platform HIP`). For the figures, install matplotlib once:
+The commands below use `--platform Reference`, which works on every computer. With a GPU, leave it out: the scripts then
+take CUDA, or OpenCL if there is no CUDA (on an AMD GPU pass `--platform HIP`). For the figures, install matplotlib
+once:
 
 ```bash
 conda install -c conda-forge matplotlib

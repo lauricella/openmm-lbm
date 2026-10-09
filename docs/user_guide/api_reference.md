@@ -49,6 +49,9 @@ return `Quantity` objects where the quantity has units.
 | `setFriction(friction)` | 1/ps | 1.0 | yes |
 | `setTemperature(temperature)` | K | 300 | yes |
 | `setRandomNumberSeed(seed)` | | 0 | used only at creation |
+| `setDomainDecomposition(px, py, pz)` | domains | (1, 1, 1) | no |
+| `setParticleCopiesCheck(check)` | | `True` | yes |
+| `setDensityHaloExchange(exchange)`, `setVelocityHaloExchange(exchange)` | | `False` | no |
 
 All parameters are read when the Context is created. "Change in a Context" tells whether a later
 change can be applied with [`updateParametersInContext()`](#changing-parameters-in-a-context); the
@@ -67,6 +70,12 @@ force.setGridSize(30, 30, 30)
 nx, ny, nz = force.getGridSize()
 ```
 
+The plugin indexes the nodes and the populations with 32-bit integers. The lattice can have at most 2147483647 nodes,
+and a domain at most 113025455 nodes, counting the layers of halo nodes along the divided axes (its 19 populations must
+have fewer than $`2^{31}`$ entries): $`480^3`$ nodes fit in one domain, $`490^3`$ do not. With one domain the domain
+is the whole lattice. A larger lattice or domain is an error when the Context is created; dividing the lattice into
+more domains (`setDomainDecomposition()`, below) lifts the limit on the domain.
+
 See [the lattice](lattice.md#geometry) for the geometry and the numbering of the nodes.
 
 ### `setDomainDecomposition(px, py, pz)`, `getDomainDecomposition()`
@@ -74,34 +83,52 @@ See [the lattice](lattice.md#geometry) for the geometry and the numbering of the
 **In development for version 0.4.0.** The decomposition of the lattice into $`p_x \times p_y \times p_z`$ domains,
 one per MPI rank, for runs of the same script in several processes (`srun` or `mpirun`). The default, 1, 1, 1, is
 one domain: the whole lattice in one process, without MPI. A 0 lets MPI choose the number of domains along that axis
-(`MPI_Dims_create`), with the most domains along z, then y. On the GPU platforms divide z and y rather than x, along
-which the nodes are consecutive in memory: a block divided along x takes 30% to 90% more time per step
-(`docs/validation.md`, Performance of the domain decomposition).
-More than one domain needs the plugin built with MPI (`-DOPENMM_LBM_MPI=ON`, [installation](installation.md)), and
-the product must be the number of MPI ranks; otherwise creating the Context raises an error. It is fixed when the
-Context is created. In this version every platform decomposes the fluid, the walls, the open faces and the coupling
-of the particles, each rank on the CUDA, OpenCL and HIP platforms on its own GPU
-([theory](../theory.md#8-domain-decomposition-in-development-for-version-040)); a Context with more than one domain
-refuses checkpoints. To give each rank its own
-GPU, launch with one GPU per task (`srun --gpus-per-task=1`) or set the platform property `DeviceIndex` to
-`openmmlbm.mpiLocalRank()`. With coupled particles the CUDA and HIP platforms need the property `DeterministicForces`
-set to `"true"`, so that every rank computes the same forces on its copies of the particles. On several nodes, `mpirun` of OpenMPI
-passes to the processes of the other nodes only the environment variables named with `-x`: pass those of the
-environment of OpenMM (for example `-x PATH -x LD_LIBRARY_PATH -x PYTHONPATH`, and for OpenCL the variables of its
-loader, such as `OCL_ICD_VENDORS`).
-On the CUDA platform, with an MPI library built with CUDA support (CUDA-aware MPI, as Open MPI with UCX), the
-populations exchanged between the ranks of the same node go from GPU to GPU (over NVLink where the GPUs have it),
-and those between nodes through the host; without that support, and on OpenCL and HIP, all of them go through the
-host. Only the first Context of each process exchanges from GPU to GPU (the MPI library binds these transfers to its
-CUDA context); the environment variable `OPENMM_LBM_DEVICE_MPI=0` makes every Context go through the host. Measured
-times per step are in [validation.md](../validation.md#performance-of-the-domain-decomposition-cuda-nvidia-a100); the
-script `devtools/benchmark_decomposition.py` measures them on another machine. Every rank computes all the forces of
-OpenMM on all the particles, so the decomposition divides the time of the fluid only: it pays where the fluid takes
-most of the time of a step.
+(`MPI_Dims_create`), with the most domains along z, then y. `getDomainDecomposition()` returns the values that were
+set, zeros included; [`getLocalDomain()`](#getlocaldomaincontext) gives the domain of the rank in a Context. On the
+GPU platforms divide z and y rather than x, along which the nodes are consecutive in memory: a block divided along x
+takes 30% to 90% more time per step
+([validation](../validation.md#performance-of-the-domain-decomposition-cuda-nvidia-a100)).
+
+A negative value is an error at once. More than one domain, or a 0, needs the plugin built with MPI
+(`-DOPENMM_LBM_MPI=ON`, [installation](installation.md)); the product must be the number of MPI ranks, and an axis
+cannot have more domains than nodes; otherwise creating the Context raises an error. The decomposition is fixed when
+the Context is created. Every platform decomposes the fluid, the walls, the open faces and the coupling of the
+particles, each rank on the CUDA, OpenCL and HIP platforms on its own GPU
+([theory](../theory.md#8-domain-decomposition-in-development-for-version-040)). With more than one domain
+`createCheckpoint()` and `loadCheckpoint()` raise an error: save and load with `saveCheckpointFile()` and
+`loadCheckpointFile()`, or `openmmlbm.saveCheckpoint()` and `openmmlbm.loadCheckpoint()` ([restart](restart.md)).
+
+To give each rank its own GPU, launch with one GPU per task (`srun --gpus-per-task=1`: every task then sees its GPU
+as device 0) or let every task see all the GPUs of its node and set the platform property `DeviceIndex` to
+`str(openmmlbm.mpiLocalRank())`. With coupled particles the CUDA and HIP platforms need the property
+`DeterministicForces` set to `"true"`, so that every rank computes the same forces on its copies of the particles.
+[Running on several GPUs](parallel.md) has a complete script and job scripts.
+
+On several nodes, `mpirun` of Open MPI passes to the processes of the other nodes only the environment variables
+named with `-x`, with their values in the environment where `mpirun` runs: set up the environment in the job script
+first (modules, `conda activate`, exports), then pass it (for example `-x PATH -x LD_LIBRARY_PATH -x PYTHONPATH`, and
+for OpenCL the variables of its loader, such as `OCL_ICD_VENDORS`).
+
+On the CUDA platform, when the MPI library of every rank can read the memory of the GPU (CUDA-aware MPI, detected
+with `MPIX_Query_cuda_support()` of Open MPI), the populations exchanged between the ranks of the same node go from
+GPU to GPU (over NVLink where the GPUs have it); those between nodes always go through the host, which was faster.
+With other MPI libraries, and on OpenCL and HIP, all of them go through the host. Only the first Context of each
+process exchanges from GPU to GPU (the MPI library binds these transfers to its CUDA context); the environment
+variable `OPENMM_LBM_DEVICE_MPI=0` makes every Context go through the host. Measured times per step are in
+[validation.md](../validation.md#performance-of-the-domain-decomposition-cuda-nvidia-a100); the script
+`devtools/benchmark_decomposition.py` measures them on another machine. Every rank computes all the forces of OpenMM
+on all the particles, so the decomposition divides the time of the fluid only: it pays where the fluid takes most of
+the time of a step.
 `getFluidFields()`, `getFluidState()` and `setFluidState()` work on the domain of each rank, or gather the whole
 lattice on rank 0 ([reading and writing the fluid](#reading-and-writing-the-fluid-of-a-context)).
-`getWallForce()`, `getFluidMachNumber()`, `getState(getForces=True)`, `setFluidState()` and the calls with `gather`
-must then be called by every rank.
+Some calls are collective with more than one domain and must be made by every rank, or the run waits forever: the
+creation of the Context; with coupled particles every evaluation of the forces, `getState(getForces=True)` and also
+`getState(getEnergy=True)`, since the `VerletIntegrator` needs the forces for the kinetic energy; `getWallForce()`,
+`getFluidMachNumber()`, `setFluidState()`, the calls with `gather`, `saveCheckpointFile()`, `loadCheckpointFile()`
+and `writeFluidFile()`. So must the reporters that make these calls: OpenMM's `StateDataReporter` with energies or
+the temperature and `CheckpointReporter`, `LBMVTKReporter`, `LBMCheckpointReporter`, and `LBMTemperatureReporter`
+with the explicit drag (it asks the State for the forces). Give such a reporter a file only on rank 0 (for example
+`os.devnull` on the other ranks); [running on several GPUs](parallel.md) has an example.
 
 The particles are replicated: every rank builds the same System and integrates all the particles, and the copies must
 stay identical. Set positions and velocities in the same way on every rank (velocities drawn at random need a fixed
@@ -114,6 +141,14 @@ period of the Mach number check (`setMachCheckFrequency()`), and stops with an e
 and `openmmlbm.mpiLocalRank()` (also `LBMForce.getMPIRank()`, `getMPISize()`, `getMPILocalRank()`) give the rank of
 the process, the number of ranks and the rank among the processes on the same node, to print from one rank or to
 choose the GPU; without MPI they return 0, 1 and 0. The first call initializes MPI if the program has not done it.
+
+MPI initialized by the plugin is finalized when the program ends. In Python the `openmmlbm` module does it as soon as
+the script ends (a function registered with `atexit`), before the objects of the script are deleted. The order
+matters: the MPI library (UCX, under Open MPI) registers the host memory of the exchanges between nodes in the CUDA
+context of the Context, which OpenMM destroys with the Context, and finalizing MPI after that made UCX print hundreds
+of errors (`cudaHostUnregister() failed`, `failed to dereg from md[3]=cuda_cpy`) at the end of every run on several
+nodes. A C++ program, or a script that initialized MPI itself (for example with mpi4py), avoids them by finalizing
+MPI while its Contexts still exist.
 
 An exception that stops the script on one rank only would leave the other ranks waiting forever in the next
 communication. When MPI runs with more than one rank, the `openmmlbm` module therefore prints an uncaught exception
@@ -456,7 +491,9 @@ A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps
 temperature (K) of the particles coupled to `force`, with three degrees of freedom per particle. It uses the
 velocity that has the right temperature for the drag scheme of the force: the full-step velocity
 $`\mathbf v + \Delta t\,\mathbf F/(2m)`$ with the explicit drag (the same temperature as `StateDataReporter`), the
-velocity of the State with the centred drag. `file` is a path or an open file such as `sys.stdout`.
+velocity of the State with the centred drag. `file` is a path or an open file such as `sys.stdout`. With the domain
+decomposition and the explicit drag the reporter asks the State for the forces, which every rank must do together:
+add it on every rank, with the file only on rank 0 (`os.devnull` on the others).
 
 ```python
 from openmmlbm import LBMTemperatureReporter
@@ -661,14 +698,14 @@ it, with the rest of what the force needs, so that a run continues exactly. The 
 
 ### `createCheckpoint(context)`, `loadCheckpoint(context, data)`
 
-`createCheckpoint()` returns, as `bytes`, the part of the state of the Context that belongs to the force and
-that OpenMM checkpoints miss: the populations of the fluid, the random numbers already drawn for the next
-step, the force on the walls of the last step and, on the Reference platform, the state of the random number
-generator of the force. `loadCheckpoint()` restores it in a Context built from the same System, on the same
-platform and with the same precision. Load the OpenMM checkpoint of the same step first. In C++ they take a
-`std::ostream` and a `std::istream` opened in binary mode. They hold the state of one domain: with more than one
-domain they raise an error, and the checkpoints go to a file with
-[`saveCheckpointFile()`](#savecheckpointfilecontext-file-loadcheckpointfilecontext-file) (or `openmmlbm.saveCheckpoint()`).
+`createCheckpoint()` returns, as `bytes`, the part of the state of the Context that belongs to the force and that OpenMM
+checkpoints miss: the populations of the fluid, the random numbers already drawn for the next step, the force on the
+walls of the last step and, on the Reference platform, the state of the random number generator of the force.
+`loadCheckpoint()` restores it in a Context built from the same System, on the same platform and with the same
+precision. Load the OpenMM checkpoint of the same step first. In C++ they take a `std::ostream` and a `std::istream`
+opened in binary mode. They hold the state of one domain: with more than one domain they raise an error, and the
+checkpoints go to a file with [`saveCheckpointFile()`](#savecheckpointfilecontext-file-loadcheckpointfilecontext-file)
+(or `openmmlbm.saveCheckpoint()`).
 
 ```python
 data = force.createCheckpoint(context)
@@ -711,25 +748,24 @@ them. The file holds:
 
 Loaded with the **same decomposition**, each rank takes its own OpenMM checkpoint and its own part, and the run
 continues exactly, bit for bit, also with the fluctuating fluid. With **another decomposition**, or another number of
-ranks, the fluid is restored exactly and the particles from their State (positions, velocities, box, time, step
-count), exactly in double precision; in mixed and single precision OpenMM keeps the positions in float, wrapped into
-the box, so the position of a particle that has left the box is set again rounded to float. The random number
-generators cannot be restored: they belong to
-the Context of each rank (OpenMM's generator on the GPU platforms), and a rank of the new decomposition has no
-counterpart in the old one. Each rank then keeps the generator of its new Context, seeded with the seed of the force
-and its rank ([`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed)): a run with fluctuations or at
-a temperature continues with new random numbers, statistically equivalent, and a run without random numbers (no
-fluctuations, temperature zero) continues as the uninterrupted one: exactly in double precision, to rounding in mixed
-and single precision, where OpenMM rebuilds its float representation of the positions, whose last bits may differ. Choose a new seed, or 0 (a new one at
-every run), so that the new numbers do not repeat those of the start of the run. The force on the walls
-([`getWallForce()`](#getwallforcecontext)) is zero until the next step in that case.
+ranks, the fluid is restored exactly and the particles from their State (positions, velocities, box, time, step count),
+exactly in double precision; in mixed and single precision OpenMM keeps the positions in float, wrapped into the box, so
+the position of a particle that has left the box is set again rounded to float. The random number generators cannot be
+restored: they belong to the Context of each rank (OpenMM's generator on the GPU platforms), and a rank of the new
+decomposition has no counterpart in the old one. Each rank then keeps the generator of its new Context, seeded with the
+seed of the force and its rank ([`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed)): a run with
+fluctuations or at a temperature continues with new random numbers, statistically equivalent, and a run without random
+numbers (no fluctuations, temperature zero) continues as the uninterrupted one: exactly in double precision, to rounding
+in mixed and single precision, where OpenMM rebuilds its float representation of the positions, whose last bits may
+differ. Choose a new seed, or 0 (a new one at every run), so that the new numbers do not repeat those of the start of
+the run. The force on the walls ([`getWallForce()`](#getwallforcecontext)) is zero until the next step in that case.
 
-The file is written to `file + '.tmp'` and then renamed, so an interrupted write never damages an existing
-checkpoint. With one domain it needs no MPI, and it is the way to continue a run of one domain with several.
-`loadCheckpointFile()` also reads the files that `openmmlbm.saveCheckpoint()` writes with one domain, but only in a
-Context with one domain. In double precision the populations take 152 bytes per node (0.32 GB for $`128^3`$ nodes, 20 GB for $`512^3`$),
-whatever the precision of the platform, which keeps them exact. Like OpenMM checkpoints, the file is specific to the
-platform, the precision and the System.
+The file is written to `file + '.tmp'` and then renamed, so an interrupted write never damages an existing checkpoint.
+With one domain it needs no MPI, and it is the way to continue a run of one domain with several. `loadCheckpointFile()`
+also reads the files that `openmmlbm.saveCheckpoint()` writes with one domain, but only in a Context with one domain. In
+double precision the populations take 152 bytes per node (0.32 GB for $`128^3`$ nodes, 20 GB for $`512^3`$), whatever
+the precision of the platform, which keeps them exact. Like OpenMM checkpoints, the file is specific to the platform,
+the precision and the System.
 
 ```python
 force.saveCheckpointFile(context, 'run.chk')
@@ -782,10 +818,12 @@ It updates:
 - the friction, the temperature (also of a fluctuating fluid) and the coupling scheme;
 - the frequency of the removal of the fluid momentum;
 - the frequency and the limit of the Mach number check;
-- the velocities and the densities of the open faces.
+- the velocities and the densities of the open faces;
+- the check of the copies of the particles (`setParticleCopiesCheck()`).
 
-The grid size, the fluid density and viscosity, the solid nodes, the wall scheme, the types of the faces,
-the set of coupled particles, the drag scheme and the fluid fluctuations cannot be changed this way: the method raises an error if they differ from those of the Context. The
+The grid size, the fluid density and viscosity, the solid nodes, the wall scheme, the types of the faces, the set of
+coupled particles, the drag scheme, the fluid fluctuations, the domain decomposition and the exchange of the halo
+cannot be changed this way: the method raises an error if they differ from those of the Context. The
 initial velocity and the random seed are used only when the Context is created. To change any of
 these, create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()` if
 the grid is the same. `Context.reinitialize()` also restarts the fluid from its initial state.
@@ -816,8 +854,8 @@ that the integrator evaluates; by default the integrator evaluates all groups.
 `openmm.XmlSerializer` saves and loads an `LBMForce`, alone or as part of a System, with all its
 parameters: grid, fluid properties, friction, temperature, random number seed, body acceleration, initial
 velocity, frequencies, Mach limit, coupling and drag schemes, fluid fluctuations, wall scheme, solid nodes, the
-type, velocity and density of each face, coupled particles, domain decomposition and check of the copies of the
-particles, force group and name. The fluid
+type, velocity and density of each face, coupled particles, domain decomposition, check of the copies of the
+particles, exchange of the halo of the density and of the velocity, force group and name. The fluid
 of a Context is not part of it. The XML has version 8. Older XML still loads: versions 1 to 3 (written by version
 0.1.0) with the explicit drag, versions 1 to 4 (versions 0.1 and 0.2 of the plugin) without fluid fluctuations,
 versions 1 to 5 with the `BounceBack` wall scheme, versions 1 to 6 with periodic faces and versions 1 to 7 (version
@@ -831,5 +869,8 @@ deserializing. A force deserialized on its own is returned as a generic `openmm.
 Invalid settings raise a Python `Exception` with the messages listed in
 [troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created (for example open
 faces with the removal of the fluid momentum, or a single open face on an axis). Some conditions only print a
-warning on stderr: a relaxation time outside [0.505, 2], and, with coupled particles and the explicit drag,
-$`\tau > 1.7`$, $`\gamma\Delta t > 1`$, and fluid fluctuations (the particles are then too hot).
+warning on stderr: a relaxation time outside [0.505, 2]; with coupled particles and the explicit drag,
+$`\tau > 1.7`$, $`\gamma\Delta t > 1`$, and fluid fluctuations (the particles are then too hot); and fluctuations
+of the fluid larger than those validated, $`k_BT`$ above 1/3000 in lattice units
+([`setFluidFluctuations()`](#setfluidfluctuationsfluctuations-getfluidfluctuations)). With the domain decomposition
+only rank 0 prints them.

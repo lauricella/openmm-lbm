@@ -62,6 +62,8 @@ Know these before using the plugin for a study:
    - A Couette flow between two open faces.
    - A flow in a duct driven by a pressure difference.
 8. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
+9. [Running on several GPUs](parallel.md): the lattice divided into domains, one MPI rank per GPU (in development
+   for version 0.4.0): building with MPI, a complete script, job scripts for one and several nodes.
 
 ## What works in this version
 
@@ -76,13 +78,14 @@ Know these before using the plugin for a study:
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |
-| Checkpoints of the fluid (`createCheckpoint()`, `openmmlbm.saveCheckpoint()`, `LBMCheckpointReporter`) | yes | yes |
+| Checkpoints of the fluid (`createCheckpoint()`, `saveCheckpointFile()`, `openmmlbm.saveCheckpoint()`, `LBMCheckpointReporter`) | yes | yes |
+| Domain decomposition over MPI ranks ([`setDomainDecomposition()`](parallel.md), in development for version 0.4.0) | yes | yes |
 | VTK files of the fluid and of the particles for ParaView ([`openmmlbm.LBMVTKReporter`](api_reference.md#openmmlbmlbmvtkreporterprefix-reportinterval-force)) | yes | yes |
 
-Every feature runs on every platform. The random forces of the Reference platform, and the fluctuations of the fluid, come from a
-generator of the force, those of the GPU platforms from OpenMM's generator: with the same seed the two are
-different sequences with the same statistics. The coupling is dissipative and has no potential energy: on every
-platform its energy in the State is zero.
+Every feature runs on every platform. The random forces of the Reference platform, and the fluctuations of the fluid,
+come from a generator of the force, those of the GPU platforms from OpenMM's generator: with the same seed the two are
+different sequences with the same statistics. The coupling is dissipative and has no potential energy: on every platform
+its energy in the State is zero.
 
 ## Conventions
 

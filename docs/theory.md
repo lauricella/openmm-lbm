@@ -1133,9 +1133,9 @@ choose).
 block with coordinates $`(c_x, c_y, c_z)`$; along an axis of $`n`$ nodes block $`c`$ holds the nodes
 $`[\lfloor nc/p\rfloor, \lfloor n(c + 1)/p\rfloor)`$, so blocks differ by at most one node. A 0 lets
 `MPI_Dims_create` choose, with the most domains along z, then y (dividing x costs more on the GPUs,
-`docs/validation.md`); the product must be the number of ranks. All MPI calls are in
-`openmmapi/src/LBMDecomposition.cpp`, compiled only with the CMake option `OPENMM_LBM_MPI`; without it, or with one
-domain, nothing changes.
+`docs/validation.md`); the product must be the number of ranks, and an axis cannot have more domains than nodes. All
+MPI calls are in `openmmapi/src/LBMDecomposition.cpp`, the only file that includes `mpi.h`, whose MPI code is compiled
+only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, nothing changes.
 
 **Reference platform** (the fluid, walls, open faces and coupled particles).
 - The arrays cover the whole lattice on every rank, and each rank advances only the nodes it owns: moments,
@@ -1163,10 +1163,11 @@ domain, nothing changes.
 - Each rank draws its own random numbers (fluctuating fluid, rebuilt boundary nodes) from the generator of the
   force, with the seed of rank 0 plus $`1000003\,r`$: the same seed on every rank would give the nodes of every
   block the same random numbers.
-- Without the removal of the fluid momentum the fluid nodes are identical, bit for bit, to those of one domain, for
-  any decomposition (`docs/validation.md`, Domain decomposition). With the removal they agree to rounding, because
-  the sum over the nodes is added in another order; with fluctuations the random numbers differ, so the agreement
-  is statistical: the variances and spectra of the fluctuations, the planes at the borders of the blocks, the
+- Without the removal of the fluid momentum and without random numbers (no fluid fluctuations, and no random coupling
+  force: temperature zero or the `NVE` coupling scheme) the fluid nodes are identical, bit for bit, to those of one
+  domain, for any decomposition (`docs/validation.md`, Domain decomposition). With the removal they agree to rounding,
+  because the sum over the nodes is added in another order; with fluctuations the random numbers differ, so the
+  agreement is statistical: the variances and spectra of the fluctuations, the planes at the borders of the blocks, the
   independence of the ranks and the temperature of particles that cross the domains agree with one domain within the
   statistical errors (`docs/validation.md`, Fluctuating fluid and particles across the domains).
 
@@ -1178,11 +1179,13 @@ domain, nothing changes.
   is divided among the ranks, and each node is computed with the arithmetic of one domain.
 - The streaming pushes the populations that leave the block into the halo. After the collision of the frame of the
   block a kernel packs those that go to fluid nodes of other ranks into a buffer, in the precision of the populations
-  (4 bytes each in single precision, 8 in mixed and double precision). On the CUDA platform, when the MPI library
-  reads and writes the memory of the devices (CUDA-aware MPI, which it reports with `MPIX_Query_cuda_support()`), the
-  buffer is sent from the device (`MPI_Isend`) as soon as it is packed, while the interior of the block collides, and
-  the populations of the other ranks are received into a buffer of the device: within a node they go from GPU to GPU
-  over NVLink. Otherwise the buffer is copied to the host and sent, the interior collides meanwhile, and after
+  (4 bytes each in single precision, 8 in mixed and double precision). On the CUDA platform, when the MPI library of
+  every rank reads and writes the memory of the devices (CUDA-aware MPI, which Open MPI reports with
+  `MPIX_Query_cuda_support()`), the populations for the ranks of the same node are sent from the device (`MPI_Isend`)
+  as soon as they are packed, while the interior of the block collides, and those of these ranks are received into the
+  buffer of the device: they go from GPU to GPU, over NVLink where the GPUs have it. The populations for and from the
+  ranks of other nodes always go through the host, which was faster over InfiniBand for blocks of $`128^3`$ nodes
+  (`docs/validation.md`): the buffer is copied to the host and sent, the interior collides meanwhile, and after
   `MPI_Waitall` the populations received are copied to the device. They are then unpacked at their slots, before the
   walls and the boundary nodes. The MPI library (UCX, under Open MPI) binds its transfers between devices to the CUDA
   context of the first one, while OpenMM gives every Context its own CUDA context and destroys it with the Context;
@@ -1196,11 +1199,16 @@ domain, nothing changes.
   $`x`$, $`y`$ and $`z`$ in turn and forwarding the populations of the edges; the volume is the same.
 - OpenMM computes the size in bytes of an upload to the device as an `int` (`ComputeArray::upload()` and
   `uploadSubArray()`, OpenMM 8.3 to 8.6), which overflows beyond 2 GB: with one domain or with the decomposition, the
-  populations of more than 14.1 million nodes per GPU in mixed and double precision (28.3 million in single
-  precision) could not be uploaded, and the Context failed with `CUDA_ERROR_INVALID_VALUE`. They are now uploaded in
-  parts of 256 MB into a smaller array of the device, and each part copied into its place by a kernel.
-- The sums of the removal of the fluid momentum and of the force on the walls, and the Mach number, are reduced on
-  the device over the block and then over the ranks as on the Reference platform. A fluctuating fluid draws its
+  populations of more than 14.1 million stored nodes per GPU (the block with its halo) in mixed and double precision
+  (28.3 million in single precision) could not be uploaded, and the Context failed with `CUDA_ERROR_INVALID_VALUE`.
+  They are uploaded in parts of 256 MB into a smaller array of the device, and each part copied into its place by a
+  kernel. The plugin itself indexes the nodes and the populations with 32-bit integers, on every platform: the
+  lattice must have fewer than $`2^{31}`$ nodes, and the 19 populations of a domain with its halo fewer than
+  $`2^{31}`$ entries (at most 113025455 nodes, for example $`480^3`$ but not $`490^3`$ in one domain). Creating a
+  Context beyond these limits is an error; dividing the lattice into more domains lifts the second one.
+- The sums of the removal of the fluid momentum and of the force on the walls, and the Mach number, are reduced over
+  the block (on the device by work group or per node, then on the host) and then over the ranks as on the Reference
+  platform. A fluctuating fluid draws its
   numbers from OpenMM's generator of the Context of each rank, seeded with the seed of rank 0 plus $`1000003\,r`$.
 - The coupled particles follow the rules of the Reference platform (below). The coupling kernels find the nearest node
   in the whole lattice; the rank that owns it computes the coupling force and the reaction on the node, the other ranks
@@ -1217,13 +1225,15 @@ domain, nothing changes.
   platform property `DeterministicForces` is `true`, which a Context with more than one domain and coupled particles
   requires (checked when it is created). The OpenCL platform has no such property; the comparison of the copies would
   stop a run whose copies drift apart.
-- The exchange of the halo of the density and the velocity (below): at the end of the step a kernel computes the
-  moments of the populations and copies $`\rho - 1`$ and $`\mathbf j`$ of the nodes of the block that are in the halo of
-  other ranks into a buffer; the host computes their fields as `getFluidFields()` does and sends them, so the copies
-  are identical bit for bit to what the owner returns. It costs one more pass over the populations per step, and the
-  transfer of the halo through the host, which keeps the fields of the nodes of the halo only.
+- The exchange of the halo of the density and the velocity (below): at the end of the step a kernel computes the moments
+  of the populations (`computeFluidMoments`) and another (`packFields`) copies $`\rho - 1`$ and $`\mathbf j`$ of the
+  nodes of the block that are in the halo of other ranks into a buffer; the host computes their fields as
+  `getFluidFields()` does and sends them, so the copies are identical bit for bit to what the owner returns. It costs
+  one more pass over the populations per step, and the transfer of the halo through the host, which keeps the fields of
+  the nodes of the halo only.
 - With the same platform and precision, the fluid nodes and the particles are identical bit for bit to those of one
-  domain without the removal of the fluid momentum (`docs/validation.md`, Domain decomposition).
+  domain without the removal of the fluid momentum and without random numbers (`docs/validation.md`, Domain
+  decomposition).
 
 **Particles, errors, fields and state** (every platform).
 - **Particles: replicated data.** Every rank has a Context with all the particles and integrates all of them; only
@@ -1236,17 +1246,19 @@ domain, nothing changes.
   coupled particles from its own generator, and the force uses those of the owner. Every rank reflects its copy of
   the particles at the walls (the solid nodes are known everywhere), and rank 0 alone counts the momentum given to
   the wall.
-- The copies stay identical only if nothing else draws different random numbers on different ranks. The integrator
-  is a `VerletIntegrator`, which draws none (section 2); a System with an `AndersenThermostat` or a Monte Carlo
-  barostat is refused with more than one domain. The positions and velocities must also start the same on every
-  rank: velocities drawn at random need the same seed on every rank, for example
-  `setVelocitiesToTemperature(T, seed)`. Copies that differ would give wrong results without any sign, so the
-  plugin compares a hash of the bits of all positions and velocities over the ranks at the first lattice step and
-  then with the period of the Mach number check (`setMachCheckFrequency()`), and stops with an error if they differ.
-  The check costs about 7 ns per particle and one `MPI_Allreduce` of two numbers; `setParticleCopiesCheck(False)`
-  turns it off, for timings.
+- The copies stay identical only if nothing else draws different random numbers on different ranks. The integrator is a
+  `VerletIntegrator`, which draws none (section 2); a System with an `AndersenThermostat` or a Monte Carlo barostat is
+  refused with more than one domain. The positions and velocities must also start the same on every rank: velocities
+  drawn at random need the same seed on every rank, for example `setVelocitiesToTemperature(T, seed)`. Copies that
+  differ would give wrong results without any sign, so the plugin compares a hash of the bits of all positions and
+  velocities over the ranks at the first lattice step and then with the period of the Mach number check
+  (`setMachCheckFrequency()`), and stops with an error if they differ. The Reference platform, whose forces are always
+  deterministic, checks every System; the CUDA, OpenCL and HIP platforms check when there are coupled particles, the
+  only particles whose copies act on the fluid. The check costs about 7 ns per particle and one `MPI_Allreduce` of two
+  numbers; `setParticleCopiesCheck(False)` turns it off, for timings.
 - The coupling forces of the next step, which OpenMM evaluates between steps when a script asks for the forces
-  (`getState(getForces=True)`), are summed over the ranks too: like `getWallForce()`, such a call is collective.
+  (`getState(getForces=True)`, and `getState(getEnergy=True)`, because the `VerletIntegrator` needs the forces for the
+  kinetic energy), are summed over the ranks too: like `getWallForce()`, such a call is collective.
 - **Errors.** An error found by one rank only would leave the others waiting forever in the next communication.
   The checks that depend on the rank are collective: all ranks must run on the same platform with the same
   precision (the replicated particles would drift apart otherwise), which is checked when the Context is created;
@@ -1254,59 +1266,71 @@ domain, nothing changes.
   ranks, and the comparison of the particles a hash compared over the ranks, so every rank stops at the same step.
   The other checks depend only on the System, the same on every rank. An exception in the script on one rank only
   (an error of the script, for example) cannot be made collective: the Python module `openmmlbm` then prints it and
-  aborts every rank with `MPI_Abort` (`LBMForce.abortMPI()`, installed as `sys.excepthook`), as `python -m mpi4py`
-  does, instead of leaving the others waiting.
+  aborts every rank with `MPI_Abort` (its `sys.excepthook` prints the exception with the previous hook, then calls
+  `LBMForce.abortMPI(1)`), as `python -m mpi4py` does, instead of leaving the others waiting.
+- **Start and end of MPI.** The plugin initializes MPI on first use (`MPI_Init_thread` with `MPI_THREAD_FUNNELED`:
+  only the main thread calls MPI), unless the program has done it, and then finalizes it. The Python module finalizes
+  it as soon as the script ends (`atexit`), before the objects of the script, and with them the Contexts, are deleted;
+  a C++ program finalizes it at the exit of the process. The order matters on several nodes: the MPI library (UCX,
+  under Open MPI) registers the host buffers of the exchanges between nodes in the CUDA context of the Context, which
+  OpenMM destroys with the Context, and finalizing MPI after that made UCX print hundreds of errors at the end of every
+  run (`docs/validation.md`). MPI initialized by the program, for example by mpi4py, is finalized by the program.
 - The MD part is not divided: every rank computes all the other forces of the System. This suits coarse-grained
   systems, in which the fluid dominates the cost.
-- **Fields and state of the fluid.** `getFluidFields()`, `getFluidState()` and `setFluidState()` work on the domain
-  of the rank (`getLocalDomain()`), without communication: the default keeps the data where they are, since gathering
-  them would move the whole lattice to one rank (320 MB of populations for $`128^3`$ nodes, 20 GB for $`512^3`$). The
-  whole lattice is gathered on rank 0, or set from it, only on request (`gather=True`, `scatter=True`, with
-  `MPI_Gatherv` and `MPI_Scatterv`), for tests and small lattices. With one domain the domain is the whole lattice
-  and nothing changes. The kernels give the fields and the state of the domain of the rank only, with its halo on
-  request, following the same rules on every platform (`CalcLBMForceKernel` in `openmmapi/include/LBMKernels.h`, the
-  nodes of the extended domain from `LBMDecomposition::getDomainNodes()`); `LBMForceImpl` gathers or scatters them,
-  so no rank holds the fields or the state of the whole lattice unless they are gathered on it.
-- **Halo of the density and the velocity.** Observables that need the neighbours of a node, such as the gradient of
-  the density or the vorticity, need on each rank the fields of the layer one node thick around its domain (the
-  halo, 26 neighbours with edges and corners). Two switches, off by default, exchange them at the end of every step,
-  after the walls and the open faces, and when the state is set: `setDensityHaloExchange()` and
+- **Fields and state of the fluid.** `getFluidFields()`, `getFluidState()` and `setFluidState()` work on the domain of
+  the rank (`getLocalDomain()`). The first two need no communication; `setFluidState()` is collective with more than one
+  domain (it checks the size of the state on every rank and exchanges the halo, if on). The default keeps the data where
+  they are, since gathering them would move the whole lattice to one rank (320 MB of populations for $`128^3`$ nodes, 20
+  GB for $`512^3`$). The whole lattice is gathered on rank 0, or set from it, only on request (`gather=True`,
+  `scatter=True`, with `MPI_Gatherv` and `MPI_Scatterv`), for tests and small lattices. With one domain the domain is
+  the whole lattice and nothing changes. The kernels give the fields and the state of the domain of the rank only, with
+  its halo on request, following the same rules on every platform (`CalcLBMForceKernel` in
+  `openmmapi/include/LBMKernels.h`, the nodes of the extended domain from `LBMDecomposition::getDomainNodes()`);
+  `LBMForceImpl` gathers or scatters them, so no rank holds the fields or the state of the whole lattice unless they are
+  gathered on it.
+- **Halo of the density and the velocity.** Observables that need the neighbours of a node, such as the gradient of the
+  density or the vorticity, need on each rank the fields of the layer one node thick around its domain (the halo, 26
+  neighbours with edges and corners). Two switches, off by default, exchange them at the end of every step, after the
+  walls and the open faces, when the Context is created and when the state is set: `setDensityHaloExchange()` and
   `setVelocityHaloExchange()`. Each rank sends to each neighbouring rank the fields of its nodes in the halo of that
   rank, in index order, computed as for its own nodes, so the copies are identical bit for bit;
-  `getFluidFields(halo=True)` returns them around the domain, without communication. Across periodic boundaries the
-  halo wraps; beyond open faces it does not exist (NaN). The fields between steps are those of the populations at the
-  end of the step, which are also those the next step starts from. With one domain the halo comes from the lattice
-  itself. No observable of the plugin uses the halo yet.
+  `getFluidFields(halo=True)` returns them around the domain, without communication. Across periodic boundaries the halo
+  wraps; beyond open faces it does not exist (NaN). The fields between steps are those of the populations at the end of
+  the step, which are also those the next step starts from. With one domain the halo of an exchanged field comes from
+  the lattice itself; the halo of a field that is not exchanged holds NaN. No observable of the plugin uses the halo
+  yet.
 - **Checkpoints and files of the fluid.** The files are independent of the decomposition: an array of the lattice is
-  stored in the order of the node index $`i + n_x(j + n_y k)`$, and each rank writes or reads the nodes of its domain
-  at their place in the one file, with collective MPI-IO (`LBMParallelFile` in `LBMDecomposition.cpp`: the file is
-  seen through an `MPI_Type_create_subarray` of the domain, so that the rows of the domain along $`x`$ are contiguous
-  both in the file and in memory); rank 0 writes the parts that every rank has, such as a header. Nothing is gathered
-  on one rank, so the files work for lattices that do not fit in the memory of one rank. With one domain the same code
-  writes with the standard library. A checkpoint file (`saveCheckpointFile()`) holds the populations (doubles, value
-  by value: $`f_q`$ of every node, then $`f_{q+1}`$), the particles, which are the same on every rank (time, step
-  count, box, positions, velocities, global parameters), and for every rank its OpenMM checkpoint and its own part of
-  the state of the force: the random numbers already drawn for the next step, the force on the walls of the last step
-  and, on the Reference platform, the state of the generator of the force. The random number generators belong to
-  the Context of each rank and cannot be divided among the domains of another decomposition: OpenMM's generator on the
-  GPU platforms keeps one state per thread, sized by the number of nodes of the domain, and can be seeded only once.
-  So a checkpoint loaded with the same decomposition continues the run bit for bit, rank by rank; with another
-  decomposition the populations are restored exactly, the particles from their State, which needs no generator
-  (exactly in double precision; in mixed and single precision a position outside the box is rounded to float when it
-  is set again), every rank keeps the generator of its new Context, and the run continues with new random numbers.
-  Without random numbers (no fluctuations, temperature zero) the run does not depend on the decomposition, so it
-  continues as the uninterrupted one: exactly in double precision; in mixed and single precision to rounding, because
-  OpenMM keeps the positions in float wrapped into the box (with a correction in mixed precision) and rebuilds that
-  representation from the positions it is given, so its last bits may differ from those of the uninterrupted run. The slots of the solid nodes are not saved beyond what the owner of
-  each node holds: as above, they are not part of the state of the fluid. The VTK files of `LBMVTKReporter` follow the
-  same scheme (`writeFluidFile()`): the head and the tail of the XML from rank 0, the arrays of the density, the
-  velocity and the solid nodes from every rank, so they are the same files, byte for byte, as with one domain.
+  stored in the order of the node index $`i + n_x(j + n_y k)`$, and each rank writes or reads the nodes of its domain at
+  their place in the one file, with collective MPI-IO (`LBMParallelFile` in `LBMDecomposition.cpp`: the file is seen
+  through an `MPI_Type_create_subarray` of the domain, so that the rows of the domain along $`x`$ are contiguous both in
+  the file and in memory); rank 0 writes the parts that every rank has, such as a header. Nothing is gathered on one
+  rank, so the files work for lattices that do not fit in the memory of one rank. With one domain the same code writes
+  with the standard library. A checkpoint file (`saveCheckpointFile()`) holds the populations (doubles, value by value:
+  $`f_q`$ of every node, then $`f_{q+1}`$), the particles, which are the same on every rank (time, step count, box,
+  positions, velocities, global parameters), and for every rank its OpenMM checkpoint and its own part of the state of
+  the force: the random numbers already drawn for the next step, the force on the walls of the last step and, on the
+  Reference platform, the state of the generator of the force. The random number generators belong to the Context of
+  each rank and cannot be divided among the domains of another decomposition: OpenMM's generator on the GPU platforms
+  keeps one state per thread, sized by the number of nodes of the domain, and can be seeded only once. So a checkpoint
+  loaded with the same decomposition continues the run bit for bit, rank by rank; with another decomposition the
+  populations are restored exactly, the particles from their State, which needs no generator (exactly in double
+  precision; in mixed and single precision a position outside the box is rounded to float when it is set again), every
+  rank keeps the generator of its new Context, and the run continues with new random numbers. Without random numbers (no
+  fluctuations, temperature zero) the run does not depend on the decomposition, so it continues as the uninterrupted
+  one: exactly in double precision; in mixed and single precision to rounding, because OpenMM keeps the positions in
+  float wrapped into the box (with a correction in mixed precision) and rebuilds that representation from the positions
+  it is given, so its last bits may differ from those of the uninterrupted run. The slots of the solid nodes are not
+  saved beyond what the owner of each node holds: as above, they are not part of the state of the fluid. The VTK files
+  of `LBMVTKReporter` follow the same scheme (`writeFluidFile()`): the head and the tail of the XML from rank 0, the
+  arrays of the density, the velocity and the solid nodes from every rank, so they are the same files, byte for byte, as
+  with one domain.
 
 ## References
 
 1. J. Latt and B. Chopard, Math. Comput. Simul. 72, 165 (2006): regularized collision.
 2. Z. Guo, C. Zheng and B. Shi, Phys. Rev. E 65, 046308 (2002): forcing scheme.
-3. accLB, Procedia Comput. Sci. 267, 40-51 (2025), doi:10.1016/j.procs.2025.08.231, eq. 6: $`f = f^{\mathrm{eq}} + (1 - \omega)\, f^{\mathrm{neq}} + S/2`$.
+3. accLB, Procedia Comput. Sci. 267, 40-51 (2025), doi:10.1016/j.procs.2025.08.231, eq. 6:
+   $`f = f^{\mathrm{eq}} + (1 - \omega)\, f^{\mathrm{neq}} + S/2`$.
 4. LBFAST, Procedia Comput. Sci. 286, 34-47 (2026), doi:10.1016/j.procs.2026.08.017, eq. 3.
 5. P. Ahlrichs and B. Dünweg, J. Chem. Phys. 111, 8225 (1999): frictional particle-fluid coupling.
 6. B. Dünweg and A. J. C. Ladd, Adv. Polym. Sci. 221, 89 (2009): review of lattice Boltzmann for soft matter.

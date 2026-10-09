@@ -145,7 +145,10 @@ To continue a run on another platform or precision (for example from a GPU to th
 check), save the particles and the fluid in portable formats instead: the particles with
 `Simulation.saveState()`, an XML file, and the fluid with `getFluidState()`, a list of numbers that does not
 depend on the platform. The continued run is then statistically equivalent but not identical, because the
-random numbers are drawn again.
+random numbers are drawn again. With more than one domain `getFluidState()` returns the domain of each rank: gather
+the whole lattice on rank 0 with `getFluidState(context, gather=True)`, write the particles and the fluid from rank 0,
+and give the fluid back with `setFluidState(context, state, scatter=True)`, called by every rank (rank 0 with the
+state, the others with `None`).
 
 ```python
 # (continued) Save portable files, then continue on another platform (here the Reference platform again).
@@ -240,7 +243,9 @@ finished at step 1000
 Run with `python run.py`. If it stops before the end, `python run.py` again continues it; when the run is
 finished, a further `python run.py` does nothing (zero steps left).
 
-A job script for Slurm that runs it (adapt the account, the partition and the environment to your cluster):
+A job script for Slurm that runs it on a GPU, with `'CUDA'` instead of `'Reference'` in `run.py` (adapt the
+account, the partition and the environment to your cluster). The environment is set up in the job script, on the
+compute node:
 
 ```bash
 #!/bin/bash
@@ -250,8 +255,13 @@ A job script for Slurm that runs it (adapt the account, the partition and the en
 #SBATCH --time=24:00:00
 source ~/miniforge3/etc/profile.d/conda.sh     # makes conda available in the job
 conda activate lbm
+# export LD_LIBRARY_PATH=$CONDA_PREFIX/cuda-compat:$LD_LIBRARY_PATH   # only with old drivers (installation, section 10)
 python run.py
 ```
+
+With several GPUs and the domain decomposition the same script runs on every rank (`mpirun -n 4 python run.py`),
+and every rank must have the reporters that compute forces or energies and the checkpoint reporter
+([running on several GPUs](parallel.md)).
 
 Submit it once with `sbatch job.sh`. To chain several jobs, each starting when the previous one ends, use a
 dependency: `sbatch --dependency=afterany:<number of the previous job> job.sh`.
@@ -265,8 +275,9 @@ dependency: `sbatch --dependency=afterany:<number of the previous job> job.sh`.
   grid. `loadCheckpoint()` refuses a checkpoint written for a different grid, number of coupled particles,
   drag scheme, wall scheme, types of the faces (`setFaceBoundary()`) or switch of the fluid fluctuations, but
   it cannot check everything else: a different friction or viscosity, or different velocities and densities
-  of the faces, would simply be used from then on. The random number seed of the script does not matter on a restart: the state of the
-  generator comes from the checkpoint.
+  of the faces, would simply be used from then on. With the same decomposition the random number seed of the
+  script does not matter on a restart: the state of the generator comes from the checkpoint (with another
+  decomposition every rank keeps the generator of its new Context, below).
 - **Reports written after the last checkpoint.** If a job stops between two checkpoints, its reporters have
   already written the steps after the last checkpoint, and the restart writes them again. Choose the
   checkpoint interval as a multiple of the report interval, and remove from the text files the lines after

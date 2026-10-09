@@ -418,9 +418,9 @@ coupling tests). In `single` precision the tolerances of 1e-12 and below become 
 | `testFaceChecks` | one open face on an axis, open faces with momentum removal, fewer than 3 nodes on an open axis: errors | |
 | Python `test_wall_scheme_and_faces` | API with units, serialization, Couette flow | 1e-10 |
 
-**Measured** (NVIDIA A100, OpenMM 8.6.1 and 8.3.1): the C++ tests pass on the Reference platform and on CUDA and
-OpenCL in the three precisions, and the Python tests pass. The GPU platforms
-against the Reference platform with regularized walls and open faces: [below](#gpu-platforms-against-the-reference-platform-fluid-and-walls).
+**Measured** (NVIDIA A100, OpenMM 8.6.1 and 8.3.1): the C++ tests pass on the Reference platform and on CUDA and OpenCL
+in the three precisions, and the Python tests pass. The GPU platforms against the Reference platform with regularized
+walls and open faces: [below](#gpu-platforms-against-the-reference-platform-fluid-and-walls).
 
 **Where the walls and the faces are** (Reference, Poiseuille flow driven by $`g`$, 12 fluid nodes). The wall of the
 bounce-back scheme lies halfway between the fluid and the solid nodes, the walls of the regularized scheme and the
@@ -659,10 +659,9 @@ $`1 \times 2 \times 2`$ and $`2 \times 2 \times 2`$ (22 ranks in all):
 | explicit drag, centred drag, open faces | identical bit for bit on every rank and decomposition (66 of 66) | absolute difference at most $`2.9 \cdot 10^{-9}`$ kJ/mol/nm |
 
 Without a body force the force on the walls, 58 to $`2.5 \cdot 10^{4}`$ kJ/mol/nm here, is a small difference between
-the pressure forces on the two sides of the solid plane, each about $`\rho c_s^2`$ times its area,
-$`6.0 \cdot 10^{6}`$ kJ/mol/nm: the difference is $`5 \cdot 10^{-16}`$ of that, the rounding of the sums added in another
-order. Relative to the net force it reaches $`3 \cdot 10^{-11}`$, which is why the script compares it with the
-pressure force.
+the pressure forces on the two sides of the solid plane, each about $`\rho c_s^2`$ times its area, $`6.0 \cdot 10^{6}`$
+kJ/mol/nm: the difference is $`5 \cdot 10^{-16}`$ of that, the rounding of the sums added in another order. Relative to
+the net force it reaches $`3 \cdot 10^{-11}`$, which is why the script compares it with the pressure force.
 
 With a fluctuating fluid (centred drag, $`T = 300`$ K, 50 steps) the ranks draw different random numbers, so the run
 is not compared with one domain; the copies of the particles stay identical on every rank (the plugin compares them
@@ -747,15 +746,26 @@ precision; one GPU runs $`256^3`$ a little slower per node than $`128^3`$). The 
 behind the collision of the interior; through the host it is not.
 
 Dividing x, the axis along which consecutive nodes are consecutive in memory, costs 30% to 90% more (more in single
-precision and with more domains along x). A profile of
-rank 0 (Nsight Systems, block of $`128^3`$ nodes, mixed precision, per step) with $`2 \times 1 \times 1`$ against
-$`1 \times 1 \times 2`$: collision of the frame 88 against 10 µs, of the interior 554 against 473 µs, moments 458
-against 375 µs, packing and unpacking 62 against 14 µs (one domain: collision 482 µs, moments 372 µs). The frame and
-the slots of the faces normal to x are one node per row of the block, scattered in memory; why the interior and the
-moments are slower too is not understood. Two changes did not help and were left out: rows of the block starting a
-segment of 32 bytes (moments 424 µs, collision 670 µs, the same time per step) and the interior collided in the order of
-the block instead of from a list. So the automatic decomposition (a 0 in `setDomainDecomposition()`) puts the most
-domains along z, then y, and x should be divided only when y and z are not enough.
+precision and with more domains along x). The cause is the granularity of the accesses to the memory of the device,
+which reads and writes segments of 32 bytes. Nsight Compute on rank 0 (block of $`128^3`$ nodes, mixed precision,
+$`2 \times 1 \times 1`$ against $`1 \times 1 \times 2`$, each kernel with the caches flushed) shows two effects:
+- the frame of the block and the slots of the faces normal to x are one node per row of the block, scattered in
+  memory, so that every access of a thread is a segment of its own: the collision of the 32768 nodes of the frame
+  moved 61 MB instead of about 7 MB, 90 µs against 11 µs, and packing and unpacking took 63 µs against 17 µs;
+- with the halo along x a row of the block holds $`n_x + 2`$ entries, and the 32 threads of a warp, which read 32
+  consecutive nodes, cross the boundaries of the segments: 8.9 segments per access instead of 8 in mixed precision
+  (5 instead of 4 in single precision), and the memory delivered 68% of its peak bandwidth instead of 79%. The
+  moments took 489 µs against 378 µs, the collision of the interior 612 µs against 500 µs.
+
+A profile of whole steps (Nsight Systems, the same blocks) gives the same picture: collision of the frame 88 against 10
+µs, of the interior 554 against 473 µs, moments 458 against 375 µs, packing and unpacking 62 against 14 µs (one domain:
+collision 482 µs, moments 372 µs). Rows of the block aligned to 128 bytes, with the interior collided in the order of
+the block instead of from a list, made the moments as fast as with one domain (384 µs), but the frame slower (148 µs,
+its nodes further apart) and left the interior at 577 µs: the time per step did not change for blocks of $`128^3`$ nodes
+($`2 \times 1 \times 1`$: 1.18 ms in mixed precision, 0.73 ms in single) and was 4% to 5% shorter for blocks of
+$`256 \times 256 \times 128`$ nodes. Rows aligned to 32 bytes did not change it either. These layouts were left out. So
+the automatic decomposition (a 0 in `setDomainDecomposition()`) puts the most domains along z, then y, and x should be
+divided only when y and z are not enough.
 
 A fluctuating fluid adds the same time as with one domain: $`256 \times 256 \times 128`$ on four GPUs
 ($`2 \times 2 \times 1`$) 1.58 ms in mixed precision and 1.06 ms in single (1.21 and 0.75 ms for $`128^3`$ on one GPU).
@@ -802,15 +812,28 @@ $`10^4`$ particles add 0.7 ms per step on $`256^3`$ nodes with one GPU and 0.4 m
 1.5 ms: the forces of OpenMM and the coupling, which every rank computes for all the particles, plus the sum of the
 coupling forces over the ranks ($`3 N_p`$ numbers, copied to the host and back). The centred drag takes the same time.
 The sort of the particles by node, which sums the reactions without atomic operations, needs keys spread over their
-values: with one key for all the particles of the other ranks, $`10^5`$ particles took 8.7 ms per step on four GPUs, more
-than on one ([theory](theory.md#8-domain-decomposition-in-development-for-version-040)). On $`512^3`$ nodes (a box of
-256 nm) $`10^5`$ particles add 3.7 ms per step on one node ($`2 \times 2 \times 1`$: 25.3 against 21.6 ms) and 4.3 ms
+values: with one key for all the particles of the other ranks, $`10^5`$ particles took 8.7 ms per step on four GPUs,
+more than on one ([theory](theory.md#8-domain-decomposition-in-development-for-version-040)). On $`512^3`$ nodes (a box
+of 256 nm) $`10^5`$ particles add 3.7 ms per step on one node ($`2 \times 2 \times 1`$: 25.3 against 21.6 ms) and 4.3 ms
 on eight nodes ($`4 \times 4 \times 2`$: 8.51 against 4.25 ms): the difference, 0.6 ms, includes the sum of the forces
-over the network; why the same particles cost more in the larger box, already on one node, is not separated.
-Starting the sum without blocking (`MPI_Iallreduce`) after the coupling and waiting for it at the end of the lattice
-step, so that it would run while the fluid advances, gave 2.99 to 3.09 ms instead of 3.37 to 3.56 ms on $`256^3`$ nodes
-with $`10^5`$ particles on one node, but 2.58 instead of 2.41 ms with $`128^3`$ per GPU, and on four nodes ($`512^3`$,
-$`1 \times 4 \times 4`$) 10.3 to 11.1 ms instead of 9.1 to 9.3 ms: it was left out.
+over the network. A profile of rank 0 (Nsight Systems, four GPUs of a node, mixed precision, $`10^5`$ particles against
+none) separates the cost of the particles into three parts:
+- the sum of the coupling forces over the ranks, while the GPU waits: 0.75 to 1.0 ms per step (download of 2.4 MB,
+  `MPI_Allreduce` 0.5 to 0.6 ms, upload);
+- the kernels of the particles (OpenMM's forces, the coupling, the sort): 0.33 to 0.40 ms;
+- the collision, which with coupled particles reads the reaction of every node of the block, three more numbers per
+  node: 0.06 ms more with $`256 \times 128 \times 128`$ nodes per GPU, 0.8 to 1.1 ms more with
+  $`512 \times 256 \times 256`$ or $`256 \times 256 \times 512`$.
+
+The last part grows with the nodes of the block, which is why the same particles cost more in the larger box: on
+$`512^3`$ nodes ($`1 \times 2 \times 2`$) $`10^5`$ particles add 2.5 ms per step (18.0 against 15.5 ms), on $`256^3`$
+nodes 1.5 to 1.7 ms. Reading the reaction only at the nodes that have particles would remove it; it is not done. With
+$`2 \times 2 \times 1`$ the moments, which do not depend on the particles, also took 1.0 ms more in the run with
+particles; that difference is not explained. Starting the sum without blocking (`MPI_Iallreduce`) after the coupling and
+waiting for it at the end of the lattice step, so that it would run while the fluid advances, gave 2.99 to 3.09 ms
+instead of 3.37 to 3.56 ms on $`256^3`$ nodes with $`10^5`$ particles on one node, but 2.58 instead of 2.41 ms with
+$`128^3`$ per GPU, and on four nodes ($`512^3`$, $`1 \times 4 \times 4`$) 10.3 to 11.1 ms instead of 9.1 to 9.3 ms: it
+was left out.
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
