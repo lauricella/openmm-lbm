@@ -4,10 +4,46 @@
 per MPI rank and GPU: every rank advances the fluid of its domain, and the ranks exchange the populations that cross
 the borders at every step. The particles are not divided: every rank builds the same System and integrates all the
 particles, so the decomposition speeds up the fluid only. It pays when the fluid takes most of the time of a step,
-as with coarse-grained molecules in a large box. The method and its limits are in
+as with coarse-grained molecules in a large box ([when it pays](#when-it-pays)). The method and its limits are in
 [theory](../theory.md#8-domain-decomposition-in-development-for-version-040), the measured speed in
 [validation](../validation.md#performance-of-the-domain-decomposition-cuda-nvidia-a100), and every method in the
 [API reference](api_reference.md#setdomaindecompositionpx-py-pz-getdomaindecomposition).
+
+## When it pays
+
+Without MPI openmm-lbm runs on one GPU, the usual way to use it. The decomposition over MPI ranks is for the cases
+that one GPU does not handle well. A step takes about $`T_{\mathrm{LB}}/P + T_{\mathrm{MD}} + T_{\mathrm{comm}}`$
+with $`P`$ ranks: the fluid is divided among them, the molecular dynamics is not (every rank computes all the forces
+of OpenMM on all the particles), and the coupling forces are summed over the ranks at every step. Measured on NVIDIA
+A100 GPUs in mixed precision ([validation](../validation.md#performance-of-the-domain-decomposition-cuda-nvidia-a100)):
+
+| Case | Time per step | Gain |
+|---|---|---|
+| $`256^3`$ nodes, fluid only, from 1 GPU to the 4 GPUs of one node | 7.42 → 1.84 ms | 4.0 times faster |
+| the same with $`10^4`$ coupled particles | 8.08 → 2.21 ms | 3.7 times faster |
+| the same with $`10^5`$ coupled particles | 8.49 → 3.37 ms | 2.5 times faster |
+| $`128^3`$ nodes per GPU, from 1 GPU to 4 GPUs of one node (a lattice 4 times larger) | 0.87 → 0.91 ms | 96% efficiency |
+| $`512^3`$ nodes, from 1 node to 8 nodes (4 to 32 GPUs) | 15.5 → 4.04 ms | 3.8 times faster |
+| $`128^3`$ nodes per GPU, from 1 node to 8 nodes (a lattice 8 times larger) | 0.90 → 2.38 ms | 38% efficiency |
+
+So:
+- **One node with several GPUs** is where the decomposition pays most: large lattices ($`256^3`$ nodes and more) of
+  coarse-grained systems, in which the fluid takes most of a step, run up to four times faster on four GPUs. Within a
+  node the populations go from GPU to GPU (NVLink, with an MPI library that reads the memory of the GPUs).
+- **Several nodes** pay only for very large lattices, of $`512^3`$ nodes and more. Between nodes the populations go
+  through the host and the network, which is slower: blocks of $`128^3`$ nodes per GPU spend more time exchanging
+  than computing.
+- **A lattice that does not fit on one GPU** can only run divided: one domain holds at most 113025455 nodes (about
+  $`480^3`$, the limit of the 32-bit indices, [`setGridSize()`](api_reference.md#setgridsizenx-ny-nz-getgridsize)),
+  and needs about 240 bytes per node in mixed and double precision (24 more with coupled particles, about 64 more with
+  a fluctuating fluid) and half of that in single precision, so a GPU with less memory holds fewer.
+- **It does not pay** when one GPU already runs the lattice in about a millisecond per step ($`128^3`$ nodes or
+  fewer), or when the particles weigh as much as the fluid: many particles, or forces that are expensive to compute
+  (all-atom models, PME), which every rank computes in full.
+
+OpenMM itself does not use MPI. It can share one simulation among the GPUs of one computer, within one process (the
+property `DeviceIndex` set to a list such as `"0,1"`), but `LBMForce` does not support that mode; with the plugin, use
+one GPU per Context and, for several GPUs, the decomposition described here.
 
 ## Building with MPI
 
@@ -187,11 +223,8 @@ mpirun -n 4 python devtools/benchmark_decomposition.py 256 256 256 1 2 2 --parti
 python devtools/benchmark_decomposition.py 256 256 256 1 1 1                               # one GPU, to compare
 ```
 
-On four NVIDIA A100 of one node, $`256^3`$ nodes took 1.84 ms per step in mixed precision, 4.0 times faster than one
-GPU; $`128^3`$ nodes per GPU ran at 96% of the speed of one GPU. Between nodes the exchange goes through the host and
-takes longer: $`512^3`$ nodes on eight nodes (32 GPUs) were 3.8 times faster than on one node. Coupled particles add
-the forces of OpenMM, which every rank computes for all of them, and the sum of their coupling forces over the ranks
-at every step: $`10^5`$ particles added about 1.5 ms per step on four GPUs.
+The numbers of [when it pays](#when-it-pays) come from this script; the times of other machines, networks and
+precisions differ, so measure before choosing the number of GPUs and nodes.
 
 ## At the end of the run
 

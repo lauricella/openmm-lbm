@@ -63,7 +63,7 @@ Know these before using the plugin for a study:
    - A flow in a duct driven by a pressure difference.
 8. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
 9. [Running on several GPUs](parallel.md): the lattice divided into domains, one MPI rank per GPU (in development
-   for version 0.4.0): building with MPI, a complete script, job scripts for one and several nodes.
+   for version 0.4.0): when it pays, building with MPI, a complete script, job scripts for one and several nodes.
 
 ## What works in this version
 
