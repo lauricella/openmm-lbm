@@ -34,6 +34,11 @@ public:
     static int getLocalRank();
     /** MPI_Abort on MPI_COMM_WORLD with the error code if MPI is running with more than one rank; otherwise nothing. */
     static void abortIfParallel(int errorCode);
+    /** MPI_Finalize, if the plugin initialized MPI and it is not finalized yet; otherwise nothing.  It is called at
+        exit, and earlier by the Python module (openmmlbm.i): the MPI library may hold registrations of host memory
+        made in the CUDA context of a Context, and finalizing it after that context is destroyed made UCX print
+        errors on every rank. */
+    static void finalizeMPI();
     /**
      * Resolve a requested decomposition for a lattice of size nx, ny, nz: the zeros are chosen with MPI_Dims_create,
      * and the product must be the number of ranks.  1, 1, 1 needs no MPI.  Throws an OpenMMException otherwise.

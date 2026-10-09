@@ -52,6 +52,30 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     force.getDomainDecomposition(requested[0], requested[1], requested[2]);
     LBMDecomposition::resolve(lattice.nx, lattice.ny, lattice.nz, requested, lattice.procs);
 
+    // Every platform indexes the nodes and the populations with 32-bit integers: the lattice must have fewer than 2^31
+    // nodes, and the 19 populations of the largest domain, with its halo along the divided axes, fewer than 2^31
+    // entries.  Beyond that the sizes wrapped around (on the GPUs an allocation failed with "out of memory").
+
+    const long long maxIndex = numeric_limits<int>::max();
+    int gridSize[3] = {lattice.nx, lattice.ny, lattice.nz};
+    long long numNodes = 1, domainNodes = 1;
+    for (int a = 0; a < 3; a++) {
+        numNodes *= gridSize[a];
+        domainNodes *= (gridSize[a]+lattice.procs[a]-1)/lattice.procs[a] + (lattice.procs[a] > 1 ? 2 : 0);
+    }
+    if (numNodes > maxIndex) {
+        stringstream msg;
+        msg << "LBMForce: the lattice has " << numNodes << " nodes, more than the " << maxIndex << " that the plugin can index";
+        throw OpenMMException(msg.str());
+    }
+    if (19*domainNodes > maxIndex) {
+        stringstream msg;
+        msg << "LBMForce: a domain of the lattice holds up to " << domainNodes << " nodes (with its halo), more than the "
+            << maxIndex/19 << " whose 19 populations the plugin can index: divide the lattice into more domains "
+            << "(setDomainDecomposition())";
+        throw OpenMMException(msg.str());
+    }
+
     // The lattice spans the periodic box, with cubic cells.
 
     Vec3 a, b, c;

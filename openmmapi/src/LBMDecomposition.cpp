@@ -25,11 +25,10 @@ using namespace OpenMM;
 using namespace std;
 
 #ifdef OPENMM_LBM_MPI
-static void finalizeMPI() {
-    int finalized;
-    MPI_Finalized(&finalized);
-    if (!finalized)
-        MPI_Finalize();
+static bool initializedMPI = false;
+
+static void finalizeAtExit() {
+    LBMDecomposition::finalizeMPI();
 }
 
 // Initialize MPI on first use, unless the program (or mpi4py) has done it; then finalize it at exit.
@@ -39,7 +38,8 @@ static void ensureMPI() {
     if (!initialized) {
         int provided;
         MPI_Init_thread(NULL, NULL, MPI_THREAD_FUNNELED, &provided);
-        atexit(finalizeMPI);
+        initializedMPI = true;
+        atexit(finalizeAtExit);
     }
 }
 #endif
@@ -85,6 +85,15 @@ int LBMDecomposition::getLocalRank() {
     return rank;
 #else
     return 0;
+#endif
+}
+
+void LBMDecomposition::finalizeMPI() {
+#ifdef OPENMM_LBM_MPI
+    int finalized;
+    MPI_Finalized(&finalized);
+    if (initializedMPI && !finalized)
+        MPI_Finalize();
 #endif
 }
 

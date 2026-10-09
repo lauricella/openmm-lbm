@@ -78,6 +78,14 @@ versions the API may still change.
   values are the same as before, byte for byte.
 
 ### Fixed
+- All platforms: a lattice of more than 2147483647 nodes, or a domain whose 19 populations have $`2^{31}`$ entries or
+  more (more than 113025455 nodes, for example $`512^3`$ on one GPU), overflowed the 32-bit indices of the plugin; on
+  the GPUs the Context failed with `CUDA_ERROR_OUT_OF_MEMORY`. Such a lattice is now an error that names the limit
+  when the Context is created (`test_lattice_too_large`). Affected since version 0.1.0.
+- With the domain decomposition on several nodes, UCX printed hundreds of errors (`cudaHostUnregister() failed`,
+  `failed to dereg from md[3]=cuda_cpy`) at the end of every run, after the work was done: MPI was finalized at the
+  exit of the process, after OpenMM had destroyed the CUDA contexts in which UCX had registered the host buffers of
+  the exchange. The Python module now finalizes MPI, if the plugin initialized it, as soon as the script ends.
 - CUDA, OpenCL and HIP platforms: a lattice whose populations take more than 2 GB on one GPU (more than 14.1 million
   nodes in mixed and double precision, 28.3 million in single precision, for example $`256^3`$) failed when the
   Context was created, with `CUDA_ERROR_INVALID_VALUE` on CUDA: OpenMM computes the size of an upload as an `int`.

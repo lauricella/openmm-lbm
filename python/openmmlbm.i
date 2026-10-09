@@ -39,6 +39,7 @@ int isNumpyAvailable() {
 
 %{
 #include "LBMForce.h"
+#include "internal/LBMDecomposition.h"
 #include <sstream>
 #include "OpenMM.h"
 #include "OpenMMAmoeba.h"
@@ -403,7 +404,16 @@ public:
 
 }
 
+// Not part of the API: called at exit by the Python module (_finalizeMPIAtExit below).
+%rename(_finalizeMPI) lbmFinalizeMPI;
+%inline %{
+void lbmFinalizeMPI() {
+    LBMPlugin::LBMDecomposition::finalizeMPI();
+}
+%}
+
 %pythoncode %{
+import atexit as _atexit
 import os as _os
 import struct as _struct
 import sys as _sys
@@ -474,6 +484,18 @@ def _abortMPIOnException(excType, value, traceback, _previous=_sys.excepthook):
 
 
 _sys.excepthook = _abortMPIOnException
+
+
+def _finalizeMPIAtExit():
+    # Finalize MPI, if the plugin initialized it, before the objects of the script are deleted: the functions
+    # registered with atexit run first.  The MPI library may hold registrations of host memory made in the CUDA
+    # context of a Context (UCX does for the populations exchanged through the host between nodes), and OpenMM
+    # destroys that context with the Context: finalizing MPI later, from the plugin's own handler at the exit of the
+    # process, made UCX print hundreds of errors at the end of every run on several nodes (docs/validation.md).
+    _finalizeMPI()
+
+
+_atexit.register(_finalizeMPIAtExit)
 
 
 def _isDecomposed(context, force):

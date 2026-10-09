@@ -352,6 +352,17 @@ def test_open_faces_need_no_momentum_removal():
         mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
 
 
+@pytest.mark.parametrize('grid, message', [((490, 490, 490), 'a domain of the lattice holds up to 117649000 nodes'),
+                                           ((1300, 1300, 1300), 'more than the 2147483647')])
+def test_lattice_too_large(grid, message):
+    # The nodes and the populations are indexed with 32-bit integers: a larger lattice, or a domain whose 19
+    # populations have 2^31 entries or more, is an error when the Context is created, before anything is allocated.
+    system, force, positions = create_system(num_particles=1)
+    force.setGridSize(*grid)
+    with pytest.raises(mm.OpenMMException, match=message):
+        mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+
+
 def test_serialization():
     system, force, positions = create_system()
     force.setFriction(7.0)

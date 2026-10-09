@@ -606,10 +606,11 @@ public:
     /**
      * Update the parameters of a Context to match those stored in this Force object: the friction,
      * the temperature, the coupling scheme, the body acceleration, the frequency of the removal of the
-     * fluid momentum, the frequency and limit of the Mach number check, and the velocities and densities of the
-     * faces.  The grid, the fluid density and viscosity, the solid nodes, the wall scheme, the boundary types of the
-     * faces, the set of coupled particles, the drag scheme and the fluid fluctuations cannot be changed this way,
-     * and an exception is thrown if they differ.  With fluid fluctuations the new
+     * fluid momentum, the frequency and limit of the Mach number check, the velocities and densities of the
+     * faces, and the check of the copies of the particles.  The grid, the fluid density and viscosity, the solid
+     * nodes, the wall scheme, the boundary types of the faces, the set of coupled particles, the drag scheme, the
+     * fluid fluctuations, the domain decomposition and the exchange of the halo cannot be changed this way, and an
+     * exception is thrown if they differ.  With fluid fluctuations the new
      * temperature applies to the fluid as well.  The initial fluid velocity and the random
      * number seed are used only when a Context is created.  The fluid itself is not modified.
      */
