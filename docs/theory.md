@@ -19,6 +19,8 @@ The fluid is a D3Q19 lattice Boltzmann model, weakly compressible:
   $`\displaystyle f_i^{\mathrm{eq}}(\rho, \mathbf u) = w_i\,\rho\left[1 + \frac{\mathbf c_i\cdot\mathbf u}{c_s^2} +
   \frac{(\mathbf c_i\cdot\mathbf u)^2}{2c_s^4} - \frac{\mathbf u\cdot\mathbf u}{2c_s^2}\right],\qquad c_s^2 = \frac13.`$
 
+  Here $`c_s`$ is the speed of sound of the lattice: $`c_s^2 = 1/3`$ in lattice units, everywhere in this document.
+
 **Collision: regularized, with Guo forcing [1, 2].** With the force density $`\mathbf F`$ acting on a node
 during the step, the post-collision populations are
 
