@@ -8,16 +8,16 @@
 the domain decomposition).
 
     mpirun -n P python benchmark_decomposition.py NX NY NZ PX PY PZ [--platform CUDA] [--precision mixed] [--fluct]
-           [--particles N] [--steps 200] [--devices 4]
+           [--particles N] [--centered] [--steps 200] [--devices 4]
 
 The fluid fills a periodic box of NX x NY x NZ nodes, 0.5 nm apart, divided into PX x PY x PZ domains (P = PX*PY*PZ
 ranks), with a body force; --fluct switches the fluid fluctuations on.  --particles N adds N particles of 100 Da
 coupled to the fluid at 300 K, at random positions, with a soft repulsion between them (CustomNonbondedForce, cutoff
 1 nm): the time adds the forces of OpenMM, which every rank computes for all the particles, and the sum of the
-coupling forces over the ranks.  Each rank uses the GPU of index (local rank) % devices.  After 20 steps the script
-times --steps steps, between two calls of getFluidMachNumber(), which are collective and wait for the devices, and
-rank 0 prints the time per step and the lattice updates per second (MLUPS), in total and per GPU.  With one rank and
-1 1 1 it times one domain."""
+coupling forces over the ranks; --centered uses the Centered drag instead of the Explicit one.  Each rank uses the
+GPU of index (local rank) % devices.  After 20 steps the script times --steps steps, between two calls of
+getFluidMachNumber(), which are collective and wait for the devices, and rank 0 prints the time per step and the
+lattice updates per second (MLUPS), in total and per GPU.  With one rank and 1 1 1 it times one domain."""
 
 import argparse
 import time
@@ -36,6 +36,7 @@ parser.add_argument('--fluct', action='store_true', help='fluctuating fluid')
 parser.add_argument('--steps', type=int, default=200, help='steps timed (default 200)')
 parser.add_argument('--devices', type=int, default=4, help='GPUs per node (default 4)')
 parser.add_argument('--particles', type=int, default=0, help='coupled particles (default 0)')
+parser.add_argument('--centered', action='store_true', help='Centered drag (default Explicit)')
 args = parser.parse_args()
 nx, ny, nz = args.size
 dx = 0.5
@@ -61,6 +62,8 @@ force.setFluidFluctuations(args.fluct)
 for i in range(args.particles):
     force.addParticle(i+1)
 force.setFriction(5.0)
+if args.centered:
+    force.setDragScheme(LBMForce.Centered)
 force.setDomainDecomposition(*args.domains)
 system.addForce(force)
 integrator = mm.VerletIntegrator(0.01)
@@ -81,6 +84,7 @@ elapsed = time.perf_counter() - start
 if openmmlbm.mpiRank() == 0:
     ms = 1000*elapsed/args.steps
     mlups = nx*ny*nz/(ms*1e-3)/1e6
-    print('%s %s %dx%dx%d nodes, %dx%dx%d domains, fluctuations %s, %d particles: %.3f ms/step, %.0f MLUPS, %.0f MLUPS '
-          'per GPU' % (args.platform, args.precision, nx, ny, nz, *args.domains, 'on' if args.fluct else 'off',
-                       args.particles, ms, mlups, mlups/openmmlbm.mpiSize()))
+    print('%s %s %dx%dx%d nodes, %dx%dx%d domains, fluctuations %s, %d particles%s: %.3f ms/step, %.0f MLUPS, %.0f '
+          'MLUPS per GPU' % (args.platform, args.precision, nx, ny, nz, *args.domains, 'on' if args.fluct else 'off',
+                             args.particles, ' (Centered drag)' if args.centered else '', ms, mlups,
+                             mlups/openmmlbm.mpiSize()))

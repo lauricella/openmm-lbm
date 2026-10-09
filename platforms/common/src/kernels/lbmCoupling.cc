@@ -22,8 +22,8 @@
  * lattice and OX, OY, OZ the first node of the block of the rank; the moments and reactions are stored at the storage
  * index of the node in the block.  Every rank holds all the particles: the nearest node and the wall normal come from
  * the whole lattice (isFluid is then the mask of the whole lattice), the rank that owns the nearest node computes the
- * coupling force, the others set it to zero and give the particle the key NUM_STORED*NUM_COUPLED + i, which sorts after
- * all the nodes and is skipped; the host sums the forces over the ranks.  SKIP_REFLECTION_MOMENTUM is defined on the
+ * coupling force, the others set it to zero and give the particle a key that sorts after all the nodes of the block and
+ * is skipped (otherRankKey()); the host sums the forces over the ranks.  SKIP_REFLECTION_MOMENTUM is defined on the
  * ranks other than 0, which reflect their copies of the particles but do not count the momentum of the wall.
  */
 
@@ -76,6 +76,27 @@ DEVICE int storedNode(int node) {
     return node;
 #endif
 }
+
+/**
+ * The node of a sort key node*NUM_COUPLED + i, or NUM_STORED for the keys of the particles of other ranks.
+ */
+DEVICE int keyNode(mm_long key) {
+    mm_long node = key/NUM_COUPLED;
+    return (node < NUM_STORED ? (int) node : NUM_STORED);
+}
+
+#ifdef DOMAIN_DECOMPOSITION
+/**
+ * The sort key of particle i whose nearest node, of index node in the lattice, belongs to another rank: it sorts after
+ * the keys of the nodes of the block, and keyNode() gives NUM_STORED.  The keys follow the node rather than sharing a
+ * few values, because OpenMM's sort puts the keys into buckets by value and sorts a bucket larger than a work group
+ * with a single work group: with one key value for the particles of the other ranks, most of them in a large System,
+ * the sort made the step several times slower.
+ */
+DEVICE mm_long otherRankKey(int node, int i) {
+    return (NUM_STORED + (mm_long) node)*NUM_COUPLED + i;
+}
+#endif
 
 #ifdef HAS_SOLID_NODES
 /**
@@ -161,7 +182,8 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
         if (i < 0)
             continue;
         mixed4 pos = loadPosition(posq, posqCorrection, j);
-        int node = storedNode(nearestNode(pos));
+        int latticeNode = nearestNode(pos);
+        int node = storedNode(latticeNode);
 #ifdef DOMAIN_DECOMPOSITION
         if (node == NUM_STORED) {
             // Another rank owns the node: it computes the force.  The random numbers are copied all the same.
@@ -170,7 +192,7 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
             particleForce[i] = 0;
             particleForce[NUM_COUPLED+i] = 0;
             particleForce[2*NUM_COUPLED+i] = 0;
-            sortKeys[i] = ((mm_long) NUM_STORED)*NUM_COUPLED + i;
+            sortKeys[i] = otherRankKey(latticeNode, i);
             continue;
         }
 #endif
@@ -219,15 +241,15 @@ KERNEL void coupleParticles(GLOBAL const real4* RESTRICT posq, GLOBAL const real
 KERNEL void sumCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const mixed* RESTRICT particleForce,
         GLOBAL mixed* RESTRICT cellReaction) {
     for (int k = GLOBAL_ID; k < NUM_COUPLED; k += GLOBAL_SIZE) {
-        int node = (int) (sortKeys[k]/NUM_COUPLED);
-        if (k > 0 && (int) (sortKeys[k-1]/NUM_COUPLED) == node)
+        int node = keyNode(sortKeys[k]);
+        if (k > 0 && keyNode(sortKeys[k-1]) == node)
             continue;
 #ifdef DOMAIN_DECOMPOSITION
         if (node == NUM_STORED)
             continue;
 #endif
         mixed fx = 0, fy = 0, fz = 0;
-        for (int m = k; m < NUM_COUPLED && (int) (sortKeys[m]/NUM_COUPLED) == node; m++) {
+        for (int m = k; m < NUM_COUPLED && keyNode(sortKeys[m]) == node; m++) {
             int i = (int) (sortKeys[m] - ((mm_long) node)*NUM_COUPLED);
             fx -= particleForce[i];
             fy -= particleForce[NUM_COUPLED+i];
@@ -244,7 +266,7 @@ KERNEL void sumCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL con
  */
 KERNEL void clearCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL mixed* RESTRICT cellReaction) {
     for (int k = GLOBAL_ID; k < NUM_COUPLED; k += GLOBAL_SIZE) {
-        int node = (int) (sortKeys[k]/NUM_COUPLED);
+        int node = keyNode(sortKeys[k]);
 #ifdef DOMAIN_DECOMPOSITION
         if (node == NUM_STORED)
             continue;
@@ -281,7 +303,8 @@ KERNEL void prepareCenteredDrag(GLOBAL const real4* RESTRICT posq, GLOBAL const 
         if (i < 0)
             continue;
         mixed4 pos = loadPosition(posq, posqCorrection, j);
-        int node = storedNode(nearestNode(pos));
+        int latticeNode = nearestNode(pos);
+        int node = storedNode(latticeNode);
 #ifdef DOMAIN_DECOMPOSITION
         if (node == NUM_STORED) {
             // Another rank owns the node and solves the drag: the force is zero here.
@@ -324,6 +347,11 @@ KERNEL void prepareCenteredDrag(GLOBAL const real4* RESTRICT posq, GLOBAL const 
         randomForce[i] = rx;
         randomForce[NUM_COUPLED+i] = ry;
         randomForce[2*NUM_COUPLED+i] = rz;
+#ifdef DOMAIN_DECOMPOSITION
+        if (node == NUM_STORED)
+            sortKeys[i] = otherRankKey(latticeNode, i);
+        else
+#endif
         sortKeys[i] = ((mm_long) node)*NUM_COUPLED + i;
     }
 }
@@ -346,8 +374,8 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
     const mixed h = 0.5f;
     const mixed a = gamma*h;
     for (int k = GLOBAL_ID; k < NUM_COUPLED; k += GLOBAL_SIZE) {
-        int node = (int) (sortKeys[k]/NUM_COUPLED);
-        if (k > 0 && (int) (sortKeys[k-1]/NUM_COUPLED) == node)
+        int node = keyNode(sortKeys[k]);
+        if (k > 0 && keyNode(sortKeys[k-1]) == node)
             continue;
 #ifdef DOMAIN_DECOMPOSITION
         if (node == NUM_STORED)
@@ -355,7 +383,7 @@ KERNEL void solveCenteredDrag(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL co
 #endif
         int end = k;
         mixed mass = 0, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0;
-        for (; end < NUM_COUPLED && (int) (sortKeys[end]/NUM_COUPLED) == node; end++) {
+        for (; end < NUM_COUPLED && keyNode(sortKeys[end]) == node; end++) {
             int i = (int) (sortKeys[end] - ((mm_long) node)*NUM_COUPLED);
             mixed m = particleMass[i];
             mass += m;

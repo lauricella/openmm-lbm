@@ -1172,12 +1172,16 @@ domain, nothing changes.
 - The coupled particles follow the rules of the Reference platform (below). The coupling kernels find the nearest node
   in the whole lattice; the rank that owns it computes the coupling force and the reaction on the node, the other ranks
   set the force to zero and give the particle a sort key past all the nodes of the block, so that it enters no
-  segment; the forces are summed over the ranks on the host. Every rank reflects its copy of the particles with the
-  mask of the whole lattice. The copies stay identical only if every rank computes the same forces of OpenMM: on the
-  CUDA and HIP platforms some sums may depend on the order of the threads unless the platform property
-  `DeterministicForces` is `true`, which a Context with more than one domain and coupled particles requires (checked
-  when it is created). The OpenCL platform has no such property; the comparison of the copies would stop a run whose
-  copies drift apart.
+  segment; the forces are summed over the ranks on the host. That key follows the nearest node in the lattice,
+  $`(N_{\mathrm{block}} + \mathrm{node})\,N_p + i`$ with $`N_{\mathrm{block}}`$ the nodes stored by the rank, rather than
+  being one value for all those particles: OpenMM's `ComputeSort` puts the keys into buckets by value and sorts a bucket
+  larger than a work group with a single work group, so with one value for the particles of the other ranks, most of
+  them, the sort took most of a step (with $`10^5`$ particles on four GPUs, `docs/validation.md`). Every rank reflects
+  its copy of the particles with the mask of the whole lattice. The copies stay identical only if every rank computes
+  the same forces of OpenMM: on the CUDA and HIP platforms some sums may depend on the order of the threads unless the
+  platform property `DeterministicForces` is `true`, which a Context with more than one domain and coupled particles
+  requires (checked when it is created). The OpenCL platform has no such property; the comparison of the copies would
+  stop a run whose copies drift apart.
 - The exchange of the halo of the density and the velocity (below): at the end of the step a kernel computes the
   moments of the populations and copies $`\rho - 1`$ and $`\mathbf j`$ of the nodes of the block that are in the halo of
   other ranks into a buffer; the host computes their fields as `getFluidFields()` does and sends them, so the copies
