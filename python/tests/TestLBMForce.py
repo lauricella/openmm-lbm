@@ -381,6 +381,25 @@ def test_fluid_fluctuations():
     assert np.std([v.value_in_unit(unit.nanometer/unit.picosecond) for v in velocity]) > 0
 
 
+@pytest.mark.parametrize('cells,warning', [(8, False), (16, True)])
+def test_fluctuation_size_message(cells, warning, capfd):
+    # With fluid fluctuations the Context prints kT in lattice units and the thermal Mach number sqrt(3 kT): water at
+    # 300 K with dx = 0.5 nm and dt = 0.01 ps gives kT = 1.3e-5, Mach number 0.0063; dx = 0.25 nm gives kT = 4.2e-4,
+    # above the largest value validated, 1/3000, with a warning.  Nothing is printed at zero temperature.
+    system, force, positions = create_system(num_particles=1)
+    force.setGridSize(cells, cells, cells)
+    force.setFluidFluctuations(True)
+    capfd.readouterr()
+    context = mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+    err = capfd.readouterr().err
+    assert 'thermal Mach number sqrt(3 kT) = %s' % ('0.036' if warning else '0.0063') in err
+    assert ('are larger than those validated' in err) == warning
+    del context
+    force.setTemperature(0)
+    context = mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+    assert 'thermal Mach number' not in capfd.readouterr().err
+
+
 @pytest.mark.parametrize('name', ['CUDA', 'OpenCL', 'HIP'])
 def test_fluid_fluctuations_gpu(name):
     # On the GPU platforms a fluctuating fluid at rest starts to move, and the noise conserves mass and momentum.

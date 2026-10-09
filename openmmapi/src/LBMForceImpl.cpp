@@ -259,6 +259,30 @@ void LBMForceImpl::initialize(ContextImpl& context) {
              << "% for the heaviest one (m_c = " << cellMass << " Da is the mass of fluid in a cell). Use the Centered "
              << "drag scheme with fluid fluctuations." << endl;
     }
+
+    // The size of the fluctuations of the fluid: kT in lattice units, kT/(m_c (dx/dt)^2), and the thermal Mach number
+    // sqrt(3 kT), the r.m.s. velocity of a node along one axis over the speed of sound of the lattice, dx/(sqrt(3) dt),
+    // and the r.m.s. relative fluctuation of the density of a node.  They depend on the temperature, the density, the
+    // lattice spacing and the time step, not on the speed of sound of the real fluid.  The fluctuating lattice
+    // Boltzmann method holds only small fluctuations: it was validated up to kT = 1/3000, where on D3Q19 it is
+    // unstable for tau <= 0.501 (docs/validation.md, Equilibrium spectra).
+
+    if (warn && lattice.fluidFluctuations && lattice.fluidKT > 0) {
+        double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
+        double latticeKT = lattice.fluidKT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
+        const double validatedKT = 1.0/3000.0;
+        stringstream message;
+        message.precision(2);
+        message << "LBMForce: fluctuating fluid: kT/(m_c (dx/dt)^2) = " << latticeKT << " in lattice units, thermal "
+                << "Mach number sqrt(3 kT) = " << sqrt(3.0*latticeKT) << " (validated up to kT = 1/3000, Mach number "
+                << sqrt(3.0*validatedKT) << ")" << endl;
+        if (latticeKT > validatedKT*(1.0 + 1e-6))
+            message << "Warning: LBMForce: the fluctuations of the fluid, kT = " << latticeKT << " in lattice units, are "
+                    << "larger than those validated, kT = 1/3000: the fluctuating fluid may become unstable (at 1/3000 "
+                    << "it is for tau <= 0.501). A larger lattice spacing or a smaller time step makes them smaller "
+                    << "(kT in lattice units goes as dt^2/dx^5)." << endl;
+        cerr << message.str();
+    }
 #ifdef LBM_DEBUG
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     cerr << "LBMForce lattice: dx = " << lattice.dx << " nm, dt = " << lattice.dt << " ps, m_c = " << cellMass

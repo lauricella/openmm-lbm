@@ -848,6 +848,8 @@ range. The plugin checks both.
   and, with fluid fluctuations and the EM scheme at $`T > 0`$, a warning that the particles will be too hot, with
   the estimate $`\gamma\Delta t\, m/(2m_c)`$ for the heaviest one (section 7); with the centred drag, an error if
   `LBMForce` is not the last force or the System has virtual sites (section 2, Solution of the centred drag).
+- With fluid fluctuations at $`T > 0`$, a line with $`k_BT`$ in lattice units and the thermal Mach number, and a
+  warning if $`k_BT`$ exceeds 1/3000, the largest value validated (section 7, Size of the fluctuations).
 
 **During the simulation.**
 - Every $`N`$ steps the plugin computes the largest Mach number of the fluid,
@@ -1009,6 +1011,36 @@ uses the D3Q27 lattice, which stays stable down to $`\tau = 0.5001`$ at $`k_BT =
 collision has less margin. Close to the limit the fluctuations are also too large at long wavelengths
 (`docs/validation.md`, Fluctuating fluid). Molecular simulations of water have $`\tau \ge 0.52`$ and
 $`k_BT \sim 10^{-5}`$, far from the limit, and the warning for $`\tau`$ below 0.505 (section 6) covers this range.
+
+**Size of the fluctuations.** The fluctuating lattice Boltzmann method holds only small fluctuations: with large ones
+the nonlinear terms of the equilibrium make it unstable (above). Their size on the lattice is $`k_BT`$ in lattice
+units, $`k_BT\,\Delta t^2/(m_c\,\Delta x^2)`$, which at a given temperature and density goes as
+$`\Delta t^2/\Delta x^5`$, or the thermal Mach number
+
+```math
+\mathrm{Ma}_{\mathrm{th}} = \frac{\sqrt{k_BT/m_c}}{c_s} = \sqrt{3k_BT}\ \text{(lattice units)},
+\qquad c_s = \frac{\Delta x}{\sqrt3\,\Delta t},
+```
+
+the r.m.s. velocity of a node along one axis over the speed of sound of the lattice, which is also the r.m.s. relative
+fluctuation of the density of a node, $`\langle\delta\rho^2\rangle/\rho_0^2 = k_BT/(m_c c_s^2)`$. Both depend on
+the temperature, the density, $`\Delta x`$ and $`\Delta t`$, not on the speed of sound of the real fluid. The lattice
+fluid has the speed of sound of the lattice, 28.9 nm/ps with $`\Delta x`$ = 0.5 nm and $`\Delta t`$ = 0.01 ps,
+against about 1.5 nm/ps for water: its velocity fluctuations are those of the temperature (equipartition,
+$`\langle u_a^2\rangle = k_BT/m_c`$), its density fluctuations those of a fluid much less compressible than water,
+smaller by $`(1.5/28.9)^2`$ = 0.0027. Giving the lattice the speed of sound of water would need
+$`\Delta t`$ = 0.19 ps and $`k_BT = 4.9\cdot 10^{-3}`$ in lattice units, beyond the validated range; what matters is
+that the fluctuations stay small enough for the method. When a Context with fluid fluctuations is created at
+$`T > 0`$, the force prints $`k_BT`$ in lattice units and $`\mathrm{Ma}_{\mathrm{th}}`$ (with the domain
+decomposition rank 0 only), and a warning if $`k_BT`$ exceeds 1/3000 ($`\mathrm{Ma}_{\mathrm{th}}`$ = 0.032), the
+largest value validated (`docs/validation.md`, Fluctuating fluid), at which the fluid is already unstable for
+$`\tau \le 0.501`$. Water at 300 K:
+
+| $`\Delta x`$ | $`\Delta t`$ | $`m_c`$ | $`k_BT`$ (lattice units) | $`\mathrm{Ma}_{\mathrm{th}}`$ |
+|---|---|---|---|---|
+| 1 nm | 0.284 ps | 602 Da | 1/3000 | 0.032 |
+| 0.5 nm | 0.01 ps | 75.3 Da | $`1.3\cdot 10^{-5}`$ | 0.0063 |
+| 0.25 nm | 0.01 ps | 9.4 Da | $`4.2\cdot 10^{-4}`$ (warning) | 0.036 |
 
 **Particles in the fluctuating fluid: use the centred drag.** The linear-response argument of section 2 (Temperature
 with a fluid without fluctuations) gains a term. Let the velocity of the node be

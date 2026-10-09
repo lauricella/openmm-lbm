@@ -517,7 +517,12 @@ schemes: with `NVE` the particles have no random force and are thermalized by th
 the fluid come from the seed of [`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed). It is
 fixed when the Context is created. On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's
 generator, which needs 64 bytes per lattice node and per boundary node (regularized walls and open faces); a step
-costs about 30% to 40% more on an NVIDIA A100.
+costs about 30% to 40% more on an NVIDIA A100. The fluctuating lattice Boltzmann method holds only small fluctuations:
+when the Context is created the force prints $`k_BT`$ in lattice units, $`k_BT\,\Delta t^2/(m_c\,\Delta x^2)`$, and
+the thermal Mach number $`\sqrt{3k_BT}`$, and warns if $`k_BT`$ exceeds 1/3000, the largest value validated; it goes
+as $`\Delta t^2/\Delta x^5`$, so a larger lattice spacing or a smaller time step makes it smaller (water at 300 K
+with $`\Delta x`$ = 0.5 nm and $`\Delta t`$ = 0.01 ps: 1.3e-5;
+[theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), section 7, Size of the fluctuations).
 
 With the fluctuating fluid **use the centred drag**
 ([`setDragScheme(LBMForce.Centered)`](#setdragschemescheme-getdragscheme)) and measure the temperature with
@@ -542,9 +547,15 @@ Typical values for coarse-grained beads are 1 to 10/ps; keep $`\gamma\Delta t`$ 
 
 ### `setTemperature(temperature)`, `getTemperature()`
 
-Temperature of the random force on the coupled particles and, with
-[fluid fluctuations](#setfluidfluctuationsfluctuations-getfluidfluctuations), of the fluid, in K: particles and
-fluid share one heat bath. The default is 300 K. It must not be negative.
+The temperature of the model, in K, a parameter of the force: it sets the random force on the coupled particles and,
+with [fluid fluctuations](#setfluidfluctuationsfluctuations-getfluidfluctuations), the fluctuations of the fluid.
+Particles and fluid share this one heat bath; there is no separate temperature of the fluid. It does not come from the
+integrator: `LBMForce` requires a `VerletIntegrator`, which has no temperature, and the coupling to the fluid is the
+thermostat of the coupled particles. With the `NVE` [coupling scheme](#setcouplingschemescheme-getcouplingscheme) the
+particles have no random force, and the temperature sets only the fluctuations of the fluid, which then thermalize the
+particles. The default is 300 K. It must not be negative; at 0 there is no random force and no fluctuation. It can be
+changed in a running Context with `updateParametersInContext()`, for the particles and the fluid from the next step
+(the size of the fluctuations, printed when the Context is created, is not printed again).
 
 ### `setRandomNumberSeed(seed)`, `getRandomNumberSeed()`
 

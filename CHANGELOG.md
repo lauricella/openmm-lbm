@@ -67,6 +67,10 @@ versions the API may still change.
   copies on the host. `devtools/benchmark_decomposition.py` measures the time per step (`docs/validation.md`), also
   with coupled particles (`--particles`, `--centered`).
 
+- With fluid fluctuations at a temperature above zero, the Context prints $`k_BT`$ in lattice units and the thermal
+  Mach number $`\sqrt{3k_BT}`$ when it is created, and warns if $`k_BT`$ exceeds 1/3000, the largest value validated
+  (`docs/theory.md`, section 7, Size of the fluctuations).
+
 ### Changed (in development for 0.4.0)
 - `LBMVTKReporter` writes the density and the velocity of the fluid in two files, `<prefix>_density_<step>.vti` and
   `<prefix>_velocity_<step>.vti` (each with the solid nodes, so that it opens alone), instead of one
