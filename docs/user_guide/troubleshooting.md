@@ -91,6 +91,11 @@ into the range.
 
 ## Common pitfalls
 
+**A run on several nodes stops at the start with `no remote ep address for lane` (UCX) in `MPI_Comm_split_type`.**
+UCX failed to connect the ranks over several InfiniBand ports. Choose one port, for example
+`mpirun -x UCX_NET_DEVICES=mlx5_0:1 ...` (the names are those of `ucx_info -d`), or keep all the ports with
+`-x UCX_PROTO_ENABLE=n` ([running on several GPUs](parallel.md#launching)).
+
 **A run with several MPI ranks hangs.** A collective call made on some ranks only waits forever for the others. With
 the domain decomposition every rank must create the Context, evaluate the forces when there are coupled particles
 (`getState()` with forces or with the energy: the `VerletIntegrator` needs the forces for the kinetic energy) and

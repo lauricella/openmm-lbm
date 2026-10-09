@@ -168,9 +168,10 @@ mpirun -n 8 --map-by ppr:4:node -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH -x UCX_
 ```
 
 `UCX_NET_DEVICES` chooses the InfiniBand ports that UCX, the transport of Open MPI, uses between nodes; the names are
-those of `ucx_info -d` on a compute node. On the nodes where the plugin was measured (four ports per node), one port
-worked and two ports were about 5% faster, while all four ports, which UCX uses when the variable is not set, stopped
-every run when the ranks connected
+those of `ucx_info -d` on a compute node. On the nodes where the plugin was measured (four ports per node, UCX 1.16),
+all four ports, which UCX uses when the variable is not set, stopped every run when the ranks connected, unless UCX
+used the protocols of its earlier versions (`-x UCX_PROTO_ENABLE=n`); one port always worked, and two ports, one port
+per rank (the one next to its GPU) or all four with `UCX_PROTO_ENABLE=n` were up to 10% faster on four nodes
 ([validation](../validation.md#performance-of-the-domain-decomposition-cuda-nvidia-a100)). For OpenCL also pass the
 variables of its loader, such as `OCL_ICD_VENDORS`. The variable `OPENMM_LBM_DEVICE_MPI=0` makes the populations go
 through the host also within a node, for example if the MPI library fails with the memory of the GPUs.

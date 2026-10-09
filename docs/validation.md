@@ -575,10 +575,11 @@ of them coupled, one outside the box:
 | Parts | `fluid=False` and `particles=False` write only the other part, `density=False` and `velocity=False` only the other field of the fluid | exact |
 | No effect on the run | a run with the reporter equals, bit for bit, the run without it | bitwise |
 
-**Measured** (OpenMM 8.6.1): all pass. The files written by the test, with the density and the velocity in one
-`.vti` file as version 0.3.0 wrote them, were also read with the VTK readers of ParaView 5.13 (`vtkXMLImageDataReader`, `vtkXMLPolyDataReader`, the `.pvd` reader): dimensions, spacing, the
-coordinates of the nodes, the fields and the times agree, within 5e-8 relative in single precision and exactly in
-double precision, and the readers return the strings of the `units` array of the field data.
+**Measured** (OpenMM 8.6.1): all pass. The files written by the test, with the density and the velocity in one `.vti`
+file as version 0.3.0 wrote them, were also read with the VTK readers of ParaView 5.13 (`vtkXMLImageDataReader`,
+`vtkXMLPolyDataReader`, the `.pvd` reader): dimensions, spacing, the coordinates of the nodes, the fields and the times
+agree, within 5e-8 relative in single precision and exactly in double precision, and the readers return the strings of
+the `units` array of the field data.
 
 ## Domain decomposition (`python/tests/mpi_decomposition.py`, MPI)
 
@@ -809,17 +810,32 @@ y and z first (as the automatic decomposition does) and along x as well:
 The transfers between nodes take longer than the collision of a block of $`128^3`$ nodes, so the time per step grows
 with the nodes until every block has its faces on other nodes. On $`512^3`$ nodes eight nodes are 3.8 times faster
 than one in mixed precision (3.8 in single precision), and 5.3 times faster than one node with x divided. With 32 ranks
-x had to be divided too. The time of $`512^3`$ on four nodes with x divided in mixed precision, 7.0 ms, comes from two
-other jobs (6.97 and 7.02 ms): in the job of this table that run did not end within the 240 s that the script allows
-it, and it printed nothing; it was not seen again. The network is shared with other jobs, and between nodes the times
-vary from one job to another by up to about 30% (two nodes, $`2 \times 2 \times 2`$, $`128^3`$ per GPU: 1.84 ms in
-another job). Two ports of UCX (`UCX_NET_DEVICES=mlx5_0:1,mlx5_1:1`) took 6.55 ms instead of 6.97 ms on four
-nodes and 3.96 ms instead of 4.25 ms on eight ($`512^3`$, mixed precision, $`4 \times 2 \times 2`$ and
-$`4 \times 4 \times 2`$); with all four ports UCX stopped with an error when the ranks connected. Sending from GPU to
-GPU between the nodes too (GPUDirect over one port) took 3.8 ms for $`256^3`$ on two nodes against 2.1 ms through the
-host: between nodes the default goes through the host. At the end of a run on several nodes UCX may print
-`cudaHostUnregister() failed` or `failed to dereg from md[3]=cuda_cpy` on the ranks of the other nodes, after the work
-is done.
+x had to be divided too. The network is shared with other jobs, and between nodes the times vary from one run to
+another by up to about 30%. One run of $`512^3`$ nodes on four nodes with x divided ($`4 \times 2 \times 2`$, mixed
+precision) did not end within the 240 s that the script allowed it, and printed nothing; eleven more runs of that
+case ended normally, in 6.83 to 7.08 ms (the table gives 7.0 ms). Python buffers its output when it is not a
+terminal, so whether that run stopped before or after printing its time is not known; `python -u` prints at once.
+
+**Ports of InfiniBand.** Each node has four ports, one next to each GPU, and UCX, the transport of Open MPI, takes the
+ports from `UCX_NET_DEVICES`. With all four ports, which UCX uses when the variable is not set, every run stopped when
+the ranks connected (`MPI_Comm_split_type`, `wireup.c: no remote ep address for lane[1]->remote_lane[1]`), also with
+`UCX_MAX_RNDV_RAILS=1` or with the transports restricted to `rc` (with `dc` the run hung). With the protocols of
+earlier versions of UCX (`UCX_PROTO_ENABLE=n`) all four ports work. On $`512^3`$ nodes in mixed precision, with
+$`1 \times 4 \times 4`$ domains on four nodes, one port (`UCX_NET_DEVICES=mlx5_0:1`) took 5.62 to 5.69 ms, one port
+per rank, the one next to its GPU, 5.34 to 5.45 ms, two ports (`mlx5_0:1,mlx5_1:1`) 5.14 to 5.25 ms and the four
+ports with `UCX_PROTO_ENABLE=n` 5.09 ms; with $`1 \times 2 \times 4`$ on two nodes all of them took 9.3 to 9.6 ms.
+Earlier, two ports took 6.55 ms instead of 6.97 ms on four nodes and 3.96 ms instead of 4.25 ms on eight
+($`4 \times 2 \times 2`$ and $`4 \times 4 \times 2`$). The tables use one port. Sending from GPU to GPU between the
+nodes too (GPUDirect over one port) took 3.8 ms for $`256^3`$ on two nodes against 2.1 ms through the host: between
+nodes the default goes through the host.
+
+**End of the run.** UCX registers the host buffers of the exchanges between nodes in the CUDA context of the Context,
+which OpenMM destroys with the Context. When MPI was finalized at the exit of the process, after Python had deleted
+the Contexts, UCX printed some 200 errors per run on several nodes (`cudaHostUnregister() failed`, `failed to dereg
+from md[3]=cuda_cpy`), after the work was done; with `MPI_Finalize` called while the Contexts still existed there
+were none, and disabling the registration cache of UCX (`UCX_RCACHE_ENABLE=n`) did not help. The Python module
+therefore finalizes MPI as soon as the script ends (`docs/theory.md`, section 8): the runs above, on two and four
+nodes, printed no such message.
 
 **Coupled particles.** Every rank computes all the forces of OpenMM on all the particles (the particles are
 replicated), so a step takes about $`T_{\mathrm{LB}}/P + T_{\mathrm{MD}} + T_{\mathrm{comm}}`$ with $`P`$ ranks: the
