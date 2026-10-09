@@ -155,7 +155,8 @@ public:
     /**
      * Set the decomposition of the lattice into px*py*pz domains, one per MPI rank, for runs with several processes
      * (docs/theory.md, Domain decomposition).  The default, 1, 1, 1, is one domain: the whole lattice in one process,
-     * without MPI.  A 0 lets MPI choose the number of domains along that axis (MPI_Dims_create).  Every rank runs
+     * without MPI.  A 0 lets MPI choose the number of domains along that axis (MPI_Dims_create), with the most
+     * domains along z, then y: on the GPU platforms dividing x costs more (docs/validation.md).  Every rank runs
      * the same script with the same System; the particles are replicated on every rank, and each rank advances the
      * fluid of its domain.  The copies of the particles must stay identical: the same positions and velocities on
      * every rank, the same platform and precision, and no AndersenThermostat or Monte Carlo barostat; the plugin

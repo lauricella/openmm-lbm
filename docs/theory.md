@@ -1100,7 +1100,8 @@ choose).
 `MPI_COMM_WORLD`, for runs of the same script in several processes. Rank $`r = c_x + p_x(c_y + p_y c_z)`$ owns the
 block with coordinates $`(c_x, c_y, c_z)`$; along an axis of $`n`$ nodes block $`c`$ holds the nodes
 $`[\lfloor nc/p\rfloor, \lfloor n(c + 1)/p\rfloor)`$, so blocks differ by at most one node. A 0 lets
-`MPI_Dims_create` choose; the product must be the number of ranks. All MPI calls are in
+`MPI_Dims_create` choose, with the most domains along z, then y (dividing x costs more on the GPUs,
+`docs/validation.md`); the product must be the number of ranks. All MPI calls are in
 `openmmapi/src/LBMDecomposition.cpp`, compiled only with the CMake option `OPENMM_LBM_MPI`; without it, or with one
 domain, nothing changes.
 

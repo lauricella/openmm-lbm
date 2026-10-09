@@ -64,7 +64,8 @@ versions the API may still change.
   interior of the block collides; `OPENMM_LBM_DEVICE_MPI=0` makes them go through the host. Only the first Context of
   a process uses it (the MPI library binds these transfers to the CUDA context of the first one). The populations
   exchanged through the host are in their own precision (4 bytes in single precision instead of 8) and without
-  copies on the host. `devtools/benchmark_decomposition.py` measures the time per step (`docs/validation.md`).
+  copies on the host. `devtools/benchmark_decomposition.py` measures the time per step (`docs/validation.md`), also
+  with coupled particles (`--particles`, `--centered`).
 
 ### Changed (in development for 0.4.0)
 - `LBMVTKReporter` writes the density and the velocity of the fluid in two files, `<prefix>_density_<step>.vti` and

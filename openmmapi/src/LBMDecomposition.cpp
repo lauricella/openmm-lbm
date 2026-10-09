@@ -115,8 +115,15 @@ void LBMDecomposition::resolve(int nx, int ny, int nz, const int requested[3], i
                 "built without MPI (CMake option OPENMM_LBM_MPI)");
 #ifdef OPENMM_LBM_MPI
     int size = getWorldSize();
-    if (procs[0] == 0 || procs[1] == 0 || procs[2] == 0)
-        MPI_Dims_create(size, 3, procs);
+    if (procs[0] == 0 || procs[1] == 0 || procs[2] == 0) {
+        // MPI_Dims_create puts the most domains on the first axis; they go to z instead, then y.  On the GPUs a block
+        // divided along x, along which the nodes are consecutive in memory, took 30% to 50% more time per step than
+        // one divided along y or z (docs/validation.md).
+        int reversed[3] = {procs[2], procs[1], procs[0]};
+        MPI_Dims_create(size, 3, reversed);
+        for (int a = 0; a < 3; a++)
+            procs[a] = reversed[2-a];
+    }
     int n[3] = {nx, ny, nz};
     if (procs[0]*procs[1]*procs[2] != size) {
         stringstream message;
