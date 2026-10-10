@@ -199,8 +199,11 @@ read 359 K.
 
 ## Interpolation stencils (`tests/TestLBMStencils.h`, Reference platform)
 
-In development for version 0.5.0 (`docs/theory.md`, section 9); the other platforms check that a stencil other than
-`NearestNode` stops with an error.
+In development for version 0.5.0 (`docs/theory.md`, section 9). The tests run on every platform and precision, with
+the tolerances of the coupling tests in mixed and single precision, except `testStencilWeights` and
+`testStencilCanonicalTemperature` (Reference platform); in single precision the conjugate gradients of the centred drag
+stop at 1e-5 instead of 1e-13. `test_coupling_agrees_with_reference` (Python, section GPU platforms against the Reference
+platform: coupled particles) also runs the three stencils with both drags, without and with walls.
 - `testStencilWeights`: along an axis, at 1001 positions in a cell, the weights sum to one and have a zero first
   moment (1e-14); the second moment is 0 to 1/4 (trilinear), 1/4 to 1/3 (three-point) and 0 (Keys); the squares of the
   three-point weights sum to 1/2.

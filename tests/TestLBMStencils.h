@@ -9,7 +9,9 @@
  * Tests of the interpolation stencils of the coupling (docs/theory.md, section 9): the weights of the kernels, a
  * linear velocity field interpolated exactly, the nearest node recovered at a node, the conservation of momentum with
  * overlapping stencils and walls, the invariance under a translation by one node, and the errors of what is not
- * available yet.  Include after TestLBMCoupling.h and call runStencilTests().
+ * available yet.  The tests with a Context run on every platform, except the statistical test of the temperature
+ * (Reference platform; the domain decomposition with a stencil is in development on the GPU platforms).  Include
+ * after TestLBMCoupling.h and call runStencilTests().
  */
 
 #include "internal/LBMStencils.h"
@@ -203,7 +205,12 @@ void testStencilMomentumConservation(Platform& platform, LBMForce::DragScheme dr
         }
         Vec3 balance = momentum(scale) + wall - p0;
         ASSERT(wall.dot(wall) > 0);
-        ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, getCouplingTolerance(platform, 1e-11));
+        // The momentum of the fluid comes from its fields, which in single precision have the rounding of single
+        // precision summed over the nodes (as in testWallMomentumBalance()).
+        double tolerance = getCouplingTolerance(platform, 1e-11);
+        if (getStorageTolerance(platform) > 1e-12)
+            tolerance = 1e-5;
+        ASSERT_EQUAL_TOL(0.0, sqrt(balance.dot(balance))/scale, tolerance);
         delete system;
     }
 }
@@ -343,10 +350,15 @@ void testCenteredStencilSolve(Platform& platform) {
 
         integrator.step(1);
         State after = context.getState(State::Velocities);
+        // In mixed and single precision the force comes from velocities and forces rounded to single precision, and in
+        // single precision the conjugate gradients stop at 1e-5.
+        double tolerance = getCouplingTolerance(platform, 1e-10);
+        if (getStorageTolerance(platform) > 1e-12)
+            tolerance = 2e-3;
         for (int i = 0; i < numParticles; i++) {
             Vec3 coupling = (after.getVelocities()[i]-velocities[i])*(masses[i]/fluidDt) - before.getForces()[i];
             Vec3 F = expected[i]*forceScale;
-            ASSERT_EQUAL_VEC(F, coupling, 1e-10*sqrt(F.dot(F)));
+            ASSERT_EQUAL_VEC(F, coupling, tolerance*sqrt(F.dot(F)));
         }
     }
 }
@@ -395,15 +407,15 @@ void testStencilTranslation(Platform& platform) {
         }
         vector<double> moved = shifted(fluid[0]);
         for (int i = 0; i < (int) moved.size(); i++)
-            ASSERT_EQUAL_TOL(moved[i], fluid[1][i], 1e-12);
+            ASSERT_EQUAL_TOL(moved[i], fluid[1][i], getCouplingTolerance(platform, 1e-12));
         for (int i = 0; i < 3; i++)
-            ASSERT_EQUAL_VEC(x[0][i] + Vec3(fluidDx, fluidDx, fluidDx), x[1][i], 1e-12);
+            ASSERT_EQUAL_VEC(x[0][i] + Vec3(fluidDx, fluidDx, fluidDx), x[1][i], getCouplingTolerance(platform, 1e-12));
     }
 }
 
 /**
  * The stencil is fixed when a Context is created and must match the checkpoints; what is not available yet stops with
- * an error: open faces and, on the GPU platforms, every stencil other than NearestNode.
+ * an error: open faces.
  */
 void testStencilErrors(Platform& platform) {
     auto fails = [&](function<void(LBMForce*)> setup) {
@@ -422,10 +434,6 @@ void testStencilErrors(Platform& platform) {
         delete system;
         return thrown;
     };
-    if (platform.getName() != "Reference") {
-        ASSERT(fails([](LBMForce* f) {}));
-        return;
-    }
     ASSERT(!fails([](LBMForce* f) {}));
     ASSERT(!fails([](LBMForce* f) {f->setDragScheme(LBMForce::Centered);}));
     ASSERT(fails([](LBMForce* f) {
@@ -579,9 +587,6 @@ void testStencilCanonicalTemperature(Platform& platform) {
 
 void runStencilTests(Platform& platform) {
     testStencilErrors(platform);
-    if (platform.getName() != "Reference")
-        return;
-    testStencilWeights();
     testStencilLinearField(platform);
     testStencilAtNode(platform);
     testStencilMomentumConservation(platform, LBMForce::Explicit);
@@ -589,5 +594,8 @@ void runStencilTests(Platform& platform) {
     testCenteredStencilSolve(platform);
     testStencilTranslation(platform);
     testStencilWarnings(platform);
+    if (platform.getName() != "Reference")
+        return;
+    testStencilWeights();
     testStencilCanonicalTemperature(platform);
 }

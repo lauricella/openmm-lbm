@@ -8,8 +8,11 @@ versions the API may still change.
 ### Added (in development)
 - Interpolation stencils of the coupling, `setInterpolationStencil()`/`getInterpolationStencil()` with
   `NearestNode` (the default, unchanged bit for bit), `Trilinear`, `ThreePoint` and `Keys` (`docs/theory.md`,
-  section 9): for now on the Reference platform, with both drag schemes and the domain decomposition, and periodic
-  faces; the other platforms and open faces stop with an error. Solid nodes of a stencil count as a wall at rest.
+  section 9): for now with both drag schemes and periodic faces on every platform, and with the domain decomposition
+  on the Reference platform; the decomposition on the CUDA, OpenCL and HIP platforms and open faces stop with an
+  error. Solid nodes of a stencil count as a wall at rest. On the GPU platforms the reactions of the stencils are
+  summed per node in particle order through sorted keys, one per node of every stencil, without atomic operations,
+  and agree with the Reference platform to rounding.
   With the centred drag, particles whose stencils share nodes are solved together by conjugate gradients. With the
   decomposition the ranks exchange a coupling halo of one or two layers, and the result is that of one domain bit for
   bit. The self-mobility of every stencil agrees with the linearized calculation within 0.0004. Serialization version

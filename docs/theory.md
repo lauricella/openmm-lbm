@@ -1347,8 +1347,9 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
 
 Version 0.5.0 will couple a particle to several nodes around it, as in Ahlrichs and Dünweg [5] and in the immersed
 boundary method [30]. This section gives the model and its derivation. Both drags with the three kernels are
-implemented on the Reference platform, also with the domain decomposition, with periodic faces
-(`setInterpolationStencil()`); the CUDA, OpenCL and HIP platforms and the open faces are in development. The coupling
+implemented on the Reference platform, also with the domain decomposition, and on the CUDA, OpenCL and HIP platforms
+with one domain, with periodic faces (`setInterpolationStencil()`); the domain decomposition on the GPU platforms and
+the open faces are in development. The coupling
 of sections 2 and 8 uses the nearest node, which remains the default. The properties stated below were checked
 with linear models of the lattice (the fluid of section 1 linearized about rest, on a periodic lattice, with the
 particles at fixed positions) and then measured with the plugin on the Reference platform (`docs/validation.md`,
@@ -1477,7 +1478,10 @@ $`\mathbf u_j(t) = \tilde{\mathbf u}_j - h\sum_l \xi_{jl}\mathbf F_l/\rho_j`$, s
   gradients with the diagonal of the matrix as preconditioner, starting from the solution of the diagonal. The matrix
   is not formed: a product spreads the vector on the nodes and interpolates it back, as the coupling does. The
   iterations stop when the residual of each Cartesian component is 1e-13 of its right-hand side; an isolated particle
-  needs none. The forces agree with a solution by Gaussian elimination to 1e-10 (`testCenteredStencilSolve`).
+  needs none. The forces agree with a solution by Gaussian elimination to 1e-10 (`testCenteredStencilSolve`). On the
+  CUDA, OpenCL and HIP platforms the same iterations run on the device: the spread vector is summed per node through
+  the sorted keys of the stencils, the dot products are reduced by a single work group in a fixed order, and the host
+  reads them to decide when to stop; in single precision the iterations stop at 1e-5.
 
 **Self-mobility.** The calculation of section 2 (Self-mobility and relaxation time: linearized collision, unit
 force on a periodic lattice of $`16^3`$ nodes) gives, with the force spread by the stencil and the velocity

@@ -93,6 +93,8 @@ private:
     void advanceFluid();
     void computeNextStepForces(long long nextStep);
     void computeCouplingForces(bool isStep);
+    /** The centred drag with an interpolation stencil: the conjugate gradients, after prepareCenteredStencil(). */
+    void solveStencilDrag();
     void setFluidParameters();
     void checkMachNumber();
     double computeMachNumber();
@@ -210,6 +212,17 @@ private:
         from OpenMM's generator (one float4 per particle). */
     OpenMM::ComputeArray couplingIndex, particleMass, particleForce, sortKeys, particleWallMomentum, cellReaction;
     OpenMM::ComputeArray noise;
+    /** Interpolation stencils (docs/theory.md, section 9): the number of nodes of the stencil (1 for the nearest node,
+        then one sort key per node of the stencil of every particle) and the weights of the nodes of the stencils,
+        at [i*stencilSize + slot]. */
+    int stencilSize;
+    OpenMM::ComputeArray stencilWeight;
+    /** The centred drag with a stencil: for each slot its weight divided by the density of its node (0 at a solid
+        node), its node and the position of the first sorted key of that node; the vector spread on the nodes (at those
+        positions, 3 components of numCoupled*stencilSize each); the right-hand side, diagonal, residual, preconditioned
+        residual, direction and product of the conjugate gradients, and their dot products. */
+    OpenMM::ComputeArray interpWeight, stencilNode, keyFirst, spreadValue, gradientRhs, gradientDiagonal, gradientResidual;
+    OpenMM::ComputeArray gradientPreconditioned, gradientDirection, gradientProduct, gradientScalars;
     /** Centered drag: velocity of every coupled particle with half the other forces, v(t - dt/2) + dt Fc/(2m), and
         its random force (lattice units, 3 components of numCoupled each). */
     OpenMM::ComputeArray knownVelocity, randomForce;
@@ -221,6 +234,8 @@ private:
     OpenMM::ComputeKernel collideKernel, bounceBackKernel, wallExchangeKernel, applyBoundariesKernel, maxSpeedKernel;
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel, packFieldsKernel;
+    OpenMM::ComputeKernel keySegmentsKernel, spreadKernel, multiplyKernel, dotKernel, startGradientsKernel;
+    OpenMM::ComputeKernel advanceGradientsKernel, directionKernel, stencilWallKernel;
 };
 
 } // namespace LBMPlugin

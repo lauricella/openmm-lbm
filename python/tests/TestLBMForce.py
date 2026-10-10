@@ -494,17 +494,23 @@ def test_fluid_agrees_with_reference(name, precision, walls):
     assert abs(wallForces[1] - wallForces[0]).max() <= 1e-10*max(1.0, abs(wallForces[0]).max())
 
 
-@pytest.mark.parametrize('name,walls,drag', [(name, walls, drag) for name in ('CUDA', 'OpenCL', 'HIP')
-                                              for walls in (False, True, 'faces') for drag in ('Explicit', 'Centered')],
+@pytest.mark.parametrize('name,walls,drag,stencil',
+                         [(name, walls, drag, 'NearestNode') for name in ('CUDA', 'OpenCL', 'HIP')
+                          for walls in (False, True, 'faces') for drag in ('Explicit', 'Centered')] +
+                         [(name, walls, drag, stencil) for name in ('CUDA', 'OpenCL', 'HIP')
+                          for walls in (False, True) for drag in ('Explicit', 'Centered')
+                          for stencil in ('Trilinear', 'ThreePoint', 'Keys')],
                          ids=lambda value: {False: 'periodic', True: 'walls'}.get(value, value))
-def test_coupling_agrees_with_reference(name, walls, drag):
+def test_coupling_agrees_with_reference(name, walls, drag, stencil):
     # At T = 0 the coupling is deterministic: in double precision the particles and the fluid of the GPU platforms
     # follow those of the Reference platform to rounding, also with particles that share a node, cross the
     # periodic boundary or are reflected by a wall (the plane j = 0 of the 8^3 grid), with both drag schemes.
     # With the centred drag the other forces enter the drag: a constant field and a soft pair force act on the
     # particles, added to the System before the LBMForce.  With open faces along x (a Velocity face XMin and a
     # Density face XMax) one particle stays on the nodes of the Density face, whose rebuilt populations take the
-    # velocity of the node without the reaction of the particles.
+    # velocity of the node without the reaction of the particles.  With an interpolation stencil two particles share
+    # part of their stencils (with the centred drag they are solved together by conjugate gradients) and those near the
+    # plane j = 0 cover solid nodes.
     import numpy as np
     try:
         platform = mm.Platform.getPlatformByName(name)
@@ -529,6 +535,7 @@ def test_coupling_agrees_with_reference(name, walls, drag):
         system.addForce(pair)
         system.addForce(force)
         force.setDragScheme(getattr(LBMForce, drag))
+        force.setInterpolationStencil(getattr(LBMForce, stencil))
         force.setFriction(10.0)
         force.setTemperature(0.0)
         force.setFluidMomentumRemovalFrequency(0)
