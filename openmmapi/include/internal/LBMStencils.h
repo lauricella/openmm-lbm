@@ -63,10 +63,14 @@ public:
     /**
      * The nodes of the stencil along one axis and their weights, for a coordinate s in lattice spacings, already
      * wrapped into [0, n): width(stencil) nodes in increasing order, starting from floor(s) for the trilinear
-     * kernel, round(s) - 1 for the three-point kernel and floor(s) - 1 for Keys, wrapped periodically into [0, n).
-     * Nodes outside the support of the kernel have weight 0 (the trilinear kernel at a node).
+     * kernel, round(s) - 1 for the three-point kernel and floor(s) - 1 for Keys, wrapped periodically into [0, n),
+     * or along an axis with open faces (open) moved onto the nearest node of the lattice, 0 or n - 1, so that a stencil
+     * never reaches across an open face.  Nodes outside the support of the kernel have weight 0 (the trilinear kernel
+     * at a node).  A node that appears in more than one slot (an axis shorter than the stencil, or the nodes beyond an
+     * open face) gets the sum of their weights, added in slot order, in its first slot, and the other slots weight 0,
+     * so that the sum of the squares of the weights of the stencil is that of its distinct nodes.
      */
-    static void axisWeights(LBMForce::InterpolationStencil stencil, double s, int n, int* index, double* weight) {
+    static void axisWeights(LBMForce::InterpolationStencil stencil, double s, int n, bool open, int* index, double* weight) {
         int w = width(stencil);
         int first;
         if (stencil == LBMForce::ThreePoint)
@@ -79,8 +83,24 @@ public:
             first = (int) std::floor(s + 0.5);
         for (int i = 0; i < w; i++) {
             weight[i] = kernel(stencil, s - (first + i));
-            index[i] = ((first + i)%n + n)%n;
+            index[i] = (open ? std::min(std::max(first + i, 0), n - 1) : ((first + i)%n + n)%n);
         }
+        for (int i = 1; i < w; i++)
+            for (int j = 0; j < i; j++)
+                if (index[j] == index[i]) {
+                    weight[j] += weight[i];
+                    weight[i] = 0.0;
+                    break;
+                }
+    }
+    /**
+     * The node that owns a particle with a stencil along one axis, for a coordinate s wrapped into [0, n): the nearest
+     * node, wrapped periodically, or along an axis with open faces the nearest node of the lattice, so that the
+     * particles between node n - 1 and the end of the box belong to node n - 1, like their stencils.
+     */
+    static int ownerIndex(double s, int n, bool open) {
+        int i = (int) std::floor(s + 0.5);
+        return (open ? std::min(i, n - 1) : i%n);
     }
 };
 

@@ -297,7 +297,9 @@ DEVICE mixed stencilKernel(mixed r) {
 /**
  * The nodes of the stencil along one axis and their weights, for a coordinate s in lattice spacings wrapped into
  * [0, size): STENCIL_WIDTH nodes in increasing order from floor(s) (trilinear), round(s) - 1 (three-point) or
- * floor(s) - 1 (Keys), wrapped periodically, as LBMStencils::axisWeights().
+ * floor(s) - 1 (Keys), wrapped periodically, or along an axis with open faces (open, OPEN_X/Y/Z) moved onto the
+ * nearest node of the lattice, 0 or size - 1; a node in several slots has the sum of their weights in its first slot
+ * and 0 in the others, as LBMStencils::axisWeights().
  */
 DEVICE int stencilFirst(mixed s) {
 #if STENCIL_WIDTH == 3
@@ -309,12 +311,34 @@ DEVICE int stencilFirst(mixed s) {
 #endif
 }
 
-DEVICE void stencilAxis(mixed s, int size, int* index, mixed* weight) {
+DEVICE void stencilAxis(mixed s, int size, int open, int* index, mixed* weight) {
     int first = stencilFirst(s);
     for (int a = 0; a < STENCIL_WIDTH; a++) {
         weight[a] = stencilKernel(s - (first + a));
-        index[a] = ((first + a)%size + size)%size;
+        index[a] = (open ? min(max(first + a, 0), size - 1) : ((first + a)%size + size)%size);
     }
+    for (int a = 1; a < STENCIL_WIDTH; a++)
+        for (int b = 0; b < a; b++)
+            if (index[b] == index[a]) {
+                weight[b] += weight[a];
+                weight[a] = 0;
+                break;
+            }
+}
+
+/**
+ * The node whose rank couples a particle with a stencil: the nearest node, or along an axis with open faces the nearest
+ * node of the lattice, so that the particles between node size - 1 and the end of the box belong to node size - 1, like
+ * their stencils (LBMStencils::ownerIndex()).
+ */
+DEVICE int stencilOwnerNode(mixed4 pos) {
+    int i = (int) floor(wrapCoordinate(pos.x, GNX) + 0.5f);
+    int j = (int) floor(wrapCoordinate(pos.y, GNY) + 0.5f);
+    int k = (int) floor(wrapCoordinate(pos.z, GNZ) + 0.5f);
+    i = (OPEN_X ? min(i, GNX - 1) : i%GNX);
+    j = (OPEN_Y ? min(j, GNY - 1) : j%GNY);
+    k = (OPEN_Z ? min(k, GNZ - 1) : k%GNZ);
+    return i + GNX*(j + GNY*k);
 }
 
 #ifdef DOMAIN_DECOMPOSITION
@@ -324,13 +348,18 @@ DEVICE void stencilAxis(mixed s, int size, int* index, mixed* weight) {
  * 2 with Keys), so they lie in the block or in its halo, at the same offsets from the nearest node as in the lattice; a
  * node of the lattice may appear at two positions of the halo of a small block, which both hold its moments
  * (unpackCouplingHalo).  s is the coordinate wrapped into [0, size), origin the first node of the block along the axis,
- * and pad its layers of halo, 0 along an axis that is not divided, where the block is the whole axis.
+ * and pad its layers of halo, 0 along an axis that is not divided, where the block is the whole axis.  Along an axis
+ * with open faces the nodes are those of stencilAxis(), which do not wrap.
  */
-DEVICE void stencilAxisStored(mixed s, int size, int origin, int pad, int* stored) {
+DEVICE void stencilAxisStored(mixed s, int size, int origin, int pad, int open, int* stored) {
     int first = stencilFirst(s);
     int nearest = (int) floor(s + 0.5f);
-    for (int a = 0; a < STENCIL_WIDTH; a++)
-        stored[a] = (pad > 0 ? nearest%size - origin + (first + a - nearest) + pad : ((first + a)%size + size)%size);
+    for (int a = 0; a < STENCIL_WIDTH; a++) {
+        if (open)
+            stored[a] = min(max(first + a, 0), size - 1) - origin + pad;
+        else
+            stored[a] = (pad > 0 ? nearest%size - origin + (first + a - nearest) + pad : ((first + a)%size + size)%size);
+    }
 }
 
 /**
@@ -496,17 +525,17 @@ KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         int ix[STENCIL_WIDTH], iy[STENCIL_WIDTH], iz[STENCIL_WIDTH];
         mixed wx[STENCIL_WIDTH], wy[STENCIL_WIDTH], wz[STENCIL_WIDTH];
         mixed sx = wrapCoordinate(pos.x, GNX), sy = wrapCoordinate(pos.y, GNY), sz = wrapCoordinate(pos.z, GNZ);
-        stencilAxis(sx, GNX, ix, wx);
-        stencilAxis(sy, GNY, iy, wy);
-        stencilAxis(sz, GNZ, iz, wz);
+        stencilAxis(sx, GNX, OPEN_X, ix, wx);
+        stencilAxis(sy, GNY, OPEN_Y, iy, wy);
+        stencilAxis(sz, GNZ, OPEN_Z, iz, wz);
 #ifdef DOMAIN_DECOMPOSITION
         // Positions of the nodes of the stencil in the arrays of the block, if the rank owns the nearest node.
-        bool owned = (storedNode(nearestNode(pos)) != NUM_STORED);
+        bool owned = (storedNode(stencilOwnerNode(pos)) != NUM_STORED);
         int jx[STENCIL_WIDTH], jy[STENCIL_WIDTH], jz[STENCIL_WIDTH];
         if (owned) {
-            stencilAxisStored(sx, GNX, OX, PAD_X, jx);
-            stencilAxisStored(sy, GNY, OY, PAD_Y, jy);
-            stencilAxisStored(sz, GNZ, OZ, PAD_Z, jz);
+            stencilAxisStored(sx, GNX, OX, PAD_X, OPEN_X, jx);
+            stencilAxisStored(sy, GNY, OY, PAD_Y, OPEN_Y, jy);
+            stencilAxisStored(sz, GNZ, OZ, PAD_Z, OPEN_Z, jz);
         }
 #else
         const bool owned = true;
@@ -661,17 +690,17 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         int ix[STENCIL_WIDTH], iy[STENCIL_WIDTH], iz[STENCIL_WIDTH];
         mixed wx[STENCIL_WIDTH], wy[STENCIL_WIDTH], wz[STENCIL_WIDTH];
         mixed sx = wrapCoordinate(pos.x, GNX), sy = wrapCoordinate(pos.y, GNY), sz = wrapCoordinate(pos.z, GNZ);
-        stencilAxis(sx, GNX, ix, wx);
-        stencilAxis(sy, GNY, iy, wy);
-        stencilAxis(sz, GNZ, iz, wz);
+        stencilAxis(sx, GNX, OPEN_X, ix, wx);
+        stencilAxis(sy, GNY, OPEN_Y, iy, wy);
+        stencilAxis(sz, GNZ, OPEN_Z, iz, wz);
 #ifdef DOMAIN_DECOMPOSITION
-        bool owned = (storedNode(nearestNode(pos)) != NUM_STORED);
+        bool owned = (storedNode(stencilOwnerNode(pos)) != NUM_STORED);
         particleOwned[i] = owned;
         int jx[STENCIL_WIDTH], jy[STENCIL_WIDTH], jz[STENCIL_WIDTH];
         if (owned) {
-            stencilAxisStored(sx, GNX, OX, PAD_X, jx);
-            stencilAxisStored(sy, GNY, OY, PAD_Y, jy);
-            stencilAxisStored(sz, GNZ, OZ, PAD_Z, jz);
+            stencilAxisStored(sx, GNX, OX, PAD_X, OPEN_X, jx);
+            stencilAxisStored(sy, GNY, OY, PAD_Y, OPEN_Y, jy);
+            stencilAxisStored(sz, GNZ, OZ, PAD_Z, OPEN_Z, jz);
         }
 #else
         const bool owned = true;

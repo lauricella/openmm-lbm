@@ -1363,7 +1363,7 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
 Version 0.5.0 will couple a particle to several nodes around it, as in Ahlrichs and Dünweg [5] and in the immersed
 boundary method [30]. This section gives the model and its derivation. Both drags with the three kernels are
 implemented on every platform (Reference, CUDA, OpenCL, HIP), with one domain and with the domain decomposition, with
-periodic faces (`setInterpolationStencil()`); the open faces are in development. The coupling
+periodic and open faces (`setInterpolationStencil()`). The coupling
 of sections 2 and 8 uses the nearest node, which remains the default. The properties stated below were checked
 with linear models of the lattice (the fluid of section 1 linearized about rest, on a periodic lattice, with the
 particles at fixed positions) and then measured with the plugin on the Reference platform (`docs/validation.md`,
@@ -1536,6 +1536,31 @@ position and $`\tau`$ (Reference platform, a particle held almost at its place b
   the Oseen tensor for $`\tau \le 1.1`$; the stencils change the near field, where the nearest node gives a mobility
   that jumps from cell to cell.
 
+**Open faces and repeated nodes.** Along an axis with open faces (section 1, Open faces) the nodes are $`0 \ldots
+n - 1`$, the values imposed by the faces hold one node beyond them, and the particles stay in OpenMM's periodic box of
+$`n`$ cells. A stencil must not reach across a face into the fluid of the other side, so along such an axis a node of
+the stencil beyond a face is replaced by the last node before it, $`0`$ or $`n - 1`$ (the index is clamped instead of
+wrapped), and a particle in the cell between node $`n - 1`$ and the end of the box, $`n - 1 \le X/\Delta x < n`$,
+belongs to node $`n - 1`$, also as the owner with the domain decomposition (the nearest node, which does not change,
+still gives node 0 for $`X/\Delta x \ge n - 1/2`$). A node that appears in several slots of a stencil along an axis,
+the last node near an open face or any node of a periodic axis shorter than the stencil, receives the sum of their
+weights in its first slot, and the other slots weight zero (`LBMStencils::axisWeights()`). The weights still sum to
+one and interpolation and spreading still use the same weights, so momentum is conserved and the
+fluctuation-dissipation argument below holds, with the weights of the distinct nodes; in particular the self weight
+$`\sum_j \xi_j^2`$ in the diagonal of the centred drag is that of the distinct nodes (without the merging, the
+diagonal of a repeated node missed the cross terms of its slots, which changed the preconditioner of the conjugate
+gradients but not the solution). What is lost near a face is the first moment: a linear field is no longer interpolated
+exactly by a stencil that reaches beyond the face, and the spread reaction has a torque about the particle. With the
+trilinear kernel a particle at $`X/\Delta x = n - 1 + f`$ sees node $`n - 1`$ alone, an error of $`f`$ times the
+change of the velocity over one cell: in the Couette flow $`u_i = U(i + 1)/(n + 1)`$ between a face at rest and a
+face moving with $`U`$ the error is $`fU/(n + 1)`$, up to 5.9% of $`U`$ with $`n = 16`$ (`testStencilOpenFaces`
+checks the interpolated velocity near the faces for every kernel). Two other rules were considered and set aside: the
+nodes beyond a face holding the value that the face imposes keep linear fields exact at a `Velocity` face, but at a
+`Density` face the velocity beyond it depends on the fluid while its share of the reaction would leave the box, so
+interpolation and spreading would no longer be transposes; a stencil truncated at the face and renormalized is not
+defined in the cell between node $`n - 1`$ and the end of the box, where the weights of the nodes inside vanish. The
+temperature of particles near open faces with the fluctuating fluid is part of the validation of version 0.5.0.
+
 **Domain decomposition** (section 8). The rank that owns the nearest node of a particle computes
 its coupling, as with the nearest node. From the nearest node the stencil reaches one node in each direction with the
 trilinear and three-point kernels and two with Keys: before the coupling the ranks exchange the density and the
@@ -1550,8 +1575,8 @@ stencil reaches, one, or two with Keys (the populations still stream into the fi
 into the halo of the moments, through the host; a node may fill two positions of the halo of a small block. Every rank
 computes the weights and sort keys of all the stencils; the keys of a stencil then hold the index of the node in the
 lattice rather than its position in the arrays, so that the keys of a node stay together wherever it is stored, and
-the nodes beyond the halo come after all the others. A stencil across an open face is not defined yet: open faces
-with a stencil stop with an error.
+the nodes beyond the halo come after all the others. Along an axis with open faces the owner of a particle is the rank
+of the nearest node of the lattice (Open faces, above), whose block and halo hold the whole stencil.
 
 ## References
 

@@ -31,7 +31,7 @@ void testStencilWeights() {
             double s = 5.0 + i/1000.0;
             int index[LBMStencils::maxWidth];
             double weight[LBMStencils::maxWidth];
-            LBMStencils::axisWeights(stencil, s, 8, index, weight);
+            LBMStencils::axisWeights(stencil, s, 8, false, index, weight);
             double sum = 0, first = 0, second = 0, squares = 0;
             for (int n = 0; n < w; n++) {
                 // index is wrapped into [0, 8); the node lies at index + 8 near s = 5...6.
@@ -60,6 +60,67 @@ void testStencilWeights() {
         else
             ASSERT_EQUAL_TOL(2.0/3.0, LBMStencils::kernel(stencil, 0.0), 1e-15);
     }
+}
+
+/**
+ * Along an axis with open faces the stencil stops at the last nodes, 0 and n - 1, which take the weights of the nodes
+ * beyond the faces; on a periodic axis shorter than the stencil a node appears in several slots.  In both cases a node
+ * that appears in several slots has the sum of their weights in its first slot and weight 0 in the others, the weights
+ * sum to one, and away from the faces they are those of the periodic axis.  The owner of a particle between node
+ * n - 1 and the end of the box is node n - 1 along an open axis, node 0 along a periodic one.
+ */
+void testStencilOpenAxisWeights() {
+    for (LBMForce::InterpolationStencil stencil : allStencils) {
+        int w = LBMStencils::width(stencil);
+        for (int n : {2, 3, 8})
+            for (bool open : {false, true}) {
+                if (open && n < 3)
+                    continue;
+                for (int i = 0; i < 1000*n; i++) {
+                    double s = i/1000.0;
+                    int index[LBMStencils::maxWidth], periodicIndex[LBMStencils::maxWidth];
+                    double weight[LBMStencils::maxWidth], periodicWeight[LBMStencils::maxWidth], kernel[LBMStencils::maxWidth];
+                    LBMStencils::axisWeights(stencil, s, n, open, index, weight);
+                    LBMStencils::axisWeights(stencil, s, n+8, false, periodicIndex, periodicWeight);
+                    double sum = 0;
+                    bool beyond = false;
+                    for (int a = 0; a < w; a++) {
+                        ASSERT(index[a] >= 0 && index[a] < n);
+                        sum += weight[a];
+                        // The node of slot a without wrapping or clamping, and its kernel weight.
+                        int node = periodicIndex[a] - (periodicIndex[a] > s+4 ? n+8 : 0);
+                        kernel[a] = LBMStencils::kernel(stencil, s - node);
+                        beyond = beyond || node < 0 || node >= n;
+                        int expectedIndex = (open ? min(max(node, 0), n-1) : (node%n + n)%n);
+                        ASSERT_EQUAL(expectedIndex, index[a]);
+                    }
+                    ASSERT_EQUAL_TOL(1.0, sum, 1e-14);
+                    for (int a = 0; a < w; a++) {
+                        int firstSlot = a;
+                        for (int b = a-1; b >= 0; b--)
+                            if (index[b] == index[a])
+                                firstSlot = b;
+                        if (firstSlot != a) {
+                            ASSERT_EQUAL(0.0, weight[a]);
+                        }
+                        else {
+                            double expected = 0;
+                            for (int b = a; b < w; b++)
+                                if (index[b] == index[a])
+                                    expected += kernel[b];
+                            ASSERT_EQUAL_TOL(expected, weight[a], 1e-15);
+                        }
+                    }
+                    if (!beyond)
+                        for (int a = 0; a < w; a++)
+                            ASSERT_EQUAL(kernel[a], weight[a]);
+                }
+            }
+    }
+    ASSERT_EQUAL(7, LBMStencils::ownerIndex(7.6, 8, true));
+    ASSERT_EQUAL(0, LBMStencils::ownerIndex(7.6, 8, false));
+    ASSERT_EQUAL(7, LBMStencils::ownerIndex(7.4, 8, false));
+    ASSERT_EQUAL(0, LBMStencils::ownerIndex(0.3, 8, true));
 }
 
 /**
@@ -100,6 +161,61 @@ void testStencilLinearField(Platform& platform) {
         ASSERT_EQUAL_VEC(linearVelocity(position)*(friction*fluidDt), v1, getCouplingTolerance(platform, 1e-12));
         delete system;
     }
+}
+
+/**
+ * Open faces along z: the stencil stops at the last nodes, which take the weights of the nodes beyond the faces.  In a
+ * fluid at equilibrium with a velocity that varies linearly in space a particle at rest feels in the first step the
+ * field at the mean node of its stencil along z, sum_c w_c z_c: its position away from the faces, with every stencil,
+ * and node n - 1 with the trilinear stencil between node n - 1 and the end of the box.
+ */
+void testStencilOpenFaces(Platform& platform) {
+    int n = 8;
+    Vec3 u0(0.01, -0.02, 0.015), x0(2.0, 2.0, 2.0);
+    Vec3 grad[3] = {Vec3(0.002, -0.001, 0.0005), Vec3(0.0015, 0.001, -0.002), Vec3(-0.001, 0.0005, 0.002)};
+    auto linearVelocity = [&](Vec3 x) {
+        Vec3 d = x-x0;
+        return u0 + grad[0]*d[0] + grad[1]*d[1] + grad[2]*d[2];
+    };
+    vector<double> state(19*n*n*n);
+    for (int k = 0; k < n; k++)
+        for (int j = 0; j < n; j++)
+            for (int i = 0; i < n; i++) {
+                Vec3 x(i*fluidDx, j*fluidDx, k*fluidDx);
+                double rho = 1.0 + 0.01*(i-4) - 0.005*(j-4) + 0.008*(k-4);
+                vector<double> node = uniformState(1, rho, linearVelocity(x)*(fluidDt/fluidDx));
+                for (int q = 0; q < 19; q++)
+                    state[q*n*n*n + i + n*(j + n*k)] = node[q];
+            }
+    double friction = 5.0;
+    for (LBMForce::InterpolationStencil stencil : allStencils)
+        for (double z : {0.1, 0.35, 0.6, 1.3, 2.2, 3.3, 3.62, 3.9}) {
+            LBMForce* force;
+            System* system = createCoupledSystem(force, 1, friction, 0.0);
+            force->setInterpolationStencil(stencil);
+            force->setFaceBoundary(LBMForce::ZMin, LBMForce::Velocity);
+            force->setFaceBoundary(LBMForce::ZMax, LBMForce::Density);
+            VerletIntegrator integrator(fluidDt);
+            Context context(*system, integrator, platform);
+            Vec3 position(2.13, 1.87, z);
+            context.setPositions(vector<Vec3>(1, position));
+            force->setFluidState(context, state);
+            integrator.step(1);
+            Vec3 v1 = context.getState(State::Velocities).getVelocities()[0];
+            int index[LBMStencils::maxWidth];
+            double weight[LBMStencils::maxWidth];
+            LBMStencils::axisWeights(stencil, z/fluidDx, n, true, index, weight);
+            double mean = 0;
+            for (int c = 0; c < LBMStencils::width(stencil); c++)
+                mean += weight[c]*index[c];
+            if (z/fluidDx > LBMStencils::width(stencil)/2 && z/fluidDx < n-1-LBMStencils::width(stencil)/2)
+                ASSERT_EQUAL_TOL(z/fluidDx, mean, 1e-13);
+            if (stencil == LBMForce::Trilinear && z/fluidDx > n-1)
+                ASSERT_EQUAL_TOL(n-1.0, mean, 1e-15);
+            Vec3 seen = linearVelocity(Vec3(position[0], position[1], mean*fluidDx));
+            ASSERT_EQUAL_VEC(seen*(friction*fluidDt), v1, getCouplingTolerance(platform, 1e-12));
+            delete system;
+        }
 }
 
 /**
@@ -219,7 +335,8 @@ void testStencilMomentumConservation(Platform& platform, LBMForce::DragScheme dr
  * The centred drag with a stencil solves a linear system for the particles whose stencils overlap (docs/theory.md,
  * section 9).  The forces of the first step are compared with the solution computed here by Gaussian elimination from
  * the fluid state, the positions, the velocities and the other forces: three particles with overlapping stencils, one
- * of them near a wall (the plane j = 0), an isolated one, different masses, a field acting on the particles.
+ * of them near a wall (the plane j = 0), an isolated one, different masses, a field acting on the particles; then the
+ * same with open faces along z and two of the particles near them, one between node n - 1 and the end of the box.
  */
 void testCenteredStencilSolve(Platform& platform) {
     int n = 8, numNodes = n*n*n, numParticles = 4;
@@ -234,7 +351,13 @@ void testCenteredStencilSolve(Platform& platform) {
             state[q*numNodes + node] = one[q];
     }
     vector<int> solid = wallPlane(n, n, n);
-    for (LBMForce::InterpolationStencil stencil : allStencils) {
+    for (int variant = 0; variant < 6; variant++) {
+        bool open = (variant >= 3);
+        LBMForce::InterpolationStencil stencil = allStencils[variant%3];
+        if (open) {
+            positions[2][2] = 0.15;
+            positions[3][2] = 3.85;
+        }
         System system;
         system.setDefaultPeriodicBoxVectors(Vec3(n*fluidDx, 0, 0), Vec3(0, n*fluidDx, 0), Vec3(0, 0, n*fluidDx));
         CustomExternalForce* field = new CustomExternalForce("-3*x+2*y-z");
@@ -249,6 +372,10 @@ void testCenteredStencilSolve(Platform& platform) {
         force->setDragScheme(LBMForce::Centered);
         force->setInterpolationStencil(stencil);
         force->setSolidNodes(solid);
+        if (open) {
+            force->setFaceBoundary(LBMForce::ZMin, LBMForce::Velocity);
+            force->setFaceBoundary(LBMForce::ZMax, LBMForce::Velocity);
+        }
         force->setForceGroup(1);
         for (int i = 0; i < numParticles; i++) {
             system.addParticle(masses[i]);
@@ -293,7 +420,7 @@ void testCenteredStencilSolve(Platform& platform) {
             int index[3][LBMStencils::maxWidth];
             double axis[3][LBMStencils::maxWidth];
             for (int k = 0; k < 3; k++)
-                LBMStencils::axisWeights(stencil, positions[i][k]/fluidDx, n, index[k], axis[k]);
+                LBMStencils::axisWeights(stencil, positions[i][k]/fluidDx, n, open && k == 2, index[k], axis[k]);
             for (int c = 0; c < w; c++)
                 for (int b = 0; b < w; b++)
                     for (int aa = 0; aa < w; aa++)
@@ -414,8 +541,8 @@ void testStencilTranslation(Platform& platform) {
 }
 
 /**
- * The stencil is fixed when a Context is created and must match the checkpoints; what is not available yet stops with
- * an error: open faces.
+ * The stencil is fixed when a Context is created and must match the checkpoints; an unknown stencil stops with an
+ * error, and open faces are accepted.
  */
 void testStencilErrors(Platform& platform) {
     auto fails = [&](function<void(LBMForce*)> setup) {
@@ -436,7 +563,7 @@ void testStencilErrors(Platform& platform) {
     };
     ASSERT(!fails([](LBMForce* f) {}));
     ASSERT(!fails([](LBMForce* f) {f->setDragScheme(LBMForce::Centered);}));
-    ASSERT(fails([](LBMForce* f) {
+    ASSERT(!fails([](LBMForce* f) {
         f->setFaceBoundary(LBMForce::XMin, LBMForce::Velocity);
         f->setFaceBoundary(LBMForce::XMax, LBMForce::Velocity);
     }));
@@ -588,6 +715,7 @@ void testStencilCanonicalTemperature(Platform& platform) {
 void runStencilTests(Platform& platform) {
     testStencilErrors(platform);
     testStencilLinearField(platform);
+    testStencilOpenFaces(platform);
     testStencilAtNode(platform);
     testStencilMomentumConservation(platform, LBMForce::Explicit);
     testStencilMomentumConservation(platform, LBMForce::Centered);
@@ -597,5 +725,6 @@ void runStencilTests(Platform& platform) {
     if (platform.getName() != "Reference")
         return;
     testStencilWeights();
+    testStencilOpenAxisWeights();
     testStencilCanonicalTemperature(platform);
 }

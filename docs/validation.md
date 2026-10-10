@@ -210,6 +210,16 @@ platform: coupled particles) also runs the three stencils with both drags, witho
 - `testStencilLinearField`: fluid at equilibrium with a velocity and a density that vary linearly in space: the
   first step gives a particle at rest $`\gamma\Delta t\,\mathbf u(\mathbf X)`$ with the linear field at the particle,
   to 1e-12, with every stencil.
+- `testStencilOpenFaces`: the same field with open faces along $`z`$ (`Velocity` at $`z_{\min}`$, `Density` at
+  $`z_{\max}`$), the particle at 8 heights from 0.2 to 7.8 lattice spacings: the first step gives the field at the
+  mean node of the stencil along $`z`$, $`\sum_c w_c z_c`$, with the weights of the nodes beyond the faces moved onto
+  the last nodes; away from the faces this is the position of the particle (1e-13), and with the trilinear stencil
+  between node 7 and the end of the box it is node 7.
+- `testStencilOpenAxisWeights` (Reference platform): along an axis with open faces of 3 and 8 nodes and along periodic
+  axes of 2, 3 and 8 nodes, at 1000 positions per cell: the nodes lie on the axis, the weights sum to one, a node in
+  several slots has the sum of their kernel weights in its first slot and 0 in the others, and away from the faces the
+  weights are those of the kernel; the owner of a particle between node $`n - 1`$ and the end of the box is node
+  $`n - 1`$ along an open axis.
 - `testStencilAtNode`: the trilinear kernel and Keys at a node give the first step of the nearest node, bit for bit,
   for the particle and the fluid.
 - `testStencilMomentumConservation`: total momentum conserved to 1e-11 over 50 steps with the random force,
@@ -217,10 +227,12 @@ platform: coupled particles) also runs the three stencils with both drags, witho
   the stencils, including the momentum given to the wall; with both drags.
 - `testCenteredStencilSolve`: the forces of the centred drag (conjugate gradients) against a solution by Gaussian
   elimination of the same system, built from the fluid state, positions, velocities and the other forces: three
-  particles with overlapping stencils near a wall, one isolated, masses 100 to 1000 Da, to 1e-10.
+  particles with overlapping stencils near a wall, one isolated, masses 100 to 1000 Da, to 1e-10; then the same with
+  open faces along $`z`$, one particle 0.3 lattice spacings from the first node and one between node 7 and the end of
+  the box.
 - `testStencilTranslation`: particles and fluid moved by one node along each axis move the run by one node, to 1e-12.
-- `testStencilErrors`: a different stencil in `updateParametersInContext()` or in a checkpoint, an unknown stencil
-  and open faces stop with an error.
+- `testStencilErrors`: a different stencil in `updateParametersInContext()` or in a checkpoint and an unknown stencil
+  stop with an error; open faces are accepted.
 - `testStencilWarnings`: with the explicit drag at $`\tau = 1.75`$ the warning on the self-mobility is printed with the
   trilinear and Keys stencils, not with the three-point one; with the fluctuating fluid the warning on the heating of
   the explicit drag gives 1.968%, 0.830% and 3.586% for a particle of 100 Da with $`\gamma\Delta t = 0.1`$ (the

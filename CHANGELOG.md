@@ -8,8 +8,12 @@ versions the API may still change.
 ### Added (in development)
 - Interpolation stencils of the coupling, `setInterpolationStencil()`/`getInterpolationStencil()` with
   `NearestNode` (the default, unchanged bit for bit), `Trilinear`, `ThreePoint` and `Keys` (`docs/theory.md`,
-  section 9): for now with both drag schemes and periodic faces on every platform, with one domain and with the
-  domain decomposition; open faces stop with an error. Solid nodes of a stencil count as a wall at rest. On the GPU platforms the reactions of the stencils are
+  section 9): with both drag schemes, periodic and open faces on every platform, with one domain and with the
+  domain decomposition. Solid nodes of a stencil count as a wall at rest. Along an axis with open faces a stencil
+  stops at the last nodes, which take the weights of the nodes beyond the faces (momentum conserved, linear fields
+  interpolated exactly only away from the faces), and a node that appears in several slots of a stencil (open faces,
+  or a periodic axis shorter than the stencil) gets the sum of their weights, so that the self weight in the diagonal
+  of the centred drag is that of the distinct nodes. On the GPU platforms the reactions of the stencils are
   summed per node in particle order through sorted keys, one per node of every stencil, without atomic operations,
   one thread per node from a list of the segments of the sorted keys, and agree with the Reference platform to
   rounding.

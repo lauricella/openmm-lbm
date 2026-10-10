@@ -28,9 +28,10 @@ Know these before using the plugin for a study:
   it use the centred drag, whose particles then have the set temperature and the diffusion coefficient with the
   hydrodynamic contribution (the explicit drag makes them too hot; [choosing the
   drag](lattice.md#choosing-the-drag)).
-- **Nearest-node coupling.** Each particle is coupled to the nearest lattice node, so the forces jump when
-  a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
-  lattice spacing and on $`\tau`$.
+- **Nearest-node coupling.** By default each particle is coupled to the nearest lattice node, so the forces jump
+  when a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
+  lattice spacing and on $`\tau`$. The interpolation stencils, in development for version 0.5.0
+  ([interpolation.md](interpolation.md)), couple a particle to 8, 27 or 64 nodes around it and remove the jump.
 - **Walls and open faces.** Solid nodes are no-slip walls at rest, with bounce-back (the default) or
   regularized walls (`setWallScheme()`); a moving plate, an inlet or an outlet is an open face with an
   imposed velocity or density (`setFaceBoundary()`). The particles stay in OpenMM's periodic box also with
@@ -64,6 +65,9 @@ Know these before using the plugin for a study:
 8. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
 9. [Running on several GPUs](parallel.md): the lattice divided into domains, one MPI rank per GPU: when it pays,
    building with MPI, a complete script, job scripts for one and several nodes.
+10. [Interpolation stencils, step by step](interpolation.md) (in development for version 0.5.0): how a particle
+    between the nodes sees the fluid and pushes on it, the weights of the trilinear, three-point and Keys stencils
+    written out in one and three dimensions, walls and open faces, which stencil to choose.
 
 ## What works in this version
 
@@ -76,6 +80,7 @@ Know these before using the plugin for a study:
 | Regularized walls (`setWallScheme(LBMForce.Regularized)`) | yes | yes |
 | Open faces with an imposed velocity or density ([`setFaceBoundary()`](api_reference.md#open-faces)) | yes | yes |
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
+| Interpolation stencils of the coupling ([`setInterpolationStencil()`](interpolation.md), in development for version 0.5.0) | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |
 | Checkpoints of the fluid (`createCheckpoint()`, `saveCheckpointFile()`, `openmmlbm.saveCheckpoint()`, `LBMCheckpointReporter`) | yes | yes |

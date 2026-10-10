@@ -648,7 +648,7 @@ void ReferenceCalcLBMForceKernel::coupleParticlesStencil(ContextImpl& context, b
     for (int i = 0; i < numParticles; i++) {
         int particle = lattice.particles[i];
         stencilNodes(positions[particle], nodes[i], weights[i]);
-        if (!isOwned(nearestNode(positions[particle])))
+        if (!isOwned(stencilOwnerNode(positions[particle])))
             continue;
         Vec3 u;
         for (int n = 0; n < (int) nodes[i].size(); n++) {
@@ -744,7 +744,7 @@ void ReferenceCalcLBMForceKernel::coupleParticlesCenteredStencil(ContextImpl& co
         int particle = lattice.particles[i];
         double m = particleMass[i];
         stencilNodes(positions[particle], nodes[i], weights[i]);
-        mine[i] = isOwned(nearestNode(positions[particle]));
+        mine[i] = isOwned(stencilOwnerNode(positions[particle]));
         if (!mine[i])
             continue;
         Vec3 known = velocities[particle]*(1.0/velocityScale) + forces[particle]*(h/(m*forceScale));
@@ -967,15 +967,29 @@ int ReferenceCalcLBMForceKernel::nearestNode(const Vec3& position) const {
     return index[0] + lattice.nx*(index[1] + lattice.ny*index[2]);
 }
 
+int ReferenceCalcLBMForceKernel::stencilOwnerNode(const Vec3& position) const {
+    // As nearestNode(), but along the axes with open faces the particles between node n - 1 and the end of the box
+    // belong to node n - 1, which their stencils do not cross (LBMStencils::ownerIndex()).
+    int size[3] = {lattice.nx, lattice.ny, lattice.nz};
+    int index[3];
+    for (int k = 0; k < 3; k++) {
+        double s = position[k]/lattice.dx;
+        s -= floor(s/size[k])*size[k];
+        index[k] = LBMStencils::ownerIndex(s, size[k], lattice.isOpenAxis(k));
+    }
+    return index[0] + lattice.nx*(index[1] + lattice.ny*index[2]);
+}
+
 void ReferenceCalcLBMForceKernel::stencilNodes(const Vec3& position, vector<int>& nodes, vector<double>& weights) const {
-    // The position is wrapped into the box as for nearestNode(), and the weights are products of those of the axes.
+    // The position is wrapped into the box as for nearestNode(), and the weights are products of those of the axes;
+    // along the axes with open faces the stencil stops at the last nodes (LBMStencils::axisWeights()).
     int size[3] = {lattice.nx, lattice.ny, lattice.nz};
     int index[3][LBMStencils::maxWidth];
     double weight[3][LBMStencils::maxWidth];
     for (int k = 0; k < 3; k++) {
         double s = position[k]/lattice.dx;
         s -= floor(s/size[k])*size[k];
-        LBMStencils::axisWeights(lattice.interpolationStencil, s, size[k], index[k], weight[k]);
+        LBMStencils::axisWeights(lattice.interpolationStencil, s, size[k], lattice.isOpenAxis(k), index[k], weight[k]);
     }
     int w = LBMStencils::width(lattice.interpolationStencil);
     nodes.clear();

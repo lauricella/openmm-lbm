@@ -862,6 +862,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             defines["STENCIL_UNSCRAMBLE"] = cc.intToString(scrambleInverse(scramble, numNodes));
             if (centered)
                 defines["CENTERED_DRAG"] = "1";
+            defines["OPEN_X"] = (lattice.isOpenAxis(0) ? "1" : "0");
+            defines["OPEN_Y"] = (lattice.isOpenAxis(1) ? "1" : "0");
+            defines["OPEN_Z"] = (lattice.isOpenAxis(2) ? "1" : "0");
         }
         defines["DX"] = cc.doubleToString(lattice.dx, true);
         defines["VELOCITY_SCALE"] = cc.doubleToString(lattice.getVelocityScale(), true);

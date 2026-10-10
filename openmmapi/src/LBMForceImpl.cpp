@@ -198,14 +198,6 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
         lattice.particles.push_back(particle);
     }
 
-    // The interpolation stencils are in development for version 0.5.0 (docs/theory.md, section 9): for now with
-    // periodic faces.
-
-    if (lattice.interpolationStencil != LBMForce::NearestNode) {
-        if (lattice.hasOpenFaces())
-            throw OpenMMException("LBMForce: open faces with an interpolation stencil other than NearestNode are not "
-                    "available yet (in development for version 0.5.0)");
-    }
     return lattice;
 }
 

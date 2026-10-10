@@ -26,7 +26,8 @@ together: copies of the particles that differ between the ranks, an AndersenTher
 OpenCL.  Last, the checkpoint files and the VTK files written by all the ranks with MPI-IO, in the folder
 mpi_decomposition_files of the working directory: a run continued from a checkpoint with the same decomposition, with
 another one and with one domain, and VTK files against those of one domain.  The particle cases run also with the
-interpolation stencils (explicit and centred drag, Trilinear, ThreePoint and Keys), and the fluctuating case with Keys.
+interpolation stencils (explicit and centred drag, without and with open faces, Trilinear, ThreePoint and Keys), and
+the fluctuating case with Keys.
 A line with FAILED marks a failure."""
 import hashlib
 import os
@@ -199,9 +200,9 @@ def particle_context(case, decomposition, platform='Reference', thermostat=False
     solid = sorted(set([i + nx*ny*k for k in range(nz) for i in range(nx)] +
                        [i + nx*(j + ny*k) for k in (2, 3) for j in (2, 3) for i in (3, 4)]))
     force.setSolidNodes(solid)
-    if case in ('centered', 'faces'):
+    if case in ('centered', 'faces', 'openfaces'):
         force.setWallScheme(LBMForce.Regularized)
-    if case == 'faces':
+    if case in ('faces', 'openfaces'):
         force.setFaceBoundary(LBMForce.XMin, LBMForce.Velocity)
         force.setFaceBoundary(LBMForce.XMax, LBMForce.Density)
         force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.5, 0.1, 0.0))
@@ -321,7 +322,9 @@ if PLATFORM in ('CUDA', 'HIP'):
 expect_error('checkpoint', 'checkpoints are written to a file', case='fluid', density_halo=False, velocity_halo=False,
              checkpoint=True, **ON)
 
-STENCIL_CASES = [drag + '_' + stencil for drag in ('explicit', 'centered') for stencil in ('Trilinear', 'ThreePoint', 'Keys')]
+# 'openfaces' is the case 'faces' with the explicit drag.
+STENCIL_CASES = [drag + '_' + stencil for drag in ('explicit', 'centered', 'openfaces', 'faces')
+                 for stencil in ('Trilinear', 'ThreePoint', 'Keys')]
 for case in ['explicit', 'centered', 'faces'] + STENCIL_CASES:
     single, wall1, solid, particles1, _ = run_particles(case, (1, 1, 1), **ON)
     split, wall2, _, particles2, domain = run_particles(case, (px, py, pz), **ON)
