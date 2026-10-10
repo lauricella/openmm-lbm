@@ -1578,8 +1578,10 @@ interpolation and spreading would no longer be transposes; a stencil truncated a
 defined in the cell between node $`n - 1`$ and the end of the box, where the weights of the nodes inside vanish. With
 the fluctuating fluid and the centred drag, particles near `Velocity` faces have the set temperature with every
 stencil, also in the cell between node $`n - 1`$ and the end of the box; near a `Density` face they are hotter, up to
-8% within four nodes, with the nearest node as well, where the fluid alone is hotter too, mostly in its velocity
-across the face (`docs/validation.md`, Interpolation stencils, Temperature near open faces).
+8% within four nodes, with the nearest node as well, where the fluid alone is hotter too: in its velocity across the
+face, and above all in the mean velocity of its planes, up to 4.8 times the temperature along the face on its plane,
+as an exact linear model of the boundary step confirms; near a `DensityVelocity` face at rest the particles keep the
+set temperature (`docs/validation.md`, Interpolation stencils, Temperature near open faces).
 
 **Domain decomposition** (section 8). The rank that owns the nearest node of a particle computes
 its coupling, as with the nearest node. From the nearest node the stencil reaches one node in each direction with the

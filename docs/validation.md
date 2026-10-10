@@ -460,9 +460,51 @@ fluctuate, and the next two planes are cooler along the normal. At a `Density` f
 the plane of the face (+55%) and on the next four planes (+6%, +3%, +1.3%, +0.8%), the tangential velocities by at
 most 1.4%, and the variance of the density of the face plane is 39% of that of the interior (with the other
 boundaries it is the interior one, except +43% on the plane of a `Velocity` face). The beads near the `Density` face
-are hotter (+5% to 8%, from their tangential velocities) than this excess of the tangential velocities of the fluid:
-the variance of the fluid at a node does not account for all of it (not explained yet). With a fluctuating fluid
-keep coupled particles at least five nodes away from `Density` faces.
+are hotter (+5% to 8%, from their tangential velocities) than this excess of the tangential velocities of the fluid.
+
+**The mean velocity of the planes.** The temperature above removes the mean velocity of each plane, and with open
+faces the momentum of the fluid is not conserved, so that mean is a free motion of the whole plane. Its own
+temperature, the **collective temperature** $`\rho\Delta x^3 N\langle\bar u_a^2\rangle/k_B`$ ($`T`$ at equilibrium),
+same box and fluid, $`4\cdot10^5`$ steps, along / across the faces, in K, with `Velocity` at $`z_{\min}`$ and, at
+$`z_{\max}`$, `Velocity` (vv), `Density` (vd) or `DensityVelocity` at rest (vdv); plane 23 is the face at $`z_{\max}`$:
+
+| plane | periodic | vv | vd | vdv |
+|---|---|---|---|---|
+| 0 | 290 / 273 | 308 / 0 | 309 / 0 | 308 / 0 |
+| 1 | 285 / 276 | 314 / 240 | 318 / 245 | 314 / 233 |
+| 12 | 286 / 280 | 300 / 297 | 443 ± 15 / 433 ± 17 | 300 / 266 |
+| 21 | 289 / 275 | 309 / 279 | 912 ± 47 / 535 ± 25 | 309 / 240 |
+| 22 | 287 / 277 | 312 / 240 | 1092 ± 53 / 525 ± 29 | 312 / 219 |
+| 23 | 288 / 275 | 306 / 0 | 1440 ± 50 / 654 ± 27 | 306 / 159 |
+
+(errors 2 to 6 K where not given). With two `Density` faces the mean flow wanders (above), and its collective
+temperature grows without bound. In the periodic box the values are the canonical ones with the conserved
+quantities of the lattice: $`T(1 - 1/n_z)`$ = 287.5 K along the planes (total momentum) and $`T(1 - 2/n_z)`$ = 275 K
+across them, since the bulk also conserves the staggered momentum $`\sum_z (-1)^{z+t} j_z`$ (theory, section 1). Next
+to a `Density` face the mean velocity of the planes is far from equilibrium, up to 4.8 $`T`$ along the face on its
+plane, while the temperature without it stays within 1.4%.
+
+An exact linear model gives the same numbers: the step of the Reference platform linearized about rest (collision,
+both random parts, streaming, bounce-back and the rebuilding of every kind of boundary node), for each wave vector
+along $`x`$ and $`y`$ a column of $`n_z`$ nodes, with the stationary covariance from the discrete Lyapunov equation;
+it agrees with one step of the plugin to the nonlinear remainder in all the cases. For the mean of the planes (wave
+vector zero) it gives 1476, 1119 and 452 K along the `Density` face on planes 23, 22 and 12 (measured 1440 ± 50,
+1092 ± 53 and 443 ± 15 K) and 662, 535 and 444 K across it (654 ± 27, 525 ± 29, 433 ± 17 K); 0.534 $`T`$ across the
+`DensityVelocity` face (159 ± 3 K); the canonical values of the periodic box and of bounce-back walls exactly. Summed
+over the 256 wave vectors of a plane of $`16 \times 16`$ nodes it gives the temperatures of a node, with the mean of
+the plane: 301.2 / 465.4 K on the plane of the `Density` face, 306.9 / 319.4 K on the next one, 295.4 / 283.8 K next
+to the `Velocity` face (measured 301.1 / 465.9, 307.2 / 318.9 and 295.1 / 284.0 K), and a variance of the density
+of the face plane of 39% of the interior one (measured 39%). In the
+model the collective temperature along the `Density` face on its plane is 4.4 $`T`$ without the random part of the
+rebuilt populations (4.9 $`T`$ with it) and does not change with the weight of the time filter (0.25, 0.5 or 1, which
+changes only the velocity across the face): the excess does not come from the random part or the filter, but from
+the deterministic rebuilding of the `Density` face. The beads take up only part of it through the mean velocity of their layer: at 15.25 the layer has 323.3 K,
+319.0 K without the mean of the layer and 388 K in the mean of the layer (nearest node, $`4\cdot10^5`$ steps).
+
+With a `DensityVelocity` face at rest in place of the `Density` face the beads keep the set temperature at every
+height within 0.4% (nearest node, $`4\cdot10^5`$ steps: 299.9 ± 0.3 K at 15.25, 299.4 ± 0.4 K at 14.5), while the
+plane of that face is cooler (282 K along it, 187 K across it). With a fluctuating fluid keep coupled particles at
+least five nodes away from `Density` faces.
 
 ## Fluctuating fluid (`tests/TestLBMFluctuations.h`, all platforms)
 
@@ -1342,7 +1384,11 @@ walls by 1e-14 and 4e-8 (CUDA and OpenCL alike). With regularized walls (the sam
 every 3 steps, 300 steps) the populations differ by at most 4e-19 of their largest value in `mixed` and `double`
 precision and 7e-8 in `single` precision, the forces on the walls by 3e-13 and 7e-8 relative; with regularized walls
 and open faces along x (a `Velocity` inlet and a `Density` outlet, no removal) by 1e-17 and 7e-8, and 1e-14 and 3e-7
-relative (CUDA and OpenCL alike, OpenMM 8.6.1).
+relative (CUDA and OpenCL alike, OpenMM 8.6.1). With `DensityVelocity` faces (version 0.5.0; case `dvfaces`: the same
+walls, `DensityVelocity` at `XMin` and `ZMax`, `Velocity` at `XMax`, `Density` at `ZMin`, so that the edges take every
+rule; and, in a separate script, 6x7x5 nodes open along the three axes with every kind of face, corners included) the
+populations differ by 1e-18 to 2e-18 in `mixed` and `double` precision and 1e-9 in `single` precision (CUDA and
+OpenCL, NVIDIA A100, OpenMM 8.6.1).
 
 The two platforms are not identical bit for bit: the GPU compilers contract multiplications and additions
 into fused multiply-adds. Each GPU platform is deterministic: the removal of the momentum and the Mach

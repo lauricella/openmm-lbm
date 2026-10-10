@@ -394,8 +394,9 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
   the set temperature (+55% on the plane of the face, +6% on the next plane, about +1% four planes in); on the plane
   of a `Velocity` face the velocity across the face is the imposed one. Coupled particles near a `Velocity` face keep
   the set temperature; near a `Density` face they are up to 8% hotter within four nodes ([validation](../validation.md),
-  Interpolation stencils, Temperature near open faces). Keep coupled particles at least five nodes away from
-  `Density` faces.
+  Interpolation stencils, Temperature near open faces): the mean velocity of the planes next to a `Density` face is far
+  above equilibrium. Keep coupled particles at least five nodes away from `Density` faces. Near a `DensityVelocity`
+  face at rest the particles keep the set temperature, and the plane of the face is cooler.
 - **Mass** is not conserved with open faces (fluid enters and leaves), and `getWallForce()` counts only the
   solid walls, not the open faces.
 - **Keep the flow slow and the density differences small**: a few percent at most, so that the fluid stays
