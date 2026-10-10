@@ -1180,7 +1180,11 @@ particles; when instead the product of the conjugate gradients was summed over t
 the host, the centred drag on four GPUs took 9.63 ms per step with the trilinear stencil on $`120^3`$ nodes (11.6 ms
 under the profiler, of which the GPUs worked 2.7 and the 10 sums took 3.5), 10.41 with the three-point one and 18.09
 with Keys. The particles are replicated, so every rank sorts all the keys and solves for all the particles: with so
-many crowded beads four GPUs pay off only when the fluid takes most of the step.
+many crowded beads four GPUs pay off only when the fluid takes most of the step. Tried and set aside: work groups of
+256 threads instead of 64 for the sums over the segments (no change), reading four keys at a time in the spreading
+(6% slower), and OpenMM's sort with buckets estimated from 64 samples, which skips its range pass of 1.9 ms with `Keys`
+but would leave 701 buckets above 256 keys (simulated with the keys of these beads; none with the buckets of equal
+width).
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
