@@ -147,6 +147,30 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    `prepareCenteredDrag` gets the buffers and their number on first use, since OpenMM creates them after the forces are
    initialized. The post-computation does nothing if `LBMForce`'s force group is not requested, or if OpenMM has marked
    the evaluation as invalid (neighbor list overflow): the repeated evaluation then does the step.
+
+   **With an interpolation stencil** (`setInterpolationStencil()`, `docs/theory.md` section 9, in development for
+   version 0.5.0) the coupling uses other kernels of `lbmCoupling.cc`, all under `#ifdef STENCIL_WIDTH` (2, 3 or 4 nodes
+   per axis, `STENCIL_SIZE` per stencil), so that the programs of the nearest node do not change. Each slot $`e`$ of a
+   stencil, $`e = i\cdot\mathrm{STENCIL\_SIZE} + \mathrm{slot}`$ for particle $`i`$, has its weight and the sort key
+   $`\pi(\mathrm{node})\cdot\mathrm{KEY\_STRIDE} + e`$, where the node is its index in the lattice and $`\pi`$ the
+   permutation of `stencilKey()` (`STENCIL_SCRAMBLE`), so that OpenMM's sort with buckets of equal width gets keys spread
+   over their range; the keys are the same on every rank. Along the axes with open faces (`OPEN_X`, `OPEN_Y`, `OPEN_Z`)
+   the nodes of a stencil stop at the last nodes, and a node in several slots of an axis keeps the sum of their weights
+   in its first slot (`stencilAxis()`, as `internal/LBMStencils.h` on the Reference platform).
+
+   | Kernel | Threads | Reads | Writes |
+   |---|---|---|---|
+   | `coupleParticlesStencil` (explicit drag) | one per atom | positions, velocities, moments of the nodes of the stencil (with the decomposition, of the block and of the coupling halo), OpenMM's random numbers | force of the particle (zero on the ranks that do not own its nearest node), weights and keys of its slots, in a lattice step the reaction on its solid nodes as wall momentum |
+   | `prepareCenteredStencil` (centred drag) | one per atom | as `prepareCenteredDrag`, and the moments of the nodes of the stencil | right-hand side $`b_k/m_k`$ and diagonal of the linear system (zero on the ranks that do not own the particle), weight, $`\xi/\rho`$, node and key of every slot |
+   | `countKeySegments`, `scanKeySegments`, `listKeySegments` (after every sort) | work groups of 64 keys; one work group; work groups of 64 keys | sorted keys, weights of the slots | the first key of each segment (the keys of one node), the weight and particle of each sorted key, with the centred drag the segment of each slot; integer counts and a scan in a fixed order |
+   | `gatherSegmentDensity`, `stencilInterpolationWeights` (centred drag with the domain decomposition) | one per segment; one per slot | sorted keys, densities of the block; weights, segments of the slots, densities of the segments | the density of the node of each segment (0 outside the block), which the host sums over the ranks (`exchangeSegmentDensity()`); $`\xi/\rho`$ of every slot of every stencil |
+   | `startStencilGradients`, `spreadStencilVector`, `multiplyStencilMatrix`, `dotStencilPartials`, `dotStencilFinish`, `advanceStencilGradients`, `updateStencilDirection` (centred drag, the conjugate gradients of `solveStencilDrag()`) | one per particle; one per segment; one per particle; `DOT_GROUPS` work groups, then one | the vectors of the particles, the segments, $`\xi/\rho`$ | the forces of the particles, in `particleForce`; the dot products in `gradientScalars`, which the host reads at every iteration to decide when to stop |
+   | `sumStencilReactions` (in a lattice step) | one per segment | segments, weights and particles in key order, forces | the reaction of each node of the block, summed in particle order |
+   | `addStencilWallMomentum` (centred drag with solid nodes, in a lattice step) | one per particle | nodes and weights of its slots, forces | the reaction on its solid nodes as wall momentum |
+   | `unpackCouplingHalo` (with the domain decomposition, before every coupling) | one per position of the coupling halo | $`\rho - 1`$ and $`\mathbf j`$ received from the owners (`exchangeCouplingHalo()`, through the host) | the halo of the moments, one or two layers |
+
+   Without random numbers the decomposition gives the forces and the fluid of one domain bit for bit: every sum runs in
+   the same order on every rank (`python/tests/mpi_decomposition.py`).
 4. **Checkpoints.** `LBMForce::createCheckpoint()` and `loadCheckpoint()` go through `LBMForceImpl`, which writes and
    checks a header (tag, version, platform, grid size, number of coupled particles, from version 2 the drag scheme, from
    version 3 the switch of the fluid fluctuations, from version 4 the wall scheme and from version 5 the types of the
