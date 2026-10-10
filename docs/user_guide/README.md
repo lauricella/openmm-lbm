@@ -34,7 +34,7 @@ Know these before using the plugin for a study:
   ([interpolation.md](interpolation.md)), couple a particle to 8, 27 or 64 nodes around it and remove the jump.
 - **Walls and open faces.** Solid nodes are no-slip walls at rest, with bounce-back (the default) or
   regularized walls (`setWallScheme()`); a moving plate, an inlet or an outlet is an open face with an
-  imposed velocity or density (`setFaceBoundary()`). The particles stay in OpenMM's periodic box also with
+  imposed velocity, density or both (`setFaceBoundary()`; both in development for version 0.5.0). The particles stay in OpenMM's periodic box also with
   open faces: keep coupled particles away from them.
 
 ## Contents
@@ -78,7 +78,7 @@ Know these before using the plugin for a study:
 | Fluid update: collision, streaming, body force, removal of the fluid momentum, Mach number check | yes | yes |
 | Solid nodes (`setSolidNodes()`) and the force of the fluid on the walls (`getWallForce()`) | yes | yes |
 | Regularized walls (`setWallScheme(LBMForce.Regularized)`) | yes | yes |
-| Open faces with an imposed velocity or density ([`setFaceBoundary()`](api_reference.md#open-faces)) | yes | yes |
+| Open faces with an imposed velocity, density or both ([`setFaceBoundary()`](api_reference.md#open-faces); both in development for version 0.5.0) | yes | yes |
 | Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
 | Interpolation stencils of the coupling ([`setInterpolationStencil()`](interpolation.md), in development for version 0.5.0) | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |

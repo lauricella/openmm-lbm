@@ -93,18 +93,30 @@ def run(case, decomposition, steps=60, density_halo=True, velocity_halo=True, pl
         force.setFluidFluctuations(True)
         force.setRandomNumberSeed(1234)
     solid = []
-    if case in ('bounceback', 'regularized', 'faces', 'fluctuating'):
+    if case in ('bounceback', 'regularized', 'faces', 'dvfaces', 'fluctuating'):
         nx, ny, nz = N
         solid = sorted(set([i + nx*ny*k for k in range(nz) for i in range(nx)] +
                            [i + nx*(j + ny*k) for k in (2, 3) for j in (2, 3) for i in (3, 4)]))
         force.setSolidNodes(solid)
-    if case in ('regularized', 'faces'):
+    if case in ('regularized', 'faces', 'dvfaces'):
         force.setWallScheme(LBMForce.Regularized)
     if case == 'faces':
         force.setFaceBoundary(LBMForce.XMin, LBMForce.Velocity)
         force.setFaceBoundary(LBMForce.XMax, LBMForce.Density)
         force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.5, 0.1, 0.0))
         force.setFaceDensity(LBMForce.XMax, 605.0)
+    if case == 'dvfaces':
+        # DensityVelocity faces with the other kinds, along x and z: the edges take the first face that sets the
+        # velocity.
+        force.setFaceBoundary(LBMForce.XMin, LBMForce.DensityVelocity)
+        force.setFaceBoundary(LBMForce.XMax, LBMForce.Velocity)
+        force.setFaceBoundary(LBMForce.ZMin, LBMForce.Density)
+        force.setFaceBoundary(LBMForce.ZMax, LBMForce.DensityVelocity)
+        force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.5, 0.1, 0.0))
+        force.setFaceDensity(LBMForce.XMin, 605.0)
+        force.setFaceVelocity(LBMForce.XMax, mm.Vec3(0.4, 0.0, 0.1))
+        force.setFaceDensity(LBMForce.ZMax, 600.0)
+        force.setFaceVelocity(LBMForce.ZMax, mm.Vec3(0.2, -0.1, 0.0))
     force.setDomainDecomposition(*decomposition)
     force.setDensityHaloExchange(density_halo)
     force.setVelocityHaloExchange(velocity_halo)
@@ -135,9 +147,12 @@ def compare_halo(single, split, case, density_halo=True, velocity_halo=True):
     density, velocity = single['gathered_fields']
     density = np.pad(density.reshape(nz, ny, nx), 1, mode='wrap')
     velocity = np.pad(velocity.reshape(nz, ny, nx, 3), ((1, 1), (1, 1), (1, 1), (0, 0)), mode='wrap')
-    if case == 'faces':
+    if case in ('faces', 'dvfaces'):
         density[:, :, [0, -1]] = np.nan
         velocity[:, :, [0, -1]] = np.nan
+    if case == 'dvfaces':
+        density[[0, -1], :, :] = np.nan
+        velocity[[0, -1], :, :] = np.nan
     expected_density = density[block(split['domain'], 1)].copy()
     expected_velocity = velocity[block(split['domain'], 1)].copy()
     halo = np.ones(expected_density.shape, dtype=bool)
@@ -260,7 +275,7 @@ def verdict(diff):
 
 ON = dict(platform=PLATFORM, properties=PROPERTIES)
 single_precision = (PROPERTIES.get('Precision') == 'single')
-for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal', 'velocityhalo', 'densityhalo'):
+for case in ('periodic', 'bounceback', 'regularized', 'faces', 'dvfaces', 'removal', 'velocityhalo', 'densityhalo'):
     # velocityhalo and densityhalo: the periodic fluid with the exchange of the halo of one field only.
     halos = dict(density_halo=(case != 'velocityhalo'), velocity_halo=(case != 'densityhalo'))
     single = run('periodic' if case.endswith('halo') else case, (1, 1, 1), **ON)

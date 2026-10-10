@@ -412,8 +412,9 @@ KERNEL void computeWallExchange(GLOBAL const mixed* RESTRICT f, GLOBAL const int
  * moments of x except the imposed one:
  *   feq_q(rho_b, u_b) + (1 - omega) fneq_q(Pi_neq of x) + S_q(u_b, rho_b g)/2,
  * plus, with a fluctuating fluid, a random part of its own, from the four float4 of OpenMM's random numbers of the
- * node after those of all the nodes.  The known populations of x are not changed.  kindAndFace = kind + 4*(face + 1);
- * faceParameters holds the velocity and rho - 1 of each face (4 per face).
+ * node after those of all the nodes.  The known populations of x are not changed.  kindAndFace = kind + 4*(face + 1),
+ * or kind + 8*(face + 1) with DENSITY_VELOCITY_FACES; faceParameters holds the velocity and rho - 1 of each face (4
+ * per face).
  *  - Walls (kind 0, next to solid nodes) and Velocity faces (kind 1): u_b = 0 or the velocity of the face; rho_b
  *    from the mass balance of the rebuilt links: the mass that x sent into the solid nodes in this streaming (in the
  *    solid node x - c_q, direction opposite to q) and, across a face, the population that arrived at x moving out of
@@ -424,6 +425,8 @@ KERNEL void computeWallExchange(GLOBAL const mixed* RESTRICT f, GLOBAL const int
  *    have arrived (the unknown ones replaced by the bounce-back of their opposites), and that velocity of x at the
  *    start of the step.
  *  - Nodes shared by several Density faces (kind 3): rho_b of the first face and u_b = 0.
+ *  - DensityVelocity faces (kind 4, only with DENSITY_VELOCITY_FACES): rho_b and u_b of the face, without the mass
+ *    balance and the filter.
  * On walls the node writes the momentum given to the solid nodes by the deviations f - w (the populations that it
  * sent into them minus those that come back) to boundaryExchange[k*NUM_BOUNDARY_NODES + b]; the host adds the part of
  * the weights w, computed once.  A thread reads its own populations and moments and the solid slots that its node
@@ -442,7 +445,11 @@ KERNEL void applyBoundaries(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT
     DECLARE_D3Q19_VELOCITIES
     for (int b = GLOBAL_ID; b < NUM_BOUNDARY_NODES; b += GLOBAL_SIZE) {
         int node = boundaryNodes[b], unknown = boundaryUnknown[b], solid = boundarySolid[b];
+#ifdef DENSITY_VELOCITY_FACES
+        int kind = kindAndFace[b]%8, face = kindAndFace[b]/8 - 1;
+#else
         int kind = kindAndFace[b]%4, face = kindAndFace[b]/4 - 1;
+#endif
         int x = node%NX, y = (node/NX)%NY, z = node/(NX*NY), s = STORAGE_INDEX(node);
         mixed dr = densityDeviation[s];
         mixed rho = 1 + dr;
@@ -457,6 +464,14 @@ KERNEL void applyBoundaries(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT
             dr = faceParameters[4*face+3];
             rho = 1 + dr;
         }
+#ifdef DENSITY_VELOCITY_FACES
+        if (kind == 4) {
+            for (int a = 0; a < 3; a++)
+                u[a] = faceParameters[4*face+a];
+            dr = faceParameters[4*face+3];
+            rho = 1 + dr;
+        }
+#endif
         if (kind == 2) {
             int axis = face/2;
             mixed inward = (face%2 == 0 ? 1 : -1), sum = 0;

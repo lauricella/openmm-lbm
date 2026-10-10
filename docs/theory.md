@@ -231,10 +231,11 @@ $`-2\,\mathbf c_q w_q`$ per link, which depends only on the geometry, is compute
 
 By default the box is periodic. `setFaceBoundary(face, type)` makes a face of
 the box open: `Velocity` (the fluid beyond the face has the velocity set with `setFaceVelocity()`: an inlet,
-an outlet or a moving wall) or `Density` (the fluid beyond the face has the density, that is the pressure
-$`p = c_s^2\rho`$, set with `setFaceDensity()`). The two faces perpendicular to an axis must be both periodic or
-both open, in any combination of `Velocity` and `Density`, and an open axis needs at least 3 nodes. The six
-faces have independent velocities and densities.
+an outlet or a moving wall), `Density` (the fluid beyond the face has the density, that is the pressure
+$`p = c_s^2\rho`$, set with `setFaceDensity()`) or `DensityVelocity` (the fluid beyond the face has both). The two
+faces perpendicular to an axis must be both periodic or both open, in any combination of `Velocity`, `Density` and
+`DensityVelocity`, and an open axis needs at least 3 nodes. The six faces have independent velocities and
+densities.
 - The nodes on an open face ($`i = 0`$ for `XMin`, $`i = n_x - 1`$ for `XMax`, and so on) are boundary nodes: the
   populations that would come from beyond the face are unknown, and the populations that leave through the face are
   lost. As for the regularized walls (the thread-safe boundary condition of [24, 25]), each unknown population is
@@ -265,6 +266,20 @@ faces have independent velocities and densities.
   term of the rebuilt populations has the body force only. Up to version 0.3.0 the Reference platform included that
   reaction, unlike the other platforms; the two agree since then (`test_coupling_agrees_with_reference`, case
   `faces`).
+- On a `DensityVelocity` face (version 0.5.0) $`\rho_b`$ and $`\mathbf u_b`$ are both those of the face: the
+  rebuilt populations are those of a `Velocity` face with the density of the face instead of the mass balance, or
+  those of a `Density` face with the velocity of the face instead of the filtered one. The face then fixes the
+  populations that enter the box, not the density and the velocity of its nodes, which also receive the populations
+  from inside. When the two values agree with the flow inside, they hold one node beyond the face as on the other
+  faces: a Couette flow between two `DensityVelocity` faces at the density of the fluid at rest is linear to 1e-14,
+  and a fluid at rest between two `DensityVelocity` faces with the same density and velocity reaches the uniform
+  flow with those values. When they do not, the flow inside decides: with a `DensityVelocity` inlet at the density
+  $`\rho_b`$ and the velocity $`u_b`$ across the face and a `Density` outlet at another density, the steady flow
+  (without walls) is uniform with the density $`\rho`$ of the outlet and the velocity $`u`$ at which the populations
+  that enter, $`\sum_{c_{q,n} = 1} f_q^{\mathrm{eq}}(\rho, u) = \rho\,(1 + 3u + 3u^2)/6`$, are those of the face,
+  $`\rho_b\,(1 + 3u_b + 3u_b^2)/6`$ (0.013356 for $`\rho_b = 1.01`$, $`u_b = 0.01`$ and $`\rho = 1`$, as measured).
+  No balance ties what enters to what arrives, as the mass balance does on a `Velocity` face: the face is a
+  reservoir.
 - **Staggered mode.** For any lattice whose velocities have components -1, 0 and 1, the staggered momentum
   $`\sum_y (-1)^{y+t} j_y`$ is conserved exactly by the bulk (the collision keeps the momentum of each node, the
   streaming moves a population by one node in one step). In a periodic box it stays zero; open faces can excite it,
@@ -281,9 +296,10 @@ faces have independent velocities and densities.
   0.9996 for 1.0 in a duct of 16 nodes), and the gradient in the middle is that of a length of 14.6 nodes
   rather than of the 17 between the nodes beyond the faces. In the middle the flow is that of the
   incompressible duct for that gradient (within 0.9 %).
-- Nodes on several open faces (edges and corners): the first `Velocity` face in the order XMin, XMax, YMin,
-  YMax, ZMin, ZMax gives the velocity; if all are `Density` faces, the first gives the density and the
-  velocity is zero. A face node next to a solid node with regularized walls is a wall node: velocity zero,
+- Nodes on several open faces (edges and corners): the first face that sets the velocity (`Velocity` or
+  `DensityVelocity`) in the order XMin, XMax, YMin, YMax, ZMin, ZMax gives the velocity, and the density too if it
+  is a `DensityVelocity` face (otherwise the density comes from the mass balance); if all are `Density` faces, the
+  first gives the density and the velocity is zero. A face node next to a solid node with regularized walls is a wall node: velocity zero,
   and $`\rho_b`$ from the mass balance of all its rebuilt links, the solid links as on a wall and the links across
   the face as on a `Velocity` face at rest. With bounce-back walls the bounce-back returns the
   populations from the solid nodes, and the face rebuilds those from beyond the face. Links that cross an
@@ -303,8 +319,9 @@ faces have independent velocities and densities.
   velocity or the density imposed on the face node itself) was tried for the faces too, and left out with the one
   of the walls.
 - Validation (`docs/validation.md`): a Couette flow between a face at rest and a moving face is linear to
-  1e-14; a uniform flow from a Velocity inlet to a Density outlet is steady to rounding; a duct driven by a
-  difference of density of 1 % agrees in the middle with the incompressible solution within 0.9 %.
+  1e-14, with `Velocity` and with `DensityVelocity` faces; a uniform flow from a Velocity or DensityVelocity inlet
+  to a Density or DensityVelocity outlet is steady to rounding; a duct driven by a difference of density of 1 %
+  agrees in the middle with the incompressible solution within 0.9 %.
 
 **Time filter of the Density faces.** On a node of a `Density` face the velocity across the face, $`v_n`$, used for
 the rebuilt populations is

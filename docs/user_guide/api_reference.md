@@ -337,12 +337,19 @@ The theory is in
    - `LBMForce.Velocity`: the fluid beyond the face moves with the velocity of `setFaceVelocity(face, velocity)`
      (default zero). A velocity across the face is an inlet or an outlet with a given flow; a velocity
      along the face is a moving plate; zero is a wall at rest.
-- `LBMForce.Density`: the fluid beyond the face has the density of `setFaceDensity(face, density)`. The density is
+   - `LBMForce.Density`: the fluid beyond the face has the density of `setFaceDensity(face, density)`. The density is
      the pressure: $`p = c_s^2\rho`$ with $`c_s^2 = \Delta x^2/(3\Delta t^2)`$. The default, 0, means the density of
      the fluid at rest (`setFluidDensity()`). The velocity across the face is filtered in time, half the value that
      the arriving fluid gives and half that of the face node at the start of the step (the velocity of
      `getFluidFields()`): this damps a spurious oscillation from one node to the next and from one step to the next,
      and does not change steady flows ([theory, Time filter of the Density faces](../theory.md#open-faces)).
+   - `LBMForce.DensityVelocity` (version 0.5.0): the fluid beyond the face has both the density of
+     `setFaceDensity(face, density)` and the velocity of `setFaceVelocity(face, velocity)`: a reservoir. The face
+     sets the fluid that enters the box, not the fluid on its nodes. When the two values agree with the flow inside
+     (for example the same density and velocity on both faces of an axis, or a Couette flow), they hold one node
+     beyond the face as on the other faces; when they do not, the flow inside decides (an inlet at a density
+     higher than that of a `Density` outlet gives a faster uniform flow at the density of the outlet;
+     [theory](../theory.md#open-faces)).
 3. **Switch off the removal of the fluid momentum**: `setFluidMomentumRemovalFrequency(0)`. With open faces
    the fluid exchanges momentum with the outside, and the plugin refuses to create the Context otherwise.
 4. **Create the Context and run.** The velocities and densities of the faces can be changed during the run
@@ -370,12 +377,13 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
 
 - **Where the face is.** The nodes of the face, for `ZMin` the nodes $`k = 0`$ and for `ZMax` the nodes
   $`k = n_z - 1`$, are ordinary fluid nodes. The populations that come from beyond the face are those of fluid with
-  the velocity of a `Velocity` face, or the density of a `Density` face, placed one node outside the box: the
-  velocity or the density of the face holds there, at $`k = -1`$ and $`k = n_z`$. A Couette flow between two
+  the velocity of a `Velocity` face, the density of a `Density` face, or both for a `DensityVelocity` face, placed
+  one node outside the box: the velocity or the density of the face holds there, at $`k = -1`$ and $`k = n_z`$. A Couette flow between two
   `Velocity` faces is $`u(z) = U(z + 1)/(n_z + 1)`$. The grid needs at least 3 nodes along an open axis.
-- **Edges and corners.** A node on several open faces takes the velocity of its first `Velocity` face in
-  the order XMin, XMax, YMin, YMax, ZMin, ZMax; if all its faces are `Density` faces, it takes the density of
-  the first one and the velocity zero. A face node next to a solid node with `Regularized` walls is a wall.
+- **Edges and corners.** A node on several open faces takes the velocity of its first face that sets one
+  (`Velocity` or `DensityVelocity`) in the order XMin, XMax, YMin, YMax, ZMin, ZMax, and also its density if it is
+  a `DensityVelocity` face; if all its faces are `Density` faces, it takes the density of the first one and the
+  velocity zero. A face node next to a solid node with `Regularized` walls is a wall.
 - **Walls and faces together** are fine: for example solid walls around a duct and open faces at its ends.
   Bounce-back is never applied across an open face.
 - **The body acceleration** (`setBodyAcceleration()`) still acts on all the fluid.
@@ -400,18 +408,18 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
 
 ### `setFaceBoundary(face, type)`, `getFaceBoundary(face)`
 
-The type of a face: `LBMForce.Periodic` (default), `LBMForce.Velocity` or `LBMForce.Density`. Fixed when the
-Context is created.
+The type of a face: `LBMForce.Periodic` (default), `LBMForce.Velocity`, `LBMForce.Density` or
+`LBMForce.DensityVelocity`. Fixed when the Context is created.
 
 ### `setFaceVelocity(face, velocity)`, `getFaceVelocity(face)`
 
-The velocity of the fluid beyond a `Velocity` face, a `Vec3` in nm/ps; default zero. It can be changed in a
+The velocity of the fluid beyond a `Velocity` or `DensityVelocity` face, a `Vec3` in nm/ps; default zero. It can be changed in a
 Context with `updateParametersInContext()`. Ignored on the other faces.
 
 ### `setFaceDensity(face, density)`, `getFaceDensity(face)`
 
-The density of the fluid beyond a `Density` face, in Da/nm³; the default, 0, means the density of the fluid at
-rest. It can be changed in a Context with `updateParametersInContext()`. Ignored on the other faces.
+The density of the fluid beyond a `Density` or `DensityVelocity` face, in Da/nm³; the default, 0, means the
+density of the fluid at rest. It can be changed in a Context with `updateParametersInContext()`. Ignored on the other faces.
 
 ## Coupled particles
 

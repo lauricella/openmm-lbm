@@ -18,15 +18,16 @@ namespace LBMPlugin {
  * The boundary nodes of the fluid (docs/theory.md, section 1), found in the same way on every platform: with
  * regularized walls the fluid nodes next to the solid nodes, and the fluid nodes on the open faces of the box.  For each of them, the directions q whose source node x - c_q is solid, or lies beyond an
  * open face, are unknown after the streaming.  A node next to a solid node is a wall at rest; on the faces, the
- * first Velocity face of the node in the order XMin ... ZMax gives the velocity, and otherwise its Density faces
- * give the density.
+ * first face of the node that sets the velocity (Velocity or DensityVelocity) in the order XMin ... ZMax gives the
+ * velocity, and the density too if it is a DensityVelocity face, and otherwise its Density faces give the density.
  * @private
  */
 class LBMBoundaries {
 public:
     /** What a boundary node imposes on the populations that it rebuilds: a wall at rest, the velocity of a face, the
-        density of a face, or the density of a face with zero velocity (nodes shared by several Density faces). */
-    enum Kind {Wall = 0, Velocity = 1, Density = 2, DensityAtRest = 3};
+        density of a face, the density of a face with zero velocity (nodes shared by several Density faces), or both
+        the density and the velocity of a face. */
+    enum Kind {Wall = 0, Velocity = 1, Density = 2, DensityAtRest = 3, DensityVelocity = 4};
     /** The boundary nodes and, for each of them, the bits 1 << q of the directions q whose populations are unknown
         after the streaming (unknown) and of those among them whose source node x - c_q is solid (solid), its Kind
         and the face that gives its velocity or density (-1 on walls). */
@@ -77,13 +78,15 @@ public:
                     int a = f/2;
                     if (!lattice.isOpenAxis(a) || index[a] != (f%2 == 0 ? 0 : size[a]-1))
                         continue;
-                    if (lattice.faceBoundary[f] == LBMForce::Velocity && velocityFace < 0)
+                    LBMForce::BoundaryType type = lattice.faceBoundary[f];
+                    if ((type == LBMForce::Velocity || type == LBMForce::DensityVelocity) && velocityFace < 0)
                         velocityFace = f;
-                    if (lattice.faceBoundary[f] == LBMForce::Density && numDensityFaces++ == 0)
+                    if (type == LBMForce::Density && numDensityFaces++ == 0)
                         densityFace = f;
                 }
                 if (velocityFace >= 0) {
-                    nodeKind = Velocity;
+                    bool both = (lattice.faceBoundary[velocityFace] == LBMForce::DensityVelocity);
+                    nodeKind = (both ? DensityVelocity : Velocity);
                     nodeFace = velocityFace;
                 }
                 else {

@@ -149,7 +149,12 @@ public:
          * The fluid beyond the face has the density, that is the pressure, set with setFaceDensity(), and the
          * velocity of the fluid on the face, filtered in time across the face.
          */
-        Density = 2
+        Density = 2,
+        /**
+         * The fluid beyond the face has both the density set with setFaceDensity() and the velocity set with
+         * setFaceVelocity(), without the mass balance of a Velocity face or the time filter of a Density face.
+         */
+        DensityVelocity = 3
     };
     /**
      * Create an LBMForce.  The grid size must be set with setGridSize() before the force is used.
@@ -353,35 +358,38 @@ public:
      */
     BoundaryType getFaceBoundary(Face face) const;
     /**
-     * Set the boundary condition of the fluid on a face of the box: Periodic (the default), Velocity or Density.  The
-     * two faces perpendicular to an axis must be both periodic or both open (Velocity or Density, in any
-     * combination).  The nodes on an open face (i = 0 for XMin, i = nx - 1 for XMax, and so on) rebuild at every step
-     * the populations that come from beyond the face as those of fluid with the stress of the node and the velocity of
-     * a Velocity face (with the density from the mass balance) or the density of a Density face (with the velocity
-     * of the node, filtered in time across the face), which therefore holds one node beyond the face (docs/theory.md,
-     * section 1).  On the nodes shared by several open faces the first Velocity face in the order
-     * XMin, XMax, YMin, YMax, ZMin, ZMax gives the velocity; if they are all Density faces, the first one gives the
-     * density and the velocity is zero.  A node next to a solid node with the Regularized wall scheme is a wall.
+     * Set the boundary condition of the fluid on a face of the box: Periodic (the default), Velocity, Density or
+     * DensityVelocity.  The two faces perpendicular to an axis must be both periodic or both open (Velocity, Density
+     * or DensityVelocity, in any combination).  The nodes on an open face (i = 0 for XMin, i = nx - 1 for XMax, and so
+     * on) rebuild at every step the populations that come from beyond the face as those of fluid with the stress of the
+     * node and the velocity of a Velocity face (with the density from the mass balance), the density of a Density face
+     * (with the velocity of the node, filtered in time across the face), or both the density and the velocity of a
+     * DensityVelocity face, which therefore hold one node beyond the face (docs/theory.md, section 1).  On the nodes
+     * shared by several open faces the first face that sets the velocity (Velocity or DensityVelocity) in the order
+     * XMin, XMax, YMin, YMax, ZMin, ZMax gives the velocity, and also the density if it is a DensityVelocity face;
+     * if they are all Density faces, the first one gives the density and the velocity is zero.  A node next to a
+     * solid node with the Regularized wall scheme is a wall.
      * With open faces the removal of the fluid momentum must be switched off (setFluidMomentumRemovalFrequency(0)).
      * The particles still see a periodic box.  It is fixed when a Context is created.
      */
     void setFaceBoundary(Face face, BoundaryType type);
     /**
-     * Get the velocity of the fluid beyond a Velocity face, measured in nm/ps.
+     * Get the velocity of the fluid beyond a Velocity or DensityVelocity face, measured in nm/ps.
      */
     OpenMM::Vec3 getFaceVelocity(Face face) const;
     /**
-     * Set the velocity of the fluid beyond a Velocity face, measured in nm/ps.  It can have any direction: across the
+     * Set the velocity of the fluid beyond a Velocity or DensityVelocity face, measured in nm/ps.  It can have any direction: across the
      * face (inlet or outlet) or along it (a moving wall).  The default is zero.  updateParametersInContext() can
      * change it.
      */
     void setFaceVelocity(Face face, const OpenMM::Vec3& velocity);
     /**
-     * Get the density of the fluid beyond a Density face, measured in Da/nm^3; 0 means the density of the fluid at rest.
+     * Get the density of the fluid beyond a Density or DensityVelocity face, measured in Da/nm^3; 0 means the density
+     * of the fluid at rest.
      */
     double getFaceDensity(Face face) const;
     /**
-     * Set the density of the fluid beyond a Density face, measured in Da/nm^3.  The pressure of the fluid is
+     * Set the density of the fluid beyond a Density or DensityVelocity face, measured in Da/nm^3.  The pressure of the fluid is
      * p = c_s^2 rho, with c_s^2 = dx^2/(3 dt^2), so a difference of density between two faces drives a flow.  The
      * default, 0, means the density of the fluid at rest (setFluidDensity()).  updateParametersInContext() can
      * change it.

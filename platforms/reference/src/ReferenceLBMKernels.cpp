@@ -1201,6 +1201,7 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
     //    bounce-back of their opposites), and that velocity of x at the start of the step: a filter in time, without
     //    memory, that damps the staggered mode and does not change steady flows.
     //  - Nodes shared by several Density faces (and no Velocity face): rho_b of the first face and u_b = 0.
+    //  - DensityVelocity face: rho_b and u_b those of the face, without the mass balance and the filter.
     // On walls the solid nodes receive the momentum of the populations that x sent into them and give that of the
     // rebuilt populations.  Each node reads only its own populations and moments and the solid slots that it wrote
     // itself.
@@ -1226,9 +1227,10 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
                 (momentum[3*node+2] + 0.5*(rb*g[2]))/rb);
         if (kind == LBMBoundaries::Wall || kind == LBMBoundaries::DensityAtRest)
             ub = Vec3();
-        if (kind == LBMBoundaries::Velocity)
+        if (kind == LBMBoundaries::Velocity || kind == LBMBoundaries::DensityVelocity)
             ub = lattice.faceVelocity[face];
-        if (kind == LBMBoundaries::Density || kind == LBMBoundaries::DensityAtRest) {
+        if (kind == LBMBoundaries::Density || kind == LBMBoundaries::DensityAtRest ||
+                kind == LBMBoundaries::DensityVelocity) {
             dr = lattice.faceDensity[face]-1.0;
             rb = lattice.faceDensity[face];
         }

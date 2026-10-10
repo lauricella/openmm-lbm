@@ -13,6 +13,8 @@
  */
 
 #include "openmm/internal/AssertionUtilities.h"
+#include "internal/LBMBoundaries.h"
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <vector>
@@ -683,18 +685,19 @@ void testWallBalance(Platform& platform, LBMForce::WallScheme scheme) {
 }
 
 /**
- * Couette flow between two Velocity faces (setFaceBoundary()): the faces perpendicular to x and y are periodic, the face
- * ZMin is at rest and the face ZMax moves with the velocity U along x.  The steady profile is exactly linear,
- * u_x(z) = U (z + 1)/(nz + 1), with the walls on the nodes beyond the faces, z = -1 and z = nz (docs/theory.md,
- * section 1), and the density stays uniform.
+ * Couette flow between two faces that set the velocity (setFaceBoundary()): Velocity faces, or DensityVelocity faces
+ * at the density of the fluid at rest.  The faces perpendicular to x and y are periodic, the face ZMin is at rest and
+ * the face ZMax moves with the velocity U along x.  The steady profile is exactly linear, u_x(z) = U (z + 1)/(nz + 1),
+ * with the walls on the nodes beyond the faces, z = -1 and z = nz (docs/theory.md, section 1), and the density stays
+ * uniform.
  */
-void testCouette(Platform& platform, double tau) {
+void testCouette(Platform& platform, double tau, LBMForce::BoundaryType type=LBMForce::Velocity) {
     int nx = 2, ny = 2, nz = 10;
     LBMForce* force;
     System* system = createFluidSystem(force, nx, ny, nz, tau);
     double U = 0.01;                             // lattice units
-    force->setFaceBoundary(LBMForce::ZMin, LBMForce::Velocity);
-    force->setFaceBoundary(LBMForce::ZMax, LBMForce::Velocity);
+    force->setFaceBoundary(LBMForce::ZMin, type);
+    force->setFaceBoundary(LBMForce::ZMax, type);
     force->setFaceVelocity(LBMForce::ZMax, Vec3(U*fluidDx/fluidDt, 0, 0));
     VerletIntegrator integrator(fluidDt);
     Context context(*system, integrator, platform);
@@ -714,17 +717,20 @@ void testCouette(Platform& platform, double tau) {
 }
 
 /**
- * A uniform flow from a Velocity face (the inlet YMin) to a Density face (the outlet YMax) at the density of the
- * fluid at rest is steady: the faces leave it unchanged.  The faces perpendicular to x and z are periodic.
+ * A uniform flow from an inlet YMin (a Velocity or DensityVelocity face) to an outlet YMax (a Density or
+ * DensityVelocity face), with the density of the fluid at rest and the velocity of the flow on both, is steady: the
+ * faces leave it unchanged.  The faces perpendicular to x and z are periodic.
  */
-void testUniformFlowThroughFaces(Platform& platform) {
+void testUniformFlowThroughFaces(Platform& platform, LBMForce::BoundaryType inlet=LBMForce::Velocity,
+        LBMForce::BoundaryType outlet=LBMForce::Density) {
     int nx = 3, ny = 8, nz = 3, numNodes = nx*ny*nz;
     LBMForce* force;
     System* system = createFluidSystem(force, nx, ny, nz, 0.8);
     Vec3 u = Vec3(0.0, 0.02, 0.0)*(fluidDx/fluidDt);
-    force->setFaceBoundary(LBMForce::YMin, LBMForce::Velocity);
-    force->setFaceBoundary(LBMForce::YMax, LBMForce::Density);
+    force->setFaceBoundary(LBMForce::YMin, inlet);
+    force->setFaceBoundary(LBMForce::YMax, outlet);
     force->setFaceVelocity(LBMForce::YMin, u);
+    force->setFaceVelocity(LBMForce::YMax, u);
     force->setInitialFluidVelocity(u);
     VerletIntegrator integrator(fluidDt);
     Context context(*system, integrator, platform);
@@ -804,6 +810,108 @@ void testPressureDrivenDuct(Platform& platform) {
     ASSERT(error < 0.02*umax);
     ASSERT(change < getFluidTolerance(platform, 1e-9, 1e-4)*umax);
     delete system;
+}
+
+/**
+ * A fluid at rest between two DensityVelocity faces YMin and YMax with the same density and velocity, different from
+ * those of the fluid at rest and with a component along the faces, reaches the uniform flow with that density and
+ * velocity (docs/theory.md, section 1).  The faces perpendicular to x and z are periodic.
+ */
+void testDensityVelocityReservoir(Platform& platform) {
+    int nx = 3, ny = 12, nz = 3, numNodes = nx*ny*nz;
+    LBMForce* force;
+    System* system = createFluidSystem(force, nx, ny, nz, 1.0);
+    double rho = 1.01;
+    Vec3 u(0.01, 0.02, 0.0);                     // lattice units
+    for (LBMForce::Face face : {LBMForce::YMin, LBMForce::YMax}) {
+        force->setFaceBoundary(face, LBMForce::DensityVelocity);
+        force->setFaceDensity(face, rho*fluidDensity);
+        force->setFaceVelocity(face, u*(fluidDx/fluidDt));
+    }
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    integrator.step(2500);
+    vector<double> density;
+    vector<Vec3> velocity;
+    force->getFluidFields(context, density, velocity);
+    double tol = getFluidTolerance(platform, 1e-9, 1e-5);
+    for (int node = 0; node < numNodes; node++) {
+        ASSERT_EQUAL_VEC(u, velocity[node]*(fluidDt/fluidDx), tol);
+        ASSERT_EQUAL_TOL(rho, density[node]/fluidDensity, tol);
+    }
+    delete system;
+}
+
+/**
+ * A DensityVelocity inlet YMin whose density, 1.01, differs from that of a Density outlet YMax, 1: the face sets the
+ * populations that enter the fluid, not the density and the velocity of the node, so the steady flow is uniform with
+ * the density of the outlet and the velocity u at which those populations, sum over c_y = 1 of feq_q(rho, u) =
+ * rho (1 + 3u + 3u^2)/6, are those of the inlet, 1.01 (1 + 3 u_b + 3 u_b^2)/6 (docs/theory.md, section 1).  Faces
+ * perpendicular to x and z periodic.
+ */
+void testDensityVelocityInlet(Platform& platform) {
+    int nx = 3, ny = 16, nz = 3, numNodes = nx*ny*nz;
+    LBMForce* force;
+    System* system = createFluidSystem(force, nx, ny, nz, 0.8);
+    double rhoIn = 1.01, ub = 0.01;
+    force->setFaceBoundary(LBMForce::YMin, LBMForce::DensityVelocity);
+    force->setFaceBoundary(LBMForce::YMax, LBMForce::Density);
+    force->setFaceDensity(LBMForce::YMin, rhoIn*fluidDensity);
+    force->setFaceVelocity(LBMForce::YMin, Vec3(0.0, ub, 0.0)*(fluidDx/fluidDt));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    integrator.step(4000);
+    vector<double> density;
+    vector<Vec3> velocity;
+    force->getFluidFields(context, density, velocity);
+    double a = rhoIn*(1.0 + 3.0*ub + 3.0*ub*ub) - 1.0;
+    double u = (-3.0 + sqrt(9.0 + 12.0*a))/6.0;
+    double tol = getFluidTolerance(platform, 1e-10, 1e-5);
+    for (int node = 0; node < numNodes; node++) {
+        ASSERT_EQUAL_VEC(Vec3(0.0, u, 0.0), velocity[node]*(fluidDt/fluidDx), tol);
+        ASSERT_EQUAL_TOL(1.0, density[node]/fluidDensity, tol);
+    }
+    delete system;
+}
+
+/**
+ * The kinds of the nodes on the open faces (internal/LBMBoundaries.h): on the nodes shared by several faces the first
+ * face that sets the velocity (Velocity or DensityVelocity) in the order XMin ... ZMax gives the velocity, and the
+ * density too if it is a DensityVelocity face; the nodes of Density faces only take the density of their face, or
+ * of the first one with zero velocity if they lie on more than one.
+ */
+void testBoundaryKinds() {
+    LBMLatticeParameters lattice;
+    lattice.nx = lattice.ny = lattice.nz = 4;
+    lattice.wallScheme = LBMForce::BounceBack;
+    LBMForce::BoundaryType types[6] = {LBMForce::Density, LBMForce::Velocity, LBMForce::DensityVelocity,
+                                       LBMForce::Density, LBMForce::Density, LBMForce::DensityVelocity};
+    for (int face = 0; face < 6; face++)
+        lattice.faceBoundary[face] = types[face];
+    LBMBoundaries boundaries;
+    boundaries.find(lattice, vector<int>());
+    ASSERT_EQUAL(4*4*4 - 2*2*2, (int) boundaries.nodes.size());
+    struct Expected {int i, j, k, kind, face;};
+    vector<Expected> expected = {
+        {0, 1, 1, LBMBoundaries::Density, 0},           // XMin only
+        {3, 1, 1, LBMBoundaries::Velocity, 1},          // XMax only
+        {1, 0, 1, LBMBoundaries::DensityVelocity, 2},   // YMin only
+        {0, 0, 1, LBMBoundaries::DensityVelocity, 2},   // XMin (Density) and YMin
+        {3, 0, 1, LBMBoundaries::Velocity, 1},          // XMax comes before YMin
+        {1, 3, 0, LBMBoundaries::DensityAtRest, 3},     // YMax and ZMin, both Density
+        {0, 3, 0, LBMBoundaries::DensityAtRest, 0},     // XMin, YMax and ZMin, all Density
+        {0, 3, 3, LBMBoundaries::DensityVelocity, 5},   // XMin and YMax (Density) and ZMax
+        {3, 0, 3, LBMBoundaries::Velocity, 1}           // XMax, YMin and ZMax
+    };
+    for (const Expected& e : expected) {
+        int node = e.i + 4*(e.j + 4*e.k);
+        int b = find(boundaries.nodes.begin(), boundaries.nodes.end(), node) - boundaries.nodes.begin();
+        ASSERT(b < (int) boundaries.nodes.size());
+        ASSERT_EQUAL(e.kind, boundaries.kind[b]);
+        ASSERT_EQUAL(e.face, boundaries.face[b]);
+    }
 }
 
 /**
@@ -948,10 +1056,18 @@ void runWallTests(Platform& platform) {
     testCouette(platform, 0.6);
     testCouette(platform, 1.0);
     testCouette(platform, 1.5);
+    testCouette(platform, 0.6, LBMForce::DensityVelocity);
+    testCouette(platform, 1.5, LBMForce::DensityVelocity);
     testUniformFlowThroughFaces(platform);
+    testUniformFlowThroughFaces(platform, LBMForce::DensityVelocity, LBMForce::Density);
+    testUniformFlowThroughFaces(platform, LBMForce::DensityVelocity, LBMForce::DensityVelocity);
+    testDensityVelocityReservoir(platform);
+    testDensityVelocityInlet(platform);
     testPressureDrivenDuct(platform);
     testFaceChecks(platform);
     testCheckpointBoundaries(platform);
     testFluidStateRestartWithBoundaries(platform, LBMForce::BounceBack);
     testFluidStateRestartWithBoundaries(platform, LBMForce::Regularized);
+    if (platform.getName() == "Reference")
+        testBoundaryKinds();
 }

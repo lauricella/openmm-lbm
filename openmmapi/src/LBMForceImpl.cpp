@@ -142,13 +142,14 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
         throw OpenMMException("LBMForce: unknown wall scheme");
     lattice.wallScheme = force.getWallScheme();
 
-    // Faces of the box: periodic, or open with a velocity or a density (in lattice units).
+    // Faces of the box: periodic, or open with a velocity, a density or both (in lattice units).
 
     const char* axisName[3] = {"x", "y", "z"};
     int size[3] = {lattice.nx, lattice.ny, lattice.nz};
     for (int face = 0; face < 6; face++) {
         LBMForce::BoundaryType type = force.getFaceBoundary((LBMForce::Face) face);
-        if (type != LBMForce::Periodic && type != LBMForce::Velocity && type != LBMForce::Density)
+        if (type != LBMForce::Periodic && type != LBMForce::Velocity && type != LBMForce::Density &&
+                type != LBMForce::DensityVelocity)
             throw OpenMMException("LBMForce: unknown boundary type of a face");
         lattice.faceBoundary[face] = type;
         lattice.faceVelocity[face] = force.getFaceVelocity((LBMForce::Face) face)*(lattice.dt/lattice.dx);
@@ -160,7 +161,7 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     for (int axis = 0; axis < 3; axis++) {
         if ((lattice.faceBoundary[2*axis] == LBMForce::Periodic) != (lattice.faceBoundary[2*axis+1] == LBMForce::Periodic))
             throw OpenMMException(string("LBMForce: the two faces perpendicular to ") + axisName[axis] + " must be both "
-                    "periodic or both open (Velocity or Density)");
+                    "periodic or both open (Velocity, Density or DensityVelocity)");
         if (lattice.isOpenAxis(axis) && size[axis] < 3)
             throw OpenMMException(string("LBMForce: with open faces perpendicular to ") + axisName[axis] + " the grid "
                     "needs at least 3 nodes along " + axisName[axis]);

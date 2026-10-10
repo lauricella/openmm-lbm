@@ -48,6 +48,10 @@ void testSerialization() {
     force.setFaceBoundary(LBMForce::YMax, LBMForce::Velocity);
     force.setFaceDensity(LBMForce::YMin, 610.0);
     force.setFaceVelocity(LBMForce::YMax, Vec3(0.1, -0.2, 0.3));
+    force.setFaceBoundary(LBMForce::ZMin, LBMForce::DensityVelocity);
+    force.setFaceBoundary(LBMForce::ZMax, LBMForce::DensityVelocity);
+    force.setFaceDensity(LBMForce::ZMin, 590.0);
+    force.setFaceVelocity(LBMForce::ZMin, Vec3(-0.2, 0.1, 0.4));
     force.setSolidNodes(vector<int>({0, 7, 42}));
     force.setBodyAcceleration(Vec3(0.1, 0.2, 0.3));
     force.setInitialFluidVelocity(Vec3(-0.1, 0.0, 0.05));

@@ -238,7 +238,8 @@ public:
     enum BoundaryType {
         Periodic = 0,
         Velocity = 1,
-        Density = 2
+        Density = 2,
+        DensityVelocity = 3
     };
     LBMForce();
 

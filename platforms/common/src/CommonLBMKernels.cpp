@@ -324,11 +324,17 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     // except that applyBoundaries rebuilds their unknown populations.  The part w of the populations that a wall node
     // sends into the solid nodes and receives from them gives the walls the same momentum in every step, -2 c_q w_q
     // for each solid direction q.  With the decomposition each rank keeps the boundary nodes of its block, and the
-    // kernels see the local indices of the nodes.
+    // kernels see the local indices of the nodes.  The kind and the face of a node are packed in one integer,
+    // kind + 4*(face + 1), or kind + 8*(face + 1) with DensityVelocity faces (kind 4), so that the programs without
+    // them are compiled from the same source as before.
 
     LBMBoundaries boundaries;
     boundaries.find(lattice, isFluidHost);
     vector<int> boundaryLocal, unknownLocal, solidLocal, kindAndFace;
+    bool densityVelocityFaces = false;
+    for (int face = 0; face < 6; face++)
+        densityVelocityFaces = densityVelocityFaces || (lattice.faceBoundary[face] == LBMForce::DensityVelocity);
+    int kindStride = (densityVelocityFaces ? 8 : 4);
     staticBoundaryMomentum = Vec3();
     for (int b = 0; b < (int) boundaries.nodes.size(); b++) {
         if (!decomposition.owns(boundaries.nodes[b]))
@@ -336,7 +342,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         boundaryLocal.push_back(localIndex(boundaries.nodes[b]));
         unknownLocal.push_back(boundaries.unknown[b]);
         solidLocal.push_back(boundaries.solid[b]);
-        kindAndFace.push_back(boundaries.kind[b] + 4*(boundaries.face[b] + 1));
+        kindAndFace.push_back(boundaries.kind[b] + kindStride*(boundaries.face[b] + 1));
         for (int q = 1; q < D3Q19::numVelocities; q++)
             if (boundaries.solid[b] & (1<<q))
                 staticBoundaryMomentum -= Vec3(D3Q19::cx[q], D3Q19::cy[q], D3Q19::cz[q])*(2.0*D3Q19::w[q]);
@@ -741,6 +747,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     if (numBoundaryNodes > 0) {
         defines["HAS_BOUNDARY_NODES"] = "1";
         defines["NUM_BOUNDARY_NODES"] = cc.intToString(numBoundaryNodes);
+        if (densityVelocityFaces)
+            defines["DENSITY_VELOCITY_FACES"] = "1";
     }
     const char* openAxis[3] = {"OPEN_X", "OPEN_Y", "OPEN_Z"};
     for (int a = 0; a < 3; a++)

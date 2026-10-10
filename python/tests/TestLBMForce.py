@@ -210,6 +210,11 @@ def test_wall_scheme_and_faces():
     assert copy.getWallScheme() == LBMForce.Regularized
     assert copy.getFaceBoundary(LBMForce.ZMax) == LBMForce.Velocity
     assert copy.getFaceVelocity(LBMForce.ZMax) == mm.Vec3(0.5, 0, 0)*unit.nanometer/unit.picosecond
+    force.setFaceBoundary(LBMForce.XMin, LBMForce.DensityVelocity)
+    copy = LBMForce.cast(mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(force)))
+    assert copy.getFaceBoundary(LBMForce.XMin) == LBMForce.DensityVelocity
+    assert copy.getFaceDensity(LBMForce.XMin) == 610.0*unit.dalton/unit.nanometer**3
+    force.setFaceBoundary(LBMForce.XMin, LBMForce.Periodic)
     system = mm.System()
     system.setDefaultPeriodicBoxVectors(mm.Vec3(1, 0, 0), mm.Vec3(0, 1, 0), mm.Vec3(0, 0, 5))
     system.addParticle(1.0)

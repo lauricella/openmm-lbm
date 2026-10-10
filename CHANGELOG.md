@@ -27,6 +27,11 @@ versions the API may still change.
   Temperatures of the particles with every stencil and both drags, with and without fluctuations of the fluid,
   checked against the exact stationary state of the linearized lattice and in the stochastic tests T2, T6 and T7;
   with the centred drag in the fluctuating fluid they are exact (`testStencilCanonicalTemperature`).
+- Open faces of a new type, `LBMForce.DensityVelocity`: the fluid beyond the face has both the density of
+  `setFaceDensity()` and the velocity of `setFaceVelocity()` (a reservoir), rebuilt as on a `Velocity` face with
+  the density of the face instead of the mass balance; on edges and corners it counts as a `Velocity` face and also
+  gives its density (`docs/theory.md`, section 1). On every platform, with one domain and with the domain
+  decomposition; the programs of the other faces are compiled from the same source as before.
 
 ### Fixed
 - Tests: a range-based `for` loop read the velocities of a temporary `State` already destroyed
