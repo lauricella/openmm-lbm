@@ -344,16 +344,20 @@ DEVICE bool inStoredRange(int index, int size, int origin, int extent, int pad) 
 #endif
 
 /**
- * The sort key of slot e of a stencil on a node of the lattice.  Without the decomposition the node is its own
- * storage index.  With the decomposition the key holds the index of the node in the lattice, so that the keys of a node
- * are together wherever it is stored; the nodes beyond the halo of the block, which only the stencils of the particles
- * of other ranks reach, come after all the others.
+ * The sort key of slot e of a stencil on a node of the lattice, pi(node)*KEY_STRIDE + e.  The node is its index in the
+ * lattice, which without the decomposition is its storage index, and with the decomposition keeps the keys of a node
+ * together wherever it is stored; the nodes beyond the halo of the block, which only the stencils of the particles of
+ * other ranks reach, come after all the others.  pi(n) = n*STENCIL_SCRAMBLE mod GNX*GNY*GNZ, a permutation that spreads
+ * the keys uniformly over their range wherever the particles are, so that the buckets of equal width of OpenMM's sort
+ * stay small (CouplingSortTrait in CommonLBMKernels.cpp, where the keys of the nearest node are permuted only for the
+ * sort, so that their kernels stay those of version 0.4.0); stencilKeyNode() inverts it with STENCIL_UNSCRAMBLE.
  */
 DEVICE mm_long stencilKey(int ix, int iy, int iz, int e) {
-    mm_long node = ix + GNX*(iy + (mm_long) GNY*iz);
+    const mm_long numNodes = (mm_long) GNX*GNY*GNZ;
+    mm_long node = ((ix + GNX*(iy + (mm_long) GNY*iz))*STENCIL_SCRAMBLE)%numNodes;
 #ifdef DOMAIN_DECOMPOSITION
     if (!(inStoredRange(ix, GNX, OX, NX, PAD_X) && inStoredRange(iy, GNY, OY, NY, PAD_Y) && inStoredRange(iz, GNZ, OZ, NZ, PAD_Z)))
-        node += (mm_long) GNX*GNY*GNZ;
+        node += numNodes;
 #endif
     return node*KEY_STRIDE + e;
 }
@@ -363,11 +367,15 @@ DEVICE mm_long stencilKey(int ix, int iy, int iz, int e) {
  * halo and beyond (only with the decomposition).
  */
 DEVICE int stencilReactionNode(mm_long key) {
+    const mm_long numNodes = (mm_long) GNX*GNY*GNZ;
+    mm_long scrambled = key/KEY_STRIDE;
+    if (scrambled >= numNodes)
+        return NUM_STORED;
+    int node = (int) ((scrambled*STENCIL_UNSCRAMBLE)%numNodes);
 #ifdef DOMAIN_DECOMPOSITION
-    mm_long node = key/KEY_STRIDE;
-    return (node < (mm_long) GNX*GNY*GNZ ? storedNode((int) node) : NUM_STORED);
+    return storedNode(node);
 #else
-    return keyNode(key);
+    return node;
 #endif
 }
 
@@ -717,17 +725,37 @@ KERNEL void multiplyStencilMatrix(GLOBAL const mixed* RESTRICT particleMass, GLO
 }
 
 /**
- * The three components of the dot product of two vectors of the particles, written to scalars[offset + k]: a single
- * work group of LBM_BLOCK_SIZE threads, partial sums in a fixed order and a reduction in local memory, so that the result
- * does not depend on the timing.
+ * The three components of the dot product of two vectors of the particles, in two stages so that the result does not
+ * depend on the timing: DOT_GROUPS work groups of LBM_BLOCK_SIZE threads add the products of a fixed subset of the
+ * particles in a fixed order and write their partial sums (dotStencilPartials), then a single work group adds the partial
+ * sums in a fixed order and writes the result to scalars[offset + k] (dotStencilFinish).  DOT_GROUPS depends only on
+ * the number of particles, so that ranks with different devices compute the same sums.
  */
-KERNEL void dotStencilVectors(GLOBAL const mixed* RESTRICT x, GLOBAL const mixed* RESTRICT y, GLOBAL mixed* RESTRICT scalars,
-        int offset) {
+KERNEL void dotStencilPartials(GLOBAL const mixed* RESTRICT x, GLOBAL const mixed* RESTRICT y, GLOBAL mixed* RESTRICT partials) {
     LOCAL mixed sums[3*LBM_BLOCK_SIZE];
     mixed s[3] = {0, 0, 0};
-    for (int i = LOCAL_ID; i < NUM_COUPLED; i += LBM_BLOCK_SIZE)
+    for (int i = GROUP_ID*LBM_BLOCK_SIZE + LOCAL_ID; i < NUM_COUPLED; i += DOT_GROUPS*LBM_BLOCK_SIZE)
         for (int k = 0; k < 3; k++)
             s[k] += x[k*NUM_COUPLED+i]*y[k*NUM_COUPLED+i];
+    for (int k = 0; k < 3; k++)
+        sums[k*LBM_BLOCK_SIZE+LOCAL_ID] = s[k];
+    for (int step = LBM_BLOCK_SIZE/2; step > 0; step /= 2) {
+        SYNC_THREADS;
+        if (LOCAL_ID < step)
+            for (int k = 0; k < 3; k++)
+                sums[k*LBM_BLOCK_SIZE+LOCAL_ID] += sums[k*LBM_BLOCK_SIZE+LOCAL_ID+step];
+    }
+    if (LOCAL_ID == 0)
+        for (int k = 0; k < 3; k++)
+            partials[3*GROUP_ID+k] = sums[k*LBM_BLOCK_SIZE];
+}
+
+KERNEL void dotStencilFinish(GLOBAL const mixed* RESTRICT partials, GLOBAL mixed* RESTRICT scalars, int offset) {
+    LOCAL mixed sums[3*LBM_BLOCK_SIZE];
+    mixed s[3] = {0, 0, 0};
+    for (int g = LOCAL_ID; g < DOT_GROUPS; g += LBM_BLOCK_SIZE)
+        for (int k = 0; k < 3; k++)
+            s[k] += partials[3*g+k];
     for (int k = 0; k < 3; k++)
         sums[k*LBM_BLOCK_SIZE+LOCAL_ID] = s[k];
     for (int step = LBM_BLOCK_SIZE/2; step > 0; step /= 2) {

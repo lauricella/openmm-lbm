@@ -1494,8 +1494,10 @@ $`\mathbf u_j(t) = \tilde{\mathbf u}_j - h\sum_l \xi_{jl}\mathbf F_l/\rho_j`$, s
   iterations stop when the residual of each Cartesian component is 1e-13 of its right-hand side; an isolated particle
   needs none. The forces agree with a solution by Gaussian elimination to 1e-10 (`testCenteredStencilSolve`). On the
   CUDA, OpenCL and HIP platforms the same iterations run on the device: the spread vector is summed per node through
-  the sorted keys of the stencils, the dot products are reduced by a single work group in a fixed order, and the host
-  reads them to decide when to stop; in single precision the iterations stop at 1e-5.
+  the sorted keys of the stencils, the dot products are reduced in two stages in a fixed order (partial sums of a
+  number of work groups that depends only on the number of particles, then one work group), so that every rank and
+  every device computes the same sums, and the host reads them to decide when to stop; in single precision the
+  iterations stop at 1e-5.
 
 **Self-mobility.** The calculation of section 2 (Self-mobility and relaxation time: linearized collision, unit
 force on a periodic lattice of $`16^3`$ nodes) gives, with the force spread by the stencil and the velocity

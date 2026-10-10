@@ -240,6 +240,9 @@ private:
         residual, direction and product of the conjugate gradients, and their dot products. */
     OpenMM::ComputeArray interpWeight, stencilNode, keyFirst, spreadValue, gradientRhs, gradientDiagonal, gradientResidual;
     OpenMM::ComputeArray gradientPreconditioned, gradientDirection, gradientProduct, gradientScalars;
+    /** The partial sums of the dot products of the conjugate gradients, 3 per work group, and the number of groups. */
+    OpenMM::ComputeArray gradientPartials;
+    int dotGroups;
     /** Centered drag: velocity of every coupled particle with half the other forces, v(t - dt/2) + dt Fc/(2m), and
         its random force (lattice units, 3 components of numCoupled each). */
     OpenMM::ComputeArray knownVelocity, randomForce;
@@ -253,7 +256,7 @@ private:
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel, packFieldsKernel;
     OpenMM::ComputeKernel keySegmentsKernel, spreadKernel, multiplyKernel, dotKernel, startGradientsKernel;
     OpenMM::ComputeKernel advanceGradientsKernel, directionKernel, stencilWallKernel, packCouplingHaloKernel;
-    OpenMM::ComputeKernel unpackCouplingHaloKernel;
+    OpenMM::ComputeKernel unpackCouplingHaloKernel, dotFinishKernel;
 };
 
 } // namespace LBMPlugin

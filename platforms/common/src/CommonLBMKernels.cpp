@@ -44,6 +44,21 @@ static long long scrambleFactor(long long size) {
 }
 
 /**
+ * The inverse of factor modulo size, for factor coprime with size.
+ */
+static long long scrambleInverse(long long factor, long long size) {
+    long long r0 = size, r1 = factor%size, t0 = 0, t1 = 1;
+    while (r1 != 0) {
+        long long q = r0/r1;
+        swap(r0, r1);
+        r1 -= q*r0;
+        swap(t0, t1);
+        t1 -= q*t0;
+    }
+    return (t0%size + size)%size;
+}
+
+/**
  * The sort keys of the coupled particles, 64-bit integers node*stride + e (kernels/lbmCoupling.cc): stride is the number
  * of keys, e the particle (or with an interpolation stencil the slot i*stencilSize + n of particle i), node the storage
  * index of the node, from 0 to numStored - 1, and with the domain decomposition numStored plus the index of a node of
@@ -60,11 +75,17 @@ static long long scrambleFactor(long long size) {
  * which is in particle order, failed with the particles of many copies of a protein in order: all the samples came
  * from the copies of one layer of the box, and 97% of the keys of 5.6e4 particles went into one bucket (7.4 ms of a
  * step of 8.7 ms on an A100).  The permutation spreads the sort keys uniformly over their range wherever the particles
- * are.
+ * are.  The kernels of the interpolation stencils write keys already permuted (stencilKey()), and with permute false
+ * the sort key is the key itself: the expression above, evaluated for every key by OpenMM's range of the keys in a
+ * single work group, took 3 ms per step with the 3.6e6 keys of 5.6e4 particles and Keys.
  */
 class CouplingSortTrait : public ComputeSortImpl::SortTrait {
 public:
-    CouplingSortTrait(long long stride, long long numStored, long long numNodes) {
+    CouplingSortTrait(long long stride, long long numStored, long long numNodes, bool permute) {
+        if (!permute) {
+            sortKey = "value";
+            return;
+        }
         string node = "(value/" + to_string(stride) + ")", entry = "(value%" + to_string(stride) + ")";
         sortKey = "(value == 0x7FFFFFFFFFFFFFFF ? value : " + node + " < " + to_string(numStored) + " ? ((" + node + "*" +
                 to_string(scrambleFactor(numStored)) + ")%" + to_string(numStored) + ")*" + to_string(stride) + " + " + entry +
@@ -145,6 +166,10 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     int stencilWidth = LBMStencils::width(lattice.interpolationStencil);
     stencilSize = stencilWidth*stencilWidth*stencilWidth;
     int stencilReach = (lattice.interpolationStencil == LBMForce::Keys ? 2 : 1);
+    // The work groups of the dot products of the conjugate gradients (dotStencilPartials()): a number that depends only
+    // on the number of particles, about 16 particles per thread.
+    int particlesPerGroup = 16*ComputeContext::ThreadBlockSize;
+    dotGroups = max(1, min(256, (int) ((lattice.particles.size() + particlesPerGroup - 1)/particlesPerGroup)));
     if (decomposed) {
         // The same collective check of the platform and precision as on the Reference platform, so that ranks on
         // different platforms all stop with the same error.  The parts not available yet with the decomposition on
@@ -633,16 +658,16 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             for (ComputeArray* array : {&gradientRhs, &gradientResidual, &gradientPreconditioned, &gradientDirection, &gradientProduct})
                 array->initialize(cc, 3*numCoupled, elementSize, "lbmGradientVector");
             gradientScalars.initialize(cc, 15, elementSize, "lbmGradientScalars");
+            gradientPartials.initialize(cc, 3*dotGroups, elementSize, "lbmGradientPartials");
             if (decomposed)
                 particleOwned.initialize<int>(cc, numCoupled, "lbmParticleOwned");
         }
         noise.initialize<mm_float4>(cc, numCoupled, "lbmNoise");
         noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
-        // The sort keys are spread uniformly over their range (CouplingSortTrait), so the sort uses buckets of equal width.
-        // With the decomposition the keys of the stencils hold the nodes of the lattice (stencilKey()).
+        // The sort keys are spread uniformly over their range, so the sort uses buckets of equal width: those of the nearest
+        // node are permuted by the sort (CouplingSortTrait), those of a stencil by the kernels (stencilKey()).
         int numKeys = numCoupled*stencilSize;
-        int keyNodes = (decomposed && stencilSize > 1 ? numNodes : numStored);
-        sort = cc.createSort(new CouplingSortTrait(numKeys, keyNodes, numNodes), numKeys, true);
+        sort = cc.createSort(new CouplingSortTrait(numKeys, numStored, numNodes, stencilSize == 1), numKeys, true);
         cc.getIntegrationUtilities().initRandomNumberGenerator(seed);
         if (decomposed && numSolidNodes > 0) {
             globalIsFluid.initialize<int>(cc, numNodes, "lbmGlobalIsFluid");
@@ -824,6 +849,10 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         if (stencilSize > 1) {
             defines["STENCIL_WIDTH"] = cc.intToString(LBMStencils::width(lattice.interpolationStencil));
             defines["STENCIL_SIZE"] = cc.intToString(stencilSize);
+            defines["DOT_GROUPS"] = cc.intToString(dotGroups);
+            long long scramble = scrambleFactor(numNodes);
+            defines["STENCIL_SCRAMBLE"] = cc.intToString(scramble);
+            defines["STENCIL_UNSCRAMBLE"] = cc.intToString(scrambleInverse(scramble, numNodes));
         }
         defines["DX"] = cc.doubleToString(lattice.dx, true);
         defines["VELOCITY_SCALE"] = cc.doubleToString(lattice.getVelocityScale(), true);
@@ -938,11 +967,14 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             multiplyKernel->addArg();       // gamma, set later
             if (decomposed)
                 multiplyKernel->addArg(particleOwned);
-            dotKernel = coupling->createKernel("dotStencilVectors");
+            dotKernel = coupling->createKernel("dotStencilPartials");
             dotKernel->addArg(gradientResidual);
             dotKernel->addArg(gradientResidual);
-            dotKernel->addArg(gradientScalars);
-            dotKernel->addArg(0);
+            dotKernel->addArg(gradientPartials);
+            dotFinishKernel = coupling->createKernel("dotStencilFinish");
+            dotFinishKernel->addArg(gradientPartials);
+            dotFinishKernel->addArg(gradientScalars);
+            dotFinishKernel->addArg(0);
             startGradientsKernel = coupling->createKernel("startStencilGradients");
             for (ComputeArray* array : {&gradientRhs, &gradientDiagonal, &particleForce, &gradientProduct, &gradientResidual,
                     &gradientPreconditioned, &gradientDirection})
@@ -1481,8 +1513,9 @@ void CommonCalcLBMForceKernel::solveStencilDrag() {
     auto dot = [&](ComputeArray& x, ComputeArray& y, int offset) {
         dotKernel->setArg(0, x);
         dotKernel->setArg(1, y);
-        dotKernel->setArg(3, offset);
-        dotKernel->execute(blockSize, blockSize);
+        dotKernel->execute(dotGroups*blockSize, blockSize);
+        dotFinishKernel->setArg(2, offset);
+        dotFinishKernel->execute(blockSize, blockSize);
     };
     startGradientsKernel->setArg(7, 0);
     startGradientsKernel->execute(numCoupled);
