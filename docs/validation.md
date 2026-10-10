@@ -1107,6 +1107,22 @@ buckets of equal width; the results are the same bit for bit (CUDA in the three 
 precision, nearest node and the three interpolation stencils, against the version before). On four GPUs the sum of
 the coupling forces over the ranks (`MPI_Allreduce` of $`3 N_p`$ numbers) took 0.26 to 0.29 ms of the step.
 
+With the interpolation stencils (in development for version 0.5.0) and the same 512 copies, milliseconds per step,
+explicit / centred drag:
+
+| Stencil | 1 GPU, $`120^3`$ nodes | 4 GPUs, $`120^3`$ nodes | 4 GPUs, $`240^3`$ nodes |
+|---|---|---|---|
+| `Trilinear` | 1.62 / 2.58 | 2.42 / 9.63 | 6.75 / 13.48 |
+| `ThreePoint` | 2.95 / 5.71 | 3.43 / 10.41 | 7.67 / 14.17 |
+| `Keys` | 5.49 / 12.86 | 6.86 / 18.09 | 13.69 / 24.43 |
+
+The beads are crowded (8 to 64 sort keys each, 3.6 million with `Keys`), so the coupling takes most of the step. The
+sums over the nodes of the stencils run one thread per node, from a list of the segments of the sorted keys made after
+each sort; before, one thread per key scanned the keys of its node when it was the first of them, and most threads of
+a warp were idle: with `Keys` and the centred drag on one GPU the spreading of the conjugate gradients took 14 of 28.6
+ms per step, now 2.7 of 12.9 (profile of the step). The centred drag on four GPUs sums the product of the conjugate
+gradients over the ranks at every iteration (through the host), which costs more than the work it divides.
+
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
 With a fluctuating fluid every rank draws its own random numbers, so a run with the decomposition differs from one with

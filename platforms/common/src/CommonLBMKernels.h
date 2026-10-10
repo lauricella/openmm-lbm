@@ -93,6 +93,8 @@ private:
     void advanceFluid();
     void computeNextStepForces(long long nextStep);
     void computeCouplingForces(bool isStep);
+    /** An interpolation stencil, after the sort: list the segments of the sorted keys (kernels/lbmCoupling.cc). */
+    void listKeySegments();
     /** The centred drag with an interpolation stencil: the conjugate gradients, after prepareCenteredStencil(). */
     void solveStencilDrag();
     void setFluidParameters();
@@ -231,14 +233,18 @@ private:
         at [i*stencilSize + slot]. */
     int stencilSize;
     OpenMM::ComputeArray stencilWeight;
+    /** The segments of the sorted keys of the stencils, one per node (listKeySegments()): the number of segments that
+        start in each chunk of blockSize keys and their offsets, followed by the number of segments; the first key of each
+        segment; the weight and particle of each sorted key. */
+    OpenMM::ComputeArray chunkCount, chunkOffset, segmentStart, sortedWeight, sortedParticle;
     /** With the domain decomposition and the centred drag with a stencil: 1 for the particles whose nearest node the
         rank owns, which it couples, and 0 for the others. */
     OpenMM::ComputeArray particleOwned;
     /** The centred drag with a stencil: for each slot its weight divided by the density of its node (0 at a solid
-        node), its node and the position of the first sorted key of that node; the vector spread on the nodes (at those
-        positions, 3 components of numCoupled*stencilSize each); the right-hand side, diagonal, residual, preconditioned
-        residual, direction and product of the conjugate gradients, and their dot products. */
-    OpenMM::ComputeArray interpWeight, stencilNode, keyFirst, spreadValue, gradientRhs, gradientDiagonal, gradientResidual;
+        node), its node and the segment of the sorted keys of that node; the vector spread on the nodes (by segment, 3
+        components of numCoupled*stencilSize each); the right-hand side, diagonal, residual, preconditioned residual,
+        direction and product of the conjugate gradients, and their dot products. */
+    OpenMM::ComputeArray interpWeight, stencilNode, keySegment, spreadValue, gradientRhs, gradientDiagonal, gradientResidual;
     OpenMM::ComputeArray gradientPreconditioned, gradientDirection, gradientProduct, gradientScalars;
     /** The partial sums of the dot products of the conjugate gradients, 3 per work group, and the number of groups. */
     OpenMM::ComputeArray gradientPartials;
@@ -254,9 +260,9 @@ private:
     OpenMM::ComputeKernel collideKernel, bounceBackKernel, wallExchangeKernel, applyBoundariesKernel, maxSpeedKernel;
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel, packFieldsKernel;
-    OpenMM::ComputeKernel keySegmentsKernel, spreadKernel, multiplyKernel, dotKernel, startGradientsKernel;
-    OpenMM::ComputeKernel advanceGradientsKernel, directionKernel, stencilWallKernel, packCouplingHaloKernel;
-    OpenMM::ComputeKernel unpackCouplingHaloKernel, dotFinishKernel;
+    OpenMM::ComputeKernel countSegmentsKernel, scanSegmentsKernel, listSegmentsKernel, spreadKernel, multiplyKernel;
+    OpenMM::ComputeKernel dotKernel, startGradientsKernel, advanceGradientsKernel, directionKernel, stencilWallKernel;
+    OpenMM::ComputeKernel packCouplingHaloKernel, unpackCouplingHaloKernel, dotFinishKernel;
 };
 
 } // namespace LBMPlugin

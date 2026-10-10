@@ -380,6 +380,98 @@ DEVICE int stencilReactionNode(mm_long key) {
 }
 
 /**
+ * The segments of the sorted stencil keys, one per node, listed after every sort so that the sums over a segment run one
+ * thread per segment, in sorted order, instead of one thread per key of which only the first of each segment works.  In
+ * three passes over chunks of LBM_BLOCK_SIZE sorted keys: countKeySegments() counts the segments that start in each chunk,
+ * scanKeySegments() (one work group) turns the counts into offsets, with the number of segments in
+ * chunkOffset[NUM_KEY_CHUNKS], and listKeySegments() writes the first key of each segment s to segmentStart[s]
+ * (segmentStart[number of segments] = NUM_KEYS), and the weight and particle of each sorted key m to sortedWeight[m] and
+ * sortedParticle[m], which the sums then read contiguously; with the centred drag also the segment of each slot e,
+ * keySegment[e], where the conjugate gradients keep the vector spread on its node.
+ */
+#define NUM_KEY_CHUNKS ((NUM_KEYS+LBM_BLOCK_SIZE-1)/LBM_BLOCK_SIZE)
+
+DEVICE bool startsKeySegment(GLOBAL const mm_long* RESTRICT sortKeys, int k) {
+    return (k == 0 || sortKeys[k-1]/KEY_STRIDE != sortKeys[k]/KEY_STRIDE);
+}
+
+KERNEL void countKeySegments(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL int* RESTRICT chunkCount) {
+    LOCAL int counts[LBM_BLOCK_SIZE];
+    for (int c = GROUP_ID; c < NUM_KEY_CHUNKS; c += NUM_GROUPS) {
+        int k = c*LBM_BLOCK_SIZE + LOCAL_ID;
+        counts[LOCAL_ID] = (k < NUM_KEYS && startsKeySegment(sortKeys, k) ? 1 : 0);
+        for (int step = LBM_BLOCK_SIZE/2; step > 0; step /= 2) {
+            SYNC_THREADS;
+            if (LOCAL_ID < step)
+                counts[LOCAL_ID] += counts[LOCAL_ID+step];
+        }
+        if (LOCAL_ID == 0)
+            chunkCount[c] = counts[0];
+        SYNC_THREADS;
+    }
+}
+
+KERNEL void scanKeySegments(GLOBAL const int* RESTRICT chunkCount, GLOBAL int* RESTRICT chunkOffset,
+        GLOBAL int* RESTRICT segmentStart) {
+    LOCAL int sums[LBM_BLOCK_SIZE];
+    const int chunksPerThread = (NUM_KEY_CHUNKS+LBM_BLOCK_SIZE-1)/LBM_BLOCK_SIZE;
+    int first = LOCAL_ID*chunksPerThread, last = min(first+chunksPerThread, NUM_KEY_CHUNKS);
+    int total = 0;
+    for (int c = first; c < last; c++)
+        total += chunkCount[c];
+    sums[LOCAL_ID] = total;
+    for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
+        SYNC_THREADS;
+        int add = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
+        SYNC_THREADS;
+        sums[LOCAL_ID] += add;
+    }
+    int offset = sums[LOCAL_ID]-total;
+    for (int c = first; c < last; c++) {
+        chunkOffset[c] = offset;
+        offset += chunkCount[c];
+    }
+    if (LOCAL_ID == LBM_BLOCK_SIZE-1) {
+        chunkOffset[NUM_KEY_CHUNKS] = sums[LOCAL_ID];
+        segmentStart[sums[LOCAL_ID]] = NUM_KEYS;
+    }
+}
+
+KERNEL void listKeySegments(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const int* RESTRICT chunkOffset,
+        GLOBAL const mixed* RESTRICT stencilWeight, GLOBAL int* RESTRICT segmentStart, GLOBAL mixed* RESTRICT sortedWeight,
+        GLOBAL int* RESTRICT sortedParticle
+#ifdef CENTERED_DRAG
+        , GLOBAL int* RESTRICT keySegment
+#endif
+        ) {
+    LOCAL int sums[LBM_BLOCK_SIZE];
+    for (int c = GROUP_ID; c < NUM_KEY_CHUNKS; c += NUM_GROUPS) {
+        int k = c*LBM_BLOCK_SIZE + LOCAL_ID;
+        bool start = (k < NUM_KEYS && startsKeySegment(sortKeys, k));
+        sums[LOCAL_ID] = (start ? 1 : 0);
+        for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
+            SYNC_THREADS;
+            int add = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
+            SYNC_THREADS;
+            sums[LOCAL_ID] += add;
+        }
+        if (k < NUM_KEYS) {
+            int s = chunkOffset[c] + sums[LOCAL_ID] - 1;
+            if (start)
+                segmentStart[s] = k;
+            mm_long key = sortKeys[k];
+            int e = (int) (key - (key/KEY_STRIDE)*KEY_STRIDE);
+            sortedWeight[k] = stencilWeight[e];
+            sortedParticle[k] = e/STENCIL_SIZE;
+#ifdef CENTERED_DRAG
+            keySegment[e] = s;
+#endif
+        }
+        SYNC_THREADS;
+    }
+}
+
+/**
  * Explicit drag with an interpolation stencil (docs/theory.md, section 9), as on the Reference platform: the
  * particle sees u = sum_j xi_j j_j/rho_j over the STENCIL_SIZE nodes of its stencil, x fastest, a solid node being a wall
  * at rest (rho = 0), and F = -gamma m (v - u) + sqrt(2 gamma m kT) xi.  The weight of slot n of particle i is stored in
@@ -487,24 +579,23 @@ KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
 }
 
 /**
- * After sorting the keys of the stencils, the first entry of each node sums the reactions -xi_j F of the particles
- * whose stencils contain it, in particle order, and writes the sum to cellReaction: one writer per node.  With the
- * domain decomposition only the nodes of the block receive the reactions.
+ * After sorting the keys of the stencils and listing their segments, each segment sums the reactions -xi_j F of the
+ * particles whose stencils contain its node, in particle order, and writes the sum to cellReaction: one writer per node.
+ * With the domain decomposition only the nodes of the block receive the reactions.
  */
 KERNEL void sumStencilReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const mixed* RESTRICT particleForce,
-        GLOBAL mixed* RESTRICT cellReaction, GLOBAL const mixed* RESTRICT stencilWeight) {
-    for (int k = GLOBAL_ID; k < NUM_KEYS; k += GLOBAL_SIZE) {
-        mm_long segment = sortKeys[k]/KEY_STRIDE;
-        if (k > 0 && sortKeys[k-1]/KEY_STRIDE == segment)
-            continue;
-        int node = stencilReactionNode(sortKeys[k]);
+        GLOBAL mixed* RESTRICT cellReaction, GLOBAL const int* RESTRICT segmentStart, GLOBAL const int* RESTRICT chunkOffset,
+        GLOBAL const mixed* RESTRICT sortedWeight, GLOBAL const int* RESTRICT sortedParticle) {
+    const int numSegments = chunkOffset[NUM_KEY_CHUNKS];
+    for (int s = GLOBAL_ID; s < numSegments; s += GLOBAL_SIZE) {
+        int first = segmentStart[s], end = segmentStart[s+1];
+        int node = stencilReactionNode(sortKeys[first]);
         if (node == NUM_STORED)
             continue;
         mixed fx = 0, fy = 0, fz = 0;
-        for (int m = k; m < NUM_KEYS && sortKeys[m]/KEY_STRIDE == segment; m++) {
-            int e = (int) (sortKeys[m] - segment*KEY_STRIDE);
-            int i = e/STENCIL_SIZE;
-            mixed w = stencilWeight[e];
+        for (int m = first; m < end; m++) {
+            int i = sortedParticle[m];
+            mixed w = sortedWeight[m];
             fx -= w*particleForce[i];
             fy -= w*particleForce[NUM_COUPLED+i];
             fz -= w*particleForce[2*NUM_COUPLED+i];
@@ -642,47 +733,32 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
 }
 
 /**
- * After sorting the keys of the stencils: for every slot e, the position in the sorted keys of the first key of its
- * node (one writer per slot), where the conjugate gradients keep the vector spread on that node.
- */
-KERNEL void findKeySegments(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL int* RESTRICT keyFirst) {
-    for (int k = GLOBAL_ID; k < NUM_KEYS; k += GLOBAL_SIZE) {
-        mm_long segment = sortKeys[k]/KEY_STRIDE;
-        if (k > 0 && sortKeys[k-1]/KEY_STRIDE == segment)
-            continue;
-        for (int m = k; m < NUM_KEYS && sortKeys[m]/KEY_STRIDE == segment; m++)
-            keyFirst[(int) (sortKeys[m] - segment*KEY_STRIDE)] = k;
-    }
-}
-
-/**
  * Conjugate gradients of the centred drag: the vector p of the particles spread on the nodes, sum_l xi_jl p_l in
- * particle order, written for node j at the position of its first sorted key (3 components of NUM_KEYS each).  With the
- * domain decomposition p is the same on every rank, and each rank spreads it on the nodes of its block and halo, from
- * all the particles.
+ * particle order, written for the node of segment s at spreadValue[s] (3 components of NUM_KEYS each).  With the domain
+ * decomposition p is the same on every rank, and each rank spreads it on the nodes of its block and halo, from all the
+ * particles.
  */
-KERNEL void spreadStencilVector(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const mixed* RESTRICT stencilWeight,
-        GLOBAL const mixed* RESTRICT p, GLOBAL mixed* RESTRICT spreadValue) {
-    for (int k = GLOBAL_ID; k < NUM_KEYS; k += GLOBAL_SIZE) {
-        mm_long segment = sortKeys[k]/KEY_STRIDE;
-        if (k > 0 && sortKeys[k-1]/KEY_STRIDE == segment)
-            continue;
+KERNEL void spreadStencilVector(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const int* RESTRICT segmentStart,
+        GLOBAL const int* RESTRICT chunkOffset, GLOBAL const mixed* RESTRICT sortedWeight,
+        GLOBAL const int* RESTRICT sortedParticle, GLOBAL const mixed* RESTRICT p, GLOBAL mixed* RESTRICT spreadValue) {
+    const int numSegments = chunkOffset[NUM_KEY_CHUNKS];
+    for (int s = GLOBAL_ID; s < numSegments; s += GLOBAL_SIZE) {
+        int first = segmentStart[s], end = segmentStart[s+1];
 #ifdef DOMAIN_DECOMPOSITION
-        if (segment >= (mm_long) GNX*GNY*GNZ)
+        if (sortKeys[first]/KEY_STRIDE >= (mm_long) GNX*GNY*GNZ)
             continue;       // beyond the halo: only particles of other ranks reach it
 #endif
         mixed sx = 0, sy = 0, sz = 0;
-        for (int m = k; m < NUM_KEYS && sortKeys[m]/KEY_STRIDE == segment; m++) {
-            int e = (int) (sortKeys[m] - segment*KEY_STRIDE);
-            int i = e/STENCIL_SIZE;
-            mixed w = stencilWeight[e];
+        for (int m = first; m < end; m++) {
+            int i = sortedParticle[m];
+            mixed w = sortedWeight[m];
             sx += w*p[i];
             sy += w*p[NUM_COUPLED+i];
             sz += w*p[2*NUM_COUPLED+i];
         }
-        spreadValue[k] = sx;
-        spreadValue[NUM_KEYS+k] = sy;
-        spreadValue[2*NUM_KEYS+k] = sz;
+        spreadValue[s] = sx;
+        spreadValue[NUM_KEYS+s] = sy;
+        spreadValue[2*NUM_KEYS+s] = sz;
     }
 }
 
@@ -691,7 +767,7 @@ KERNEL void spreadStencilVector(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL 
  * (spread p)_j over the stencil of particle k, in slot order.
  */
 KERNEL void multiplyStencilMatrix(GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mixed* RESTRICT interpWeight,
-        GLOBAL const int* RESTRICT keyFirst, GLOBAL const mixed* RESTRICT spreadValue, GLOBAL const mixed* RESTRICT p,
+        GLOBAL const int* RESTRICT keySegment, GLOBAL const mixed* RESTRICT spreadValue, GLOBAL const mixed* RESTRICT p,
         GLOBAL mixed* RESTRICT result, mixed gamma
 #ifdef DOMAIN_DECOMPOSITION
         , GLOBAL const int* RESTRICT particleOwned
@@ -711,7 +787,7 @@ KERNEL void multiplyStencilMatrix(GLOBAL const mixed* RESTRICT particleMass, GLO
         mixed sx = 0, sy = 0, sz = 0;
         for (int n = 0; n < STENCIL_SIZE; n++) {
             int e = i*STENCIL_SIZE + n;
-            int k = keyFirst[e];
+            int k = keySegment[e];
             mixed w = interpWeight[e];
             sx += spreadValue[k]*w;
             sy += spreadValue[NUM_KEYS+k]*w;

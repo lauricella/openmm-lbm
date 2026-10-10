@@ -640,8 +640,15 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         particleWallMomentum.upload(vector<double>(3*numCoupled, 0.0), true);
         // One key per particle, or with an interpolation stencil one per node of its stencil.
         sortKeys.initialize(cc, numCoupled*stencilSize, sizeof(long long), "lbmSortKeys");
-        if (stencilSize > 1)
-            stencilWeight.initialize(cc, numCoupled*stencilSize, elementSize, "lbmStencilWeight");
+        if (stencilSize > 1) {
+            int numKeys = numCoupled*stencilSize, numChunks = (numKeys+blockSize-1)/blockSize;
+            stencilWeight.initialize(cc, numKeys, elementSize, "lbmStencilWeight");
+            chunkCount.initialize<int>(cc, numChunks, "lbmChunkCount");
+            chunkOffset.initialize<int>(cc, numChunks+1, "lbmChunkOffset");
+            segmentStart.initialize<int>(cc, numKeys+1, "lbmSegmentStart");
+            sortedWeight.initialize(cc, numKeys, elementSize, "lbmSortedWeight");
+            sortedParticle.initialize<int>(cc, numKeys, "lbmSortedParticle");
+        }
         if (centered && stencilSize == 1) {
             knownVelocity.initialize(cc, 3*numCoupled, elementSize, "lbmKnownVelocity");
             randomForce.initialize(cc, 3*numCoupled, elementSize, "lbmRandomForce");
@@ -652,7 +659,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             int numKeys = numCoupled*stencilSize;
             interpWeight.initialize(cc, numKeys, elementSize, "lbmInterpWeight");
             stencilNode.initialize<int>(cc, numKeys, "lbmStencilNode");
-            keyFirst.initialize<int>(cc, numKeys, "lbmKeyFirst");
+            keySegment.initialize<int>(cc, numKeys, "lbmKeySegment");
             spreadValue.initialize(cc, 3*numKeys, elementSize, "lbmSpreadValue");
             gradientDiagonal.initialize(cc, numCoupled, elementSize, "lbmGradientDiagonal");
             for (ComputeArray* array : {&gradientRhs, &gradientResidual, &gradientPreconditioned, &gradientDirection, &gradientProduct})
@@ -853,6 +860,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             long long scramble = scrambleFactor(numNodes);
             defines["STENCIL_SCRAMBLE"] = cc.intToString(scramble);
             defines["STENCIL_UNSCRAMBLE"] = cc.intToString(scrambleInverse(scramble, numNodes));
+            if (centered)
+                defines["CENTERED_DRAG"] = "1";
         }
         defines["DX"] = cc.doubleToString(lattice.dx, true);
         defines["VELOCITY_SCALE"] = cc.doubleToString(lattice.getVelocityScale(), true);
@@ -904,8 +913,22 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         sumReactionsKernel->addArg(sortKeys);
         sumReactionsKernel->addArg(particleForce);
         sumReactionsKernel->addArg(cellReaction);
-        if (stencilSize > 1)
-            sumReactionsKernel->addArg(stencilWeight);
+        if (stencilSize > 1) {
+            for (ComputeArray* array : {&segmentStart, &chunkOffset, &sortedWeight, &sortedParticle})
+                sumReactionsKernel->addArg(*array);
+            countSegmentsKernel = coupling->createKernel("countKeySegments");
+            countSegmentsKernel->addArg(sortKeys);
+            countSegmentsKernel->addArg(chunkCount);
+            scanSegmentsKernel = coupling->createKernel("scanKeySegments");
+            scanSegmentsKernel->addArg(chunkCount);
+            scanSegmentsKernel->addArg(chunkOffset);
+            scanSegmentsKernel->addArg(segmentStart);
+            listSegmentsKernel = coupling->createKernel("listKeySegments");
+            for (ComputeArray* array : {&sortKeys, &chunkOffset, &stencilWeight, &segmentStart, &sortedWeight, &sortedParticle})
+                listSegmentsKernel->addArg(*array);
+            if (centered)
+                listSegmentsKernel->addArg(keySegment);
+        }
         clearReactionsKernel = coupling->createKernel("clearCellReactions");
         clearReactionsKernel->addArg(sortKeys);
         clearReactionsKernel->addArg(cellReaction);
@@ -949,18 +972,14 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
                     prepareCenteredKernel->addArg();    // floating point force buffers and their number, set on first use
             if (decomposed)
                 prepareCenteredKernel->addArg(particleOwned);
-            keySegmentsKernel = coupling->createKernel("findKeySegments");
-            keySegmentsKernel->addArg(sortKeys);
-            keySegmentsKernel->addArg(keyFirst);
             spreadKernel = coupling->createKernel("spreadStencilVector");
-            spreadKernel->addArg(sortKeys);
-            spreadKernel->addArg(stencilWeight);
-            spreadKernel->addArg(gradientDirection);
-            spreadKernel->addArg(spreadValue);
+            for (ComputeArray* array : {&sortKeys, &segmentStart, &chunkOffset, &sortedWeight, &sortedParticle, &gradientDirection,
+                    &spreadValue})
+                spreadKernel->addArg(*array);
             multiplyKernel = coupling->createKernel("multiplyStencilMatrix");
             multiplyKernel->addArg(particleMass);
             multiplyKernel->addArg(interpWeight);
-            multiplyKernel->addArg(keyFirst);
+            multiplyKernel->addArg(keySegment);
             multiplyKernel->addArg(spreadValue);
             multiplyKernel->addArg(gradientDirection);
             multiplyKernel->addArg(gradientProduct);
@@ -1428,7 +1447,7 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
         }
         sort->sort(sortKeys);
         if (stencilSize > 1) {
-            keySegmentsKernel->execute(numCoupled*stencilSize);
+            listKeySegments();
             solveStencilDrag();
             if (isStep) {
                 sumReactionsKernel->execute(numCoupled*stencilSize);
@@ -1451,7 +1470,12 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
             sumParticleForces();
         if (isStep) {
             sort->sort(sortKeys);
-            sumReactionsKernel->execute(numCoupled*stencilSize);
+            if (stencilSize > 1) {
+                listKeySegments();
+                sumReactionsKernel->execute(numCoupled*stencilSize);
+            }
+            else
+                sumReactionsKernel->execute(numCoupled);
         }
     }
     if (isStep)
@@ -1494,6 +1518,13 @@ void CommonCalcLBMForceKernel::sumOverRanks(ComputeArray& array) {
     array.upload(values, true);
 }
 
+void CommonCalcLBMForceKernel::listKeySegments() {
+    int numChunks = chunkCount.getSize();
+    countSegmentsKernel->execute(numChunks*blockSize, blockSize);
+    scanSegmentsKernel->execute(blockSize, blockSize);
+    listSegmentsKernel->execute(numChunks*blockSize, blockSize);
+}
+
 void CommonCalcLBMForceKernel::solveStencilDrag() {
     // The linear system of the centred drag with a stencil (prepareCenteredStencil()), solved as on the Reference
     // platform by conjugate gradients with the diagonal as preconditioner, from the solution of the diagonal, until the
@@ -1503,7 +1534,7 @@ void CommonCalcLBMForceKernel::solveStencilDrag() {
     // to decide when to stop.
     int numCoupled = lattice.particles.size();
     auto multiply = [&](ComputeArray& p) {
-        spreadKernel->setArg(2, p);
+        spreadKernel->setArg(5, p);
         spreadKernel->execute(numCoupled*stencilSize);
         multiplyKernel->setArg(4, p);
         multiplyKernel->execute(numCoupled);

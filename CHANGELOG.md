@@ -11,7 +11,8 @@ versions the API may still change.
   section 9): for now with both drag schemes and periodic faces on every platform, with one domain and with the
   domain decomposition; open faces stop with an error. Solid nodes of a stencil count as a wall at rest. On the GPU platforms the reactions of the stencils are
   summed per node in particle order through sorted keys, one per node of every stencil, without atomic operations,
-  and agree with the Reference platform to rounding.
+  one thread per node from a list of the segments of the sorted keys, and agree with the Reference platform to
+  rounding.
   With the centred drag, particles whose stencils share nodes are solved together by conjugate gradients. With the
   decomposition the ranks exchange a coupling halo of one or two layers (on the GPU platforms the arrays of the block
   hold two layers of halo with Keys), and the result is that of one domain bit for bit. The self-mobility of every stencil agrees with the linearized calculation within 0.0004. Serialization version
