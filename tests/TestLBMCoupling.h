@@ -33,7 +33,9 @@ double getCouplingTolerance(Platform& platform, double tolerance) {
 /**
  * Create a System with numParticles particles of mass couplingMass and a fluid of 8x8x8 nodes (tau = 0.8),
  * without removal of the fluid momentum.  The particles listed in coupled are coupled to the fluid; if the
- * list is empty, all of them are.
+ * list is empty, all of them are.  The random numbers have a fixed seed, so that a test that checks a value which
+ * depends on them (testMomentumConservation(): the particle crosses the boundary, 4 standard deviations of its
+ * random displacement away) gives the same result in every run; tests that need other seeds set them.
  */
 System* createCoupledSystem(LBMForce*& force, int numParticles, double friction, double temperature, vector<int> coupled=vector<int>()) {
     int n = 8;
@@ -46,6 +48,7 @@ System* createCoupledSystem(LBMForce*& force, int numParticles, double friction,
     force->setFluidMomentumRemovalFrequency(0);
     force->setFriction(friction);
     force->setTemperature(temperature);
+    force->setRandomNumberSeed(1);
     for (int i = 0; i < numParticles; i++)
         system->addParticle(couplingMass);
     if (coupled.empty())

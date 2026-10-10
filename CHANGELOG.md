@@ -27,6 +27,11 @@ versions the API may still change.
 ### Fixed
 - Tests: a range-based `for` loop read the velocities of a temporary `State` already destroyed
   (`testRepeatedForceEvaluation`), which made its tolerance depend on undefined memory.
+- Tests: the coupling tests at 300 K ran with a random seed chosen by the platform, so `testMomentumConservation` and
+  `testStencilMomentumConservation`, which check that a particle has crossed the periodic boundary after 50 steps,
+  failed about once in 10^4 runs: the crossing is 4.1 standard deviations of the random displacement away with the
+  explicit drag (measured with 2*10^4 to 4*10^4 repetitions of the test on each of the Reference, CUDA and OpenCL
+  platforms, with the same distribution on all of them).  The Systems of the coupling tests now have a fixed seed.
 
 ### Documentation
 - `docs/theory.md`, new section 9: the interpolation stencils of the coupling planned for version 0.5.0 (trilinear,
