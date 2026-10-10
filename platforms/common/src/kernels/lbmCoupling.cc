@@ -769,9 +769,48 @@ KERNEL void spreadStencilVector(GLOBAL const int* RESTRICT segmentStart, GLOBAL 
 }
 
 /**
- * The product of the matrix of the centred drag with p, one thread per particle: (1 + a) p_k/m_k + a sum_j xi_jk/rho_j
- * (spread p)_j over the stencil of particle k, in slot order.
+ * The product of the matrix of the centred drag with p: (1 + a) p_k/m_k + a sum_j xi_jk/rho_j (spread p)_j over the
+ * stencil of particle k, in slot order.  The values of the slots are scattered: with the three-point kernel and Keys a
+ * work group of LBM_BLOCK_SIZE threads takes LBM_BLOCK_SIZE/STENCIL_SIZE particles at a time, its threads read the
+ * values of the slots together, one per slot, into local memory, and then three threads per particle, one per
+ * component, add them in slot order; with the trilinear kernel, whose 8 slots this does not speed up, one thread per
+ * particle reads and adds them.
  */
+#if STENCIL_SIZE >= 27
+#define STENCIL_PARTICLES_PER_GROUP (LBM_BLOCK_SIZE/STENCIL_SIZE)
+
+KERNEL void multiplyStencilMatrix(GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mixed* RESTRICT interpWeight,
+        GLOBAL const int* RESTRICT keySegment, GLOBAL const mixed* RESTRICT spreadValue, GLOBAL const mixed* RESTRICT p,
+        GLOBAL mixed* RESTRICT result, mixed gamma) {
+    LOCAL mixed slotValue[4*LBM_BLOCK_SIZE];
+    const mixed a = gamma*0.5f;
+    for (int firstParticle = GROUP_ID*STENCIL_PARTICLES_PER_GROUP; firstParticle < NUM_COUPLED;
+            firstParticle += NUM_GROUPS*STENCIL_PARTICLES_PER_GROUP) {
+        int slotParticle = firstParticle + LOCAL_ID/STENCIL_SIZE;
+        if (LOCAL_ID < STENCIL_PARTICLES_PER_GROUP*STENCIL_SIZE && slotParticle < NUM_COUPLED) {
+            int e = slotParticle*STENCIL_SIZE + LOCAL_ID%STENCIL_SIZE;
+            int k = keySegment[e];
+            slotValue[4*LOCAL_ID] = spreadValue[3*k];
+            slotValue[4*LOCAL_ID+1] = spreadValue[3*k+1];
+            slotValue[4*LOCAL_ID+2] = spreadValue[3*k+2];
+            slotValue[4*LOCAL_ID+3] = interpWeight[e];
+        }
+        SYNC_THREADS;
+        int localParticle = LOCAL_ID/3, component = LOCAL_ID%3;
+        int i = firstParticle + localParticle;
+        if (localParticle < STENCIL_PARTICLES_PER_GROUP && i < NUM_COUPLED) {
+            mixed sum = 0;
+            for (int n = 0; n < STENCIL_SIZE; n++) {
+                int slot = 4*(localParticle*STENCIL_SIZE + n);
+                sum += slotValue[slot+component]*slotValue[slot+3];
+            }
+            mixed d = (1+a)/particleMass[i];
+            result[component*NUM_COUPLED+i] = p[component*NUM_COUPLED+i]*d + sum*a;
+        }
+        SYNC_THREADS;
+    }
+}
+#else
 KERNEL void multiplyStencilMatrix(GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mixed* RESTRICT interpWeight,
         GLOBAL const int* RESTRICT keySegment, GLOBAL const mixed* RESTRICT spreadValue, GLOBAL const mixed* RESTRICT p,
         GLOBAL mixed* RESTRICT result, mixed gamma) {
@@ -792,6 +831,7 @@ KERNEL void multiplyStencilMatrix(GLOBAL const mixed* RESTRICT particleMass, GLO
         result[2*NUM_COUPLED+i] = p[2*NUM_COUPLED+i]*d + sz*a;
     }
 }
+#endif
 
 /**
  * The three components of the dot product of two vectors of the particles, in two stages so that the result does not

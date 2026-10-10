@@ -233,6 +233,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     useDouble = (cc.getUseDoublePrecision() || cc.getUseMixedPrecision());
     int elementSize = (useDouble ? sizeof(double) : sizeof(float));
     blockSize = ComputeContext::ThreadBlockSize;
+    // The product of the conjugate gradients of a stencil (multiplyStencilMatrix()) puts its slots in one work group.
+    if (stencilSize > blockSize)
+        throw OpenMMException("LBMForce: the interpolation stencil has more nodes than a work group of the platform");
     numGroups = max(1, min(cc.getNumThreadBlocks(), (numLocal+blockSize-1)/blockSize));
     populations.initialize(cc, D3Q19::numVelocities*numStored, elementSize, "lbmPopulations");
     densityDeviation.initialize(cc, numStored, elementSize, "lbmDensityDeviation");
@@ -1562,7 +1565,12 @@ void CommonCalcLBMForceKernel::solveStencilDrag() {
         spreadKernel->setArg(4, p);
         spreadKernel->execute(numCoupled*stencilSize);
         multiplyKernel->setArg(4, p);
-        multiplyKernel->execute(numCoupled);
+        if (stencilSize >= 27) {
+            int particlesPerGroup = blockSize/stencilSize;
+            multiplyKernel->execute(((numCoupled+particlesPerGroup-1)/particlesPerGroup)*blockSize, blockSize);
+        }
+        else
+            multiplyKernel->execute(numCoupled);
     };
     auto dot = [&](ComputeArray& x, ComputeArray& y, int offset) {
         dotKernel->setArg(0, x);
