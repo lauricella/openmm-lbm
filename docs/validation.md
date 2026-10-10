@@ -1186,7 +1186,7 @@ many crowded beads four GPUs pay off only when the fluid takes most of the step.
 but would leave 701 buckets above 256 keys (simulated with the keys of these beads; none with the buckets of equal
 width), and one sum over the ranks of the right-hand sides, the diagonal and the densities of the segments together
 instead of three (on four GPUs 4.95 instead of 4.40 ms with the trilinear stencil, 9.08 instead of 7.70 with the
-three-point one: the first sum, before the sort, keeps the ranks together).
+three-point one; not explained).
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
