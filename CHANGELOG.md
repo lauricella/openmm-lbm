@@ -45,6 +45,11 @@ versions the API may still change.
   platforms, with the same distribution on all of them).  The Systems of the coupling tests now have a fixed seed.
 
 ### Documentation
+- `docs/validation.md`, Temperature near open faces: with the fluctuating fluid and the centred drag the coupled
+  particles near `Velocity` faces have the set temperature with every stencil; near a `Density` face they are up to 8%
+  hotter within four nodes, with the nearest node as well, because the fluid next to a `Density` face is hotter (a
+  limitation of the open faces since version 0.3.0; `docs/user_guide/api_reference.md`, Open faces).
+- `docs/user_guide/interpolation.md`: the interpolation stencils step by step, with their weights written out.
 - `docs/theory.md`, new section 9: the interpolation stencils of the coupling planned for version 0.5.0 (trilinear,
   three-point and Keys kernels; interpolation of the node velocity and spreading of the reaction with the same
   weights; conservation of momentum and angular momentum; fluctuation-dissipation balance, exact for the centred drag

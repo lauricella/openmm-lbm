@@ -1184,7 +1184,9 @@ many crowded beads four GPUs pay off only when the fluid takes most of the step.
 256 threads instead of 64 for the sums over the segments (no change), reading four keys at a time in the spreading
 (6% slower), and OpenMM's sort with buckets estimated from 64 samples, which skips its range pass of 1.9 ms with `Keys`
 but would leave 701 buckets above 256 keys (simulated with the keys of these beads; none with the buckets of equal
-width).
+width), and one sum over the ranks of the right-hand sides, the diagonal and the densities of the segments together
+instead of three (on four GPUs 4.95 instead of 4.40 ms with the trilinear stencil, 9.08 instead of 7.70 with the
+three-point one: the first sum, before the sort, keeps the ranks together).
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
