@@ -436,18 +436,32 @@ coupled to node 0, next to the other face). Temperatures in K:
 With `Velocity` faces every stencil gives the set temperature at every height, within 0.5%, also in the cell between
 the last node and the end of the box (the low value at 2.5 is in every column: the shared random numbers). Near a
 `Density` face the beads are hotter, from 4 nodes away (+1% at 12, +2% at 13.5, +3% to 5% at 14.5, +5% to 8% at 15.25),
-**with the nearest node as well**: the cause is the fluid next to the `Density` face, not the stencils. The kinetic
-temperature of the fluid per plane, $`\rho\Delta x^3\langle\lvert\mathbf u - \bar{\mathbf u}\rvert^2\rangle/(3k_B)`$
-with $`\bar{\mathbf u}`$ the mean velocity of the plane (`getFluidFields()` every 500 steps, the runs with the nearest
-node), in K:
+**with the nearest node as well**: the cause is next to the `Density` face, not in the stencils.
 
-| plane $`z/\Delta x`$ | 0 | 1 | 2 | 3 | 4 to 11 | 12 | 13 | 14 | 15 |
-|---|---|---|---|---|---|---|---|---|---|
-| vv | 196.4 | 290.1 | 297.5 | 298.0 | 297.8 to 299.7 | 298.1 | 297.7 | 291.3 | 196.1 |
-| vd | 196.5 | 290.2 | 297.5 | 298.1 | 297.9 to 299.8 | 300.3 | 302.9 | 307.0 | 349.4 |
+**The fluid alone next to walls and open faces** (no coupled particles; CUDA, mixed precision, one A100). $`16 \times 16
+\times 24`$ nodes, the same fluid at 300 K, no removal of the momentum, periodic along $`x`$ and $`y`$, along $`z`$
+periodic, solid planes $`k = 0`$ and $`k = 23`$ (bounce-back or regularized walls), or open faces; $`2\cdot10^5`$
+steps after $`2\cdot10^4`$, `getFluidFields()` every 50 steps. The kinetic temperature of a plane per component,
+$`\rho\Delta x^3\langle(u_a - \bar u_a)^2\rangle/k_B`$, with $`\bar u_a`$ the mean of the plane and the factor
+$`N/(N - 1)`$ for the subtracted mean ($`N = 256`$ nodes per plane), tangential (mean of $`x`$ and $`y`$) / normal,
+in K (errors 0.3 to 0.5 K), from the boundary inwards (the face plane, or the first fluid plane next to a wall):
 
-The planes of the faces are cold at a `Velocity` face and hot at a `Density` face, whose excess reaches about three
-planes into the fluid; beads next to a `Velocity` face nevertheless have the set temperature. With a fluctuating fluid
+| plane | periodic | bounce-back walls | regularized walls | `Velocity` face | `Density` face |
+|---|---|---|---|---|---|
+| 1st | 300 / 300 | 300 / 300 | 286 / 300 | 295 / 0 (imposed) | 297 / 464 |
+| 2nd | 300 / 300 | 300 / 300 | 299 / 300 | 295 / 284 | 304 / 318 |
+| 3rd | 300 / 300 | 300 / 301 | 300 / 300 | 299 / 297 | 303 / 309 |
+| 4th | 300 / 300 | 300 / 301 | 300 / 301 | 300 / 300 | 302 / 304 |
+| 5th | 300 / 300 | 300 / 300 | 300 / 300 | 300 / 300 | 301 / 302 |
+
+Bounce-back walls are at equilibrium from the first fluid node; regularized walls cool the tangential velocity of the
+first node by 4.6%; at a `Velocity` face the normal velocity of the face plane is the imposed one and does not
+fluctuate, and the next two planes are cooler along the normal. At a `Density` face the normal velocity is hot on
+the plane of the face (+55%) and on the next four planes (+6%, +3%, +1.3%, +0.8%), the tangential velocities by at
+most 1.4%, and the variance of the density of the face plane is 39% of that of the interior (with the other
+boundaries it is the interior one, except +43% on the plane of a `Velocity` face). The beads near the `Density` face
+are hotter (+5% to 8%, from their tangential velocities) than this excess of the tangential velocities of the fluid:
+the variance of the fluid at a node does not account for all of it (not explained yet). With a fluctuating fluid
 keep coupled particles at least five nodes away from `Density` faces.
 
 ## Fluctuating fluid (`tests/TestLBMFluctuations.h`, all platforms)
