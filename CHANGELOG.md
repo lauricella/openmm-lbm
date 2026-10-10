@@ -15,7 +15,11 @@ versions the API may still change.
   bit. The self-mobility of every stencil agrees with the linearized calculation within 0.0004. Serialization version
   9 and checkpoint version 6 with the stencil (older ones load with the nearest node). The warning for
   $`\tau > 1.7`$ with the explicit drag is not printed with the three-point stencil, whose self-mobility stays
-  positive, and the warning on the temperature with fluid fluctuations uses its self weight 1/8.
+  positive, and the warning on the temperature of the explicit drag with fluid fluctuations uses the self weight of
+  the stencil averaged over a cell (8/27, 1/8 and $`(57/70)^3`$ for the trilinear, three-point and Keys stencils).
+  Temperatures of the particles with every stencil and both drags, with and without fluctuations of the fluid,
+  checked against the exact stationary state of the linearized lattice and in the stochastic tests T2, T6 and T7;
+  with the centred drag in the fluctuating fluid they are exact (`testStencilCanonicalTemperature`).
 
 ### Fixed
 - Tests: a range-based `for` loop read the velocities of a temporary `State` already destroyed
@@ -25,7 +29,8 @@ versions the API may still change.
 - `docs/theory.md`, new section 9: the interpolation stencils of the coupling planned for version 0.5.0 (trilinear,
   three-point and Keys kernels; interpolation of the node velocity and spreading of the reaction with the same
   weights; conservation of momentum and angular momentum; fluctuation-dissipation balance, exact for the centred drag
-  in the fluctuating fluid; the centred drag as a linear system; predicted self-mobility). Not implemented yet.
+  in the fluctuating fluid; the centred drag as a linear system; self-mobility), and `docs/validation.md`,
+  Interpolation stencils, with the measured self-mobility and temperatures.
 
 ## 0.4.0 (2026-10-09)
 

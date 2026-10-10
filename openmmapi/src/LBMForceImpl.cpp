@@ -284,8 +284,10 @@ void LBMForceImpl::initialize(ContextImpl& context) {
     // With the fluctuating fluid the explicit drag makes the coupled particles too hot, by about
     // gamma dt m/(2 m_c (1 + zeta y)), because it misses the response of the cell within the step; the centred drag
     // gives the right temperature (docs/theory.md, section 7).  The warning gives the bound gamma dt m/(2 m_c) for the
-    // heaviest coupled particle, times the largest self weight sum_j xi_j^2 of the stencil: 1, or 1/8 for the
-    // three-point stencil (section 9).
+    // heaviest coupled particle, times the self weight K = sum_j xi_j^2 of the stencil averaged over a cell, which a
+    // particle that moves across the lattice sees (section 9): 1 for the nearest node, (2/3)^3 = 8/27 for the
+    // trilinear stencil, 1/8 for the three-point stencil and (57/70)^3 for Keys, the cube of the mean over a period of
+    // sum_j phi(r - j)^2 along an axis.
 
     if (warn && !lattice.particles.empty() && lattice.dragScheme == LBMForce::Explicit && lattice.fluidFluctuations &&
             lattice.kT > 0 && gammaDt > 0) {
@@ -293,12 +295,20 @@ void LBMForceImpl::initialize(ContextImpl& context) {
         double maxMass = 0;
         for (int particle : lattice.particles)
             maxMass = max(maxMass, context.getSystem().getParticleMass(particle));
-        double selfWeight = (lattice.interpolationStencil == LBMForce::ThreePoint ? 0.125 : 1.0);
+        double selfWeight = 1.0;
+        if (lattice.interpolationStencil == LBMForce::Trilinear)
+            selfWeight = 8.0/27.0;
+        else if (lattice.interpolationStencil == LBMForce::ThreePoint)
+            selfWeight = 0.125;
+        else if (lattice.interpolationStencil == LBMForce::Keys)
+            selfWeight = pow(57.0/70.0, 3);
         cerr << "Warning: LBMForce: with fluid fluctuations the explicit drag makes the coupled particles hotter than "
-             << "the set temperature, by about friction*dt*m" << (selfWeight < 1.0 ? "/8" : "") << "/(2 m_c) = "
+             << "the set temperature, by about friction*dt*m" << (selfWeight < 1.0 ? "*K" : "") << "/(2 m_c) = "
              << 100.0*gammaDt*maxMass*selfWeight/(2.0*cellMass)
-             << "% for the heaviest one (m_c = " << cellMass << " Da is the mass of fluid in a cell). Use the Centered "
-             << "drag scheme with fluid fluctuations." << endl;
+             << "% for the heaviest one (m_c = " << cellMass << " Da is the mass of fluid in a cell";
+        if (selfWeight < 1.0)
+            cerr << ", K = " << selfWeight << " the self weight of the interpolation stencil averaged over a cell";
+        cerr << "). Use the Centered drag scheme with fluid fluctuations." << endl;
     }
 
     // The size of the fluctuations of the fluid: kT in lattice units, kT/(m_c (dx/dt)^2), and the thermal Mach number

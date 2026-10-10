@@ -471,9 +471,33 @@ void testStencilErrors(Platform& platform) {
 /**
  * With the explicit drag the warning for tau > 1.7 (self-mobility small or negative) is printed with the trilinear and
  * Keys stencils, which give the nearest node at a node, and not with the three-point stencil, whose self-mobility stays
- * positive (docs/theory.md, section 9).
+ * positive (docs/theory.md, section 9).  With the fluctuating fluid the warning on the heating of the explicit drag
+ * gives friction*dt*m*K/(2 m_c) with the self weight K averaged over a cell: 8/27, 1/8 and (57/70)^3 of the 6.64% of
+ * the nearest node for a particle of 100 Da with friction*dt = 0.1.
  */
 void testStencilWarnings(Platform& platform) {
+    const char* heating[] = {"= 1.968", "= 0.830", "= 3.586"};
+    for (int k = 0; k < 3; k++) {
+        LBMForce* force;
+        System* system = createCoupledSystem(force, 1, 10.0, 300.0);
+        force->setFluidFluctuations(true);
+        force->setInterpolationStencil(allStencils[k]);
+        VerletIntegrator integrator(fluidDt);
+        stringstream captured;
+        streambuf* original = cerr.rdbuf(captured.rdbuf());
+        try {
+            Context context(*system, integrator, platform);
+        }
+        catch (...) {
+            cerr.rdbuf(original);
+            throw;
+        }
+        cerr.rdbuf(original);
+        ASSERT(captured.str().find("the explicit drag makes the coupled particles hotter") != string::npos);
+        ASSERT(captured.str().find(heating[k]) != string::npos);
+        ASSERT(captured.str().find("averaged over a cell") != string::npos);
+        delete system;
+    }
     for (LBMForce::InterpolationStencil stencil : allStencils) {
         LBMForce* force;
         System* system = createCoupledSystem(force, 1, 1.0, 0.0);
@@ -496,6 +520,63 @@ void testStencilWarnings(Platform& platform) {
     }
 }
 
+/**
+ * With the centred drag and the fluctuating fluid the canonical distribution is stationary with every stencil
+ * (docs/theory.md, section 9): two particles of 100 and 1000 Da with overlapping stencils, held at their positions on a
+ * 4^3 lattice (the position is set again before every step, the velocity evolves), have at the half step the
+ * temperature of the canonical ensemble with the total momentum fixed, m <v^2>/3 = kT (1 - m/M), M being the mass of
+ * the particles and the fluid.  The statistical error is about 1.3%; with the explicit drag, or with the fluid without
+ * fluctuations, the temperatures differ by 9 to 48%.
+ */
+void testStencilCanonicalTemperature(Platform& platform) {
+    int n = 4, steps = 40000, every = 4;
+    double temperature = 300.0, kT = BOLTZ*temperature;
+    const LBMForce::InterpolationStencil stencils[] = {LBMForce::NearestNode, LBMForce::Trilinear, LBMForce::ThreePoint,
+                                                       LBMForce::Keys};
+    vector<double> masses = {100.0, 1000.0};
+    vector<Vec3> positions = {Vec3(1.5, 2.0, 2.0)*fluidDx, Vec3(2.7, 2.2, 2.1)*fluidDx};
+    double totalMass = masses[0] + masses[1] + n*n*n*fluidDensity*fluidDx*fluidDx*fluidDx;
+    for (LBMForce::InterpolationStencil stencil : stencils) {
+        System system;
+        system.setDefaultPeriodicBoxVectors(Vec3(n*fluidDx, 0, 0), Vec3(0, n*fluidDx, 0), Vec3(0, 0, n*fluidDx));
+        LBMForce* force = new LBMForce();
+        force->setGridSize(n, n, n);
+        force->setFluidDensity(fluidDensity);
+        force->setKinematicViscosity((1.1-0.5)/3.0*fluidDx*fluidDx/fluidDt);
+        force->setFluidMomentumRemovalFrequency(0);
+        force->setFriction(10.0);
+        force->setTemperature(temperature);
+        force->setFluidFluctuations(true);
+        force->setDragScheme(LBMForce::Centered);
+        force->setInterpolationStencil(stencil);
+        force->setRandomNumberSeed(5);
+        for (int i = 0; i < 2; i++) {
+            system.addParticle(masses[i]);
+            force->addParticle(i);
+        }
+        system.addForce(force);
+        VerletIntegrator integrator(fluidDt);
+        Context context(system, integrator, platform);
+        context.setPositions(positions);
+        for (int step = 0; step < steps/10; step++) {
+            context.setPositions(positions);
+            integrator.step(1);
+        }
+        vector<double> sum(2, 0.0);
+        for (int step = 0; step < steps; step++) {
+            context.setPositions(positions);
+            integrator.step(1);
+            if (step%every == 0) {
+                State state = context.getState(State::Velocities);
+                for (int i = 0; i < 2; i++)
+                    sum[i] += masses[i]*state.getVelocities()[i].dot(state.getVelocities()[i])/3.0;
+            }
+        }
+        for (int i = 0; i < 2; i++)
+            ASSERT_EQUAL_TOL(kT*(1.0-masses[i]/totalMass), sum[i]/(steps/every), 0.05);
+    }
+}
+
 void runStencilTests(Platform& platform) {
     testStencilErrors(platform);
     if (platform.getName() != "Reference")
@@ -508,4 +589,5 @@ void runStencilTests(Platform& platform) {
     testCenteredStencilSolve(platform);
     testStencilTranslation(platform);
     testStencilWarnings(platform);
+    testStencilCanonicalTemperature(platform);
 }

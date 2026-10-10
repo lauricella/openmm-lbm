@@ -500,7 +500,9 @@ For now the stencils other than `NearestNode` work only on the Reference platfor
 domain decomposition, and periodic faces; the other platforms and open faces stop with an error. With the centred drag
 the particles whose stencils share nodes are solved together by conjugate gradients. The stencil is fixed when the Context is
 created and saved with the force by `XmlSerializer`; a checkpoint can only be loaded in a Context with the same
-stencil.
+stencil. With the centred drag and fluid fluctuations the coupled particles have the set temperature with every
+stencil; with the explicit drag they are too hot, as with the nearest node, but less, by about the self weight of the
+stencil averaged over a cell (8/27, 1/8 and 0.540; [validation.md](../validation.md#interpolation-stencils-teststestlbmstencilsh-reference-platform)).
 
 ```python
 force.setInterpolationStencil(LBMForce.ThreePoint)

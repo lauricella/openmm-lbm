@@ -219,7 +219,15 @@ In development for version 0.5.0 (`docs/theory.md`, section 9); the other platfo
 - `testStencilErrors`: a different stencil in `updateParametersInContext()` or in a checkpoint, an unknown stencil
   and open faces stop with an error.
 - `testStencilWarnings`: with the explicit drag at $`\tau = 1.75`$ the warning on the self-mobility is printed with the
-  trilinear and Keys stencils, not with the three-point one.
+  trilinear and Keys stencils, not with the three-point one; with the fluctuating fluid the warning on the heating of
+  the explicit drag gives 1.968%, 0.830% and 3.586% for a particle of 100 Da with $`\gamma\Delta t = 0.1`$ (the
+  6.64% of the nearest node times the self weight averaged over a cell, 8/27, 1/8 and $`(57/70)^3`$).
+- `testStencilCanonicalTemperature`: centred drag, fluctuating fluid, $`4^3`$ nodes, $`\tau = 1.1`$,
+  $`\gamma\Delta t = 0.1`$, two particles of 100 and 1000 Da with overlapping stencils held at their positions (set
+  again before every step) for 40000 steps, with the nearest node and every stencil: the half-step temperature is that
+  of the canonical ensemble with fixed total momentum, $`m\langle v^2\rangle/3 = k_BT\,(1 - m/M)`$ with $`M`$ the
+  mass of particles and fluid, within 5% (statistical error 1.3%; the explicit drag or the fluid without
+  fluctuations give 9% to 48% off).
 - The nearest node is unchanged: 64 arrays (fluid state, positions, velocities, forces) of 16 runs with both drags,
   both coupling schemes, with and without fluid fluctuations, with bounce-back and regularized walls, identical bit
   for bit to version 0.4.0.
@@ -247,6 +255,143 @@ of 4000 to 6500 steps. Positions in units of $`\Delta x`$ from a node; $`y\,\eta
 All 60 values agree with the linearized calculation of `docs/theory.md`, section 9, within 0.0004, which checks the
 interpolation, the spreading and both drags independently of the tests above. The nearest node agrees with section 2
 within 0.002: there the particle moved across the cells at 0.05 nm/ps.
+
+**Temperature with the particles held in place: exact comparison.** The linearized lattice of `docs/theory.md`,
+section 9 (the fluid of section 1 linearized about rest, Guo forcing, the fluctuations of section 7, particles at fixed
+positions with their random force) is a linear map with Gaussian noise, whose stationary covariance is computed
+exactly, by summing $`A^nQA^{n\mathsf T}`$ with repeated squaring after removing the conserved modes (eigenvalue 1:
+mass and total momentum) and the staggered modes that the particles do not reach (eigenvalue -1, for example the
+momentum $`(-1)^{x+t}j_x`$ at the wavevector $`\pi`$, an exact invariant of the fluid on a periodic lattice with an even
+number of nodes). The plugin runs on the same lattice of $`4^3`$ nodes ($`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 0.01 ps,
+$`\tau = 1.1`$, $`\gamma\Delta t = 0.1`$, 300 K) with the particles held at their positions (set again before every
+step), $`4\times10^6`$ steps per case: 56 cases, every stencil at a node, at the centre of a cell and at a generic
+point, $`m/m_c`$ = 1.33 and 13.3, both drags, with and without fluctuations of the fluid, and two particles with
+overlapping stencils (three-point and Keys, $`\tau = 0.62`$). The 128 temperatures, at the half and at the full step,
+relative to the canonical value $`k_BT\,(1 - m/M)`$:
+
+| Drag, fluid | exact values | largest deviation |
+|---|---|---|
+| centred, fluctuating | 1 | 0.9 standard errors |
+| centred, without fluctuations | 0.517 to 0.988 | 1.2 |
+| explicit, fluctuating | 1.006 to 1.593 | 0.8 |
+| explicit, without fluctuations | 0.668 to 0.994 | 1.2 |
+
+All agree within 1.2 standard errors (about 0.13%, from block averages), and within 0.18%: the random force, its
+spreading, the fluid noise and the solution of the centred drag are right for every stencil, also with overlapping
+stencils. The same 8 cases with two particles, with the domain decomposition (two ranks, the stencils across the
+blocks along x, y or z), agree within 1.7 standard errors (32 values). The centred drag in the fluctuating fluid gives
+exactly the canonical temperature; the others do not, and on this small lattice their exact values differ from the
+approximate formulas of linear response of `docs/theory.md` (sections 2 and 7) by up to 18% at $`\tau = 1.1`$ and more
+at $`\tau = 0.62`$; with free particles on $`16^3`$ nodes the formulas are much closer (below).
+
+**Stochastic tests with free particles (T2, T6, T7).** The tests of the section Stochastic tests T2, T6, T7 below,
+with the same cases, protocol and analysis, on the Reference platform with every stencil, both drags, and the fluid
+with and without fluctuations; T6 and T7 at $`L`$ = 8 nm ($`16^3`$ nodes, the lattice of the self-mobility above),
+with $`\gamma`$ = 5 and 10/ps and runs of 2 ns. A particle that moves across the lattice visits every position of a
+cell alike, so it sees the self weight and the self-mobility of the stencil averaged over a cell: the mean self weight
+is $`(2/3)^3 = 8/27`$ for the trilinear kernel, 1/8 for the three-point kernel and $`(57/70)^3 = 0.540`$ for Keys, and
+on this lattice at $`\tau = 1.1`$ the mean $`y_{\mathrm{centred}}`$ is 9.57e-5 (nearest node), 4.47e-5 (trilinear),
+3.02e-5 (three-point) and 6.58e-5 ps/Da (Keys), and $`y_{\mathrm{explicit}}`$ 2.93e-5, 2.53e-5, 2.18e-5 and 2.99e-5
+ps/Da (averages over $`8^3`$ positions of the linearized calculation). The predictions in parentheses are the formulas
+of `docs/theory.md` (sections 2, 7 and 9) averaged in this way: with the fluctuating fluid
+$`T\,\langle 1 + \gamma\Delta t\,mK/(2m_c(1 + \zeta y_{\mathrm{explicit}}))\rangle`$ for the explicit drag, and
+without fluctuations $`T\,\langle 1/(1 + \zeta y)\rangle`$ with the $`y`$ of the drag.
+
+T2 (100 particles of 100 Da, $`L`$ = 8 nm, 200 ps; four runs with different random numbers), mean temperatures in K.
+The statistical error, from the scatter of the four runs, is about 1 K at $`\gamma`$ = 1/ps and 0.3 to 0.4 K at 5 and
+10/ps. Fluctuating fluid:
+
+| $`\Delta t`$ (ps) | $`\tau`$ | $`\gamma`$ (1/ps) | centred, half step: `Trilinear` / `ThreePoint` / `Keys` | explicit, full step: `Trilinear` / `ThreePoint` / `Keys` |
+|---|---|---|---|---|
+| 0.005 | 0.80 | 1 | 300.8 / 300.8 / 300.8 | 301.0 (300.3) / 300.9 (300.1) / 301.3 (300.5) |
+| 0.005 | 0.80 | 5 | 299.9 / 299.9 / 299.9 | 301.2 (301.4) / 300.4 (300.6) / 302.4 (302.6) |
+| 0.005 | 0.80 | 10 | 299.9 / 299.9 / 299.9 | 302.6 (302.8) / 301.0 (301.2) / 304.9 (305.2) |
+| 0.01 | 1.10 | 1 | 301.4 / 301.4 / 301.4 | 302.0 (300.6) / 301.7 (300.2) / 302.5 (301.1) |
+| 0.01 | 1.10 | 5 | 299.7 / 299.7 / 299.7 | 302.5 (302.9) / 300.9 (301.2) / 304.9 (305.3) |
+| 0.01 | 1.10 | 10 | 299.9 / 299.8 / 299.9 | 305.4 (305.7) / 302.1 (302.4) / 310.1 (310.4) |
+| 0.02 | 1.70 | 1 | 298.7 / 298.7 / 298.6 | 299.8 (301.2) / 299.2 (300.5) / 300.8 (302.1) |
+| 0.02 | 1.70 | 5 | 299.8 / 299.8 / 299.8 | 305.4 (305.8) / 302.1 (302.5) / 310.3 (310.7) |
+| 0.02 | 1.70 | 10 | 299.8 / 299.8 / 299.8 | 310.9 (311.5) / 304.2 (304.9) / 320.5 (321.2) |
+
+With the centred drag the three stencils give almost the same half-step temperature, because they share the random
+numbers, and it is the set one within the statistical error (at most 1.4 errors). With the explicit drag the particles
+are much less hot than with the nearest node (310.9, 304.2 and 320.5 K at $`\Delta t`$ = 0.02 ps and
+$`\gamma`$ = 10/ps, against 340.7 K), and the prediction holds within 1.5 K. Fluid without fluctuations:
+
+| $`\Delta t`$ (ps) | $`\tau`$ | $`\gamma`$ (1/ps) | centred, half step: `Trilinear` / `ThreePoint` / `Keys` | explicit, full step: `Trilinear` / `ThreePoint` / `Keys` |
+|---|---|---|---|---|
+| 0.005 | 0.80 | 1 | 298.0 (298.9) / 298.3 (299.2) / 297.6 (298.4) | 298.3 (299.2) / 298.5 (299.3) / 298.1 (299.0) |
+| 0.005 | 0.80 | 5 | 295.4 (294.5) / 296.9 (296.0) / 293.4 (292.3) | 296.8 (295.9) / 297.5 (296.6) / 295.9 (294.9) |
+| 0.005 | 0.80 | 10 | 291.9 (289.2) / 294.7 (292.1) / 288.2 (285.0) | 294.5 (291.9) / 295.7 (293.3) / 292.9 (289.9) |
+| 0.01 | 1.10 | 1 | 298.8 (298.7) / 299.2 (299.1) / 298.2 (298.0) | 299.4 (299.2) / 299.5 (299.3) / 299.3 (299.1) |
+| 0.01 | 1.10 | 5 | 294.4 (293.4) / 296.4 (295.5) / 291.5 (290.5) | 297.1 (296.3) / 297.6 (296.8) / 296.6 (295.6) |
+| 0.01 | 1.10 | 10 | 289.6 (287.2) / 293.5 (291.2) / 284.3 (281.5) | 295.0 (292.6) / 295.7 (293.6) / 294.0 (291.3) |
+| 0.02 | 1.70 | 1 | 298.2 (298.3) / 298.9 (298.9) / 297.3 (297.4) | 299.4 (299.5) / 299.4 (299.4) / 299.5 (299.5) |
+| 0.02 | 1.70 | 5 | 292.3 (291.7) / 295.4 (294.7) / 287.9 (287.3) | 297.7 (297.3) / 297.6 (297.1) / 297.9 (297.5) |
+| 0.02 | 1.70 | 10 | 286.3 (283.8) / 292.4 (289.6) / 278.0 (275.7) | 296.8 (294.6) / 296.6 (294.3) / 297.2 (295.1) |
+
+The predictions hold within 1.1%.
+
+T6 (64 particles of 1000 Da, $`m/m_c`$ = 13.3, $`L`$ = 8 nm, $`\tau`$ = 1.1, 2 ns). The total momentum is zero, so the
+exact half-step temperature of the centred drag is $`T\,(1 - m/M)`$ = 299.2 K, $`M`$ being the mass of particles and
+fluid, and the predictions include the same factor. Fluctuating fluid:
+
+| Stencil | $`\gamma`$ | $`D/(k_BT/m\gamma)`$, centred / explicit | $`D/(k_BT(1/\zeta + y_{\mathrm{centred}}))`$, centred / explicit | half-step $`T`$, centred (exact 299.2) | full-step $`T`$, explicit (prediction) |
+|---|---|---|---|---|---|
+| nearest node | 5 | 1.486 / 1.488 | 1.005 / 1.007 | 298.6 | 388.8 (385.9) |
+| nearest node | 10 | 1.976 / 1.954 | 1.010 / 0.998 | 299.3 | 467.0 (453.0) |
+| `Trilinear` | 5 | 1.222 / 1.220 | 0.999 / 0.997 | 299.3 | 325.2 (325.0) |
+| `Trilinear` | 10 | 1.455 / 1.451 | 1.005 / 1.003 | 299.2 | 346.6 (345.5) |
+| `ThreePoint` | 5 | 1.155 / 1.156 | 1.004 / 1.004 | 299.3 | 310.2 (310.4) |
+| `ThreePoint` | 10 | 1.334 / 1.334 | 1.025 / 1.025 | 299.3 | 319.5 (319.6) |
+| `Keys` | 5 | 1.353 / 1.322 | 1.018 / 0.994 | 299.2 | 346.5 (345.9) |
+| `Keys` | 10 | 1.654 / 1.702 | 0.998 / 1.026 | 299.2 | 385.5 (381.8) |
+
+The centred drag has the exact temperature with every stencil. The diffusion coefficient is the same for both drags
+within 3%, and the Einstein relation holds with the self-mobility of the centred drag of the stencil, averaged over the
+cell, within 2.6%, inside the statistical error of $`D`$ in a run of 2 ns (about 4%, from the number of independent
+intervals of the fit; the stencils share the random numbers, so their errors are correlated): the stencils reduce the
+hydrodynamic part of $`D`$ as they reduce the self-mobility. The explicit drag is too hot by the predicted amount, within 1% with the
+stencils (the nearest node is 3% above it at $`\gamma`$ = 10/ps, as at $`L`$ = 16 nm below). Fluid without
+fluctuations:
+
+| Stencil | $`\gamma`$ | $`D/(k_BT/m\gamma)`$, centred / explicit | half-step $`T`$, centred (prediction) | full-step $`T`$, explicit (prediction) |
+|---|---|---|---|---|
+| nearest node | 5 | 0.940 / 0.941 | 208.3 (202.4) | 271.2 (261.0) |
+| nearest node | 10 | 0.933 / 0.934 | 161.6 (152.9) | 255.6 (231.5) |
+| `Trilinear` | 5 | 0.940 / 0.941 | 252.6 (244.8) | 274.6 (265.7) |
+| `Trilinear` | 10 | 0.933 / 0.933 | 222.9 (207.5) | 259.6 (238.9) |
+| `ThreePoint` | 5 | 0.941 / 0.941 | 268.5 (260.0) | 278.1 (269.7) |
+| `ThreePoint` | 10 | 0.933 / 0.933 | 248.8 (229.9) | 265.1 (245.5) |
+| `Keys` | 5 | 0.940 / 0.941 | 232.9 (225.4) | 269.9 (260.3) |
+| `Keys` | 10 | 0.933 / 0.933 | 193.9 (181.1) | 252.4 (230.4) |
+
+Without fluctuations of the fluid $`D = k_BT/(m\gamma)`$ within the statistical error, the same for every stencil and
+drag, which share the random numbers. The half-step temperature of the centred drag is much closer to the set one with
+the stencils than with the nearest node (268.5 K with the three-point kernel at $`\gamma`$ = 5/ps, against 208.3 K),
+and the predictions of linear response are 3% to 10% below the measured temperatures, as for the nearest node.
+
+T7, ratio of the normalized velocity autocorrelation at half steps (T6 at $`\gamma`$ = 10/ps, fluctuating fluid) to
+the response to a kick minus its plateau. The response is computed at $`T = 0`$ in the starting configuration of T6,
+with the same stencil and drag, the kicked particle being placed at the 27 points
+$`((i + 1/2)/3, (j + 1/2)/3, (k + 1/2)/3)\,\Delta x`$ of a cell, and averaged:
+
+| Stencil | drag | 0.05 ps | 0.1 ps | 0.2 ps | 0.3 ps | 0.5 ps |
+|---|---|---|---|---|---|---|
+| nearest node | centred | 1.002 | 1.001 | 0.998 | 0.995 | 0.995 |
+| `Trilinear` | centred | 1.007 | 1.010 | 1.015 | 1.019 | 1.024 |
+| `ThreePoint` | centred | 1.002 | 1.001 | 0.999 | 0.997 | 0.978 |
+| `Keys` | centred | 1.003 | 1.002 | 1.000 | 0.999 | 0.998 |
+| nearest node | explicit | 0.974 | 0.960 | 0.940 | 0.925 | 0.878 |
+| `Trilinear` | explicit | 0.993 | 0.987 | 0.978 | 0.968 | 0.935 |
+| `ThreePoint` | explicit | 0.998 | 0.994 | 0.985 | 0.978 | 0.944 |
+| `Keys` | explicit | 0.985 | 0.976 | 0.959 | 0.946 | 0.938 |
+
+With the centred drag and the fluctuating fluid the fluctuation-dissipation theorem holds for the dynamics with every
+stencil, within 2.5%; at 1 ps the autocorrelation is 0.2% to 1% of its initial value and the ratio is dominated by the
+statistical error. With the trilinear kernel and Keys the response depends on where the particle is in the cell:
+kicked within $`0.2\,\Delta x`$ of a node, where these kernels approach the nearest node, the particle keeps its
+velocity longer, and the ratio of the autocorrelation to that response falls to 0.69 (trilinear) and 0.75 (Keys) at 0.5 ps.
 
 ## Fluctuating fluid (`tests/TestLBMFluctuations.h`, all platforms)
 

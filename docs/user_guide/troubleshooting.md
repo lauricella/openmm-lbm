@@ -85,9 +85,10 @@ $`\text{friction}\times\Delta t \ge 2`$. Reduce the friction or the time step, o
 
 The warning `with fluid fluctuations the explicit drag makes the coupled particles hotter than the set
 temperature, by about friction*dt*m/(2 m_c) = ...%` is printed on stderr when fluid fluctuations are switched on
-with the explicit drag, coupled particles, the `EulerMaruyama` scheme, $`T > 0`$ and a friction above zero. Use the
-centred drag (`setDragScheme(LBMForce.Centered)`) with the fluctuating fluid; see
-[choosing the drag](lattice.md#choosing-the-drag).
+with the explicit drag, coupled particles, the `EulerMaruyama` scheme, $`T > 0`$ and a friction above zero. With an
+interpolation stencil it reads `friction*dt*m*K/(2 m_c)`, $`K`$ being the self weight of the stencil averaged over a
+cell (8/27, 1/8 and 0.540 for the trilinear, three-point and Keys stencils). Use the centred drag
+(`setDragScheme(LBMForce.Centered)`) with the fluctuating fluid; see [choosing the drag](lattice.md#choosing-the-drag).
 
 The warning `the relaxation time tau = ... is outside the range [0.505, 2]` is printed on stderr and
 does not stop the simulation. See [relaxation time](lattice.md#relaxation-time) for how to bring $`\tau`$
@@ -143,7 +144,8 @@ still; the centred drag is colder than the explicit one ([choosing the drag](lat
 **With fluid fluctuations the particles are hotter than the set temperature.** With the explicit drag the thermal
 motion of the fluid heats the coupled particles by about $`\text{friction}\times\Delta t\times m/(2m_c)`$, where
 $`m_c`$ is the mass of fluid in a cell (56% for beads of 1000 Da with friction 10/ps, $`\Delta t = 0.01`$ ps and
-$`\Delta x = 0.5`$ nm); a warning says so when the Context is created. Use the centred drag with the fluctuating
+$`\Delta x = 0.5`$ nm), times the self weight of the interpolation stencil averaged over a cell with a stencil other
+than the nearest node; a warning says so when the Context is created. Use the centred drag with the fluctuating
 fluid, and measure the temperature with `openmmlbm.LBMTemperatureReporter` ([choosing the
 drag](lattice.md#choosing-the-drag)).
 

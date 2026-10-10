@@ -864,7 +864,8 @@ range. The plugin checks both.
 - A warning is printed on stderr if $`\tau`$ is outside [0.505, 2], the range used by the reference implementation.
 - With coupled particles and the explicit drag, warnings for $`\tau > 1.7`$ and $`\gamma\Delta t > 1`$ (section 2),
   and, with fluid fluctuations and the EM scheme at $`T > 0`$, a warning that the particles will be too hot, with
-  the estimate $`\gamma\Delta t\, m/(2m_c)`$ for the heaviest one (section 7); with the centred drag, an error if
+  the estimate $`\gamma\Delta t\, m/(2m_c)`$ for the heaviest one (section 7), times the self weight of the
+  interpolation stencil averaged over a cell (section 9); with the centred drag, an error if
   `LBMForce` is not the last force or the System has virtual sites (section 2, Solution of the centred drag).
 - With fluid fluctuations at $`T > 0`$, a line with $`k_BT`$ in lattice units and the thermal Mach number, and a
   warning if $`k_BT`$ exceeds 1/3000, the largest value validated (section 7, Size of the fluctuations).
@@ -1350,7 +1351,8 @@ implemented on the Reference platform, also with the domain decomposition, with 
 (`setInterpolationStencil()`); the CUDA, OpenCL and HIP platforms and the open faces are in development. The coupling
 of sections 2 and 8 uses the nearest node, which remains the default. The properties stated below were checked
 with linear models of the lattice (the fluid of section 1 linearized about rest, on a periodic lattice, with the
-particles at fixed positions); the measurements with the plugin will replace the predictions.
+particles at fixed positions) and then measured with the plugin on the Reference platform (`docs/validation.md`,
+Interpolation stencils).
 
 **Interpolation and spreading.** A particle at $`\mathbf X`$ sees the fluid velocity interpolated from the nodes
 $`\mathbf x_j`$ around it, and the reaction of its drag is spread on the same nodes with the same weights:
@@ -1433,12 +1435,22 @@ overlap or not. In discrete time, in lattice units ($`\Delta t = 1`$, masses in 
   ($`4^3`$ nodes, one particle at a node, at the centre of a cell and at a generic point, two particles with
   overlapping stencils, $`\tau`$ = 0.62 to 3.51, $`m/m_c`$ = 1.33 to 13.3): the stationarity condition holds to
   3e-16 with every stencil, against 2e-3 to 0.2 for the explicit drag. The half-step temperature of the centred
-  drag in the fluctuating fluid therefore stays exact with the stencils.
+  drag in the fluctuating fluid therefore stays exact with the stencils. The plugin, with the particles held at their
+  positions on the same lattice, gives the temperatures of the exact stationary state of the linearized model, for
+  every stencil, both drags and both fluids, within 0.2%; free particles in the fluctuating fluid have the exact
+  half-step temperature within the statistical error.
 - The temperatures of section 2 (fluid without fluctuations) and section 7 (explicit drag in the fluctuating fluid)
-  come from linear response and are expected to hold with $`m/m_c`$ replaced by $`mK`$ and with the self-mobility
-  $`y`$ of the stencil (below), for example
+  come from linear response and hold with $`m/m_c`$ replaced by $`mK`$ and with the self-mobility $`y`$ of the stencil
+  (below), for example
   $`T_{\mathrm{explicit}}/T = 1 + \gamma\Delta t\, mK/\bigl(2\,(1 + \zeta y_{\mathrm{explicit}})\bigr)`$ in the
-  fluctuating fluid; they will be measured.
+  fluctuating fluid. A particle that moves across the lattice visits every position of a cell alike and sees them
+  averaged over the cell; the mean self weight is $`(2/3)^3 = 8/27`$ for the trilinear kernel, 1/8 for the three-point
+  kernel and $`(57/70)^3 = 0.540`$ for Keys, the cubes of the means of $`\sum_j \phi(r - j)^2`$ over $`r`$. Averaged in
+  this way the formula of the explicit drag in the fluctuating fluid agrees with the measured temperatures within 1%
+  (particles of 100 and 1000 Da, against 3% for the nearest node), and those of the fluid without fluctuations are
+  approximate, as for the nearest node (`docs/validation.md`, Interpolation stencils). The heating of the explicit
+  drag is smaller with the stencils than with the nearest node by about the mean self weight, which the warning on
+  the heating uses.
 
 **The centred drag with a stencil.** In the notation of section 2 (Solution of the centred drag, lattice units,
 $`h = 1/2`$, $`a = \gamma h`$), with $`\tilde{\mathbf v}_k = \mathbf v_k(t - h) + h\,\mathbf F^{\mathrm c}_k/m_k`$,
