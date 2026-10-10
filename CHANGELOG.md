@@ -27,6 +27,13 @@ versions the API may still change.
 ### Fixed
 - Tests: a range-based `for` loop read the velocities of a temporary `State` already destroyed
   (`testRepeatedForceEvaluation`), which made its tolerance depend on undefined memory.
+- GPU platforms: the sort of the coupling keys could take most of a step with many coupled particles, from version
+  0.1.0: OpenMM's sort chose its buckets from 64 keys at fixed intervals of the array, which is in particle order, and
+  with the beads of 512 copies of a protein in order all the samples came from one layer of copies and 97% of the keys
+  went into one bucket, sorted by a single work group (8.7 ms per step on an A100, 7.4 of them in the sort). The keys
+  are now sorted by a permutation of their node, which spreads them over their range, with buckets of equal width
+  (1.3 ms per step); the results are the same bit for bit (`docs/theory.md`, section 2, and `docs/validation.md`,
+  Performance of the domain decomposition).
 - Tests: the coupling tests at 300 K ran with a random seed chosen by the platform, so `testMomentumConservation` and
   `testStencilMomentumConservation`, which check that a particle has crossed the periodic boundary after 50 steps,
   failed about once in 10^4 runs: the crossing is 4.1 standard deviations of the random displacement away with the

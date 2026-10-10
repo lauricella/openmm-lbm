@@ -33,10 +33,44 @@ using namespace OpenMM;
 using namespace std;
 
 /**
- * The sort keys of the coupled particles, node*numCoupled + i, or with an interpolation stencil
- * node*numCoupled*stencilSize + i*stencilSize + slot: 64-bit integers, sorted by their value.
+ * The factor of a permutation of the integers in [0, size), n -> n*factor mod size: the integer nearest to size times
+ * the golden ratio minus 1 that is coprime with size, so that the multiples of the factor spread evenly over [0, size).
+ */
+static long long scrambleFactor(long long size) {
+    long long factor = max(1LL, llround(0.6180339887498949*size));
+    while (gcd(factor, size) != 1)
+        factor++;
+    return factor;
+}
+
+/**
+ * The sort keys of the coupled particles, 64-bit integers node*stride + e (kernels/lbmCoupling.cc): stride is the number
+ * of keys, e the particle (or with an interpolation stencil the slot i*stencilSize + n of particle i), node the storage
+ * index of the node, from 0 to numStored - 1, and with the domain decomposition numStored plus the index of a node of
+ * the lattice for the particles of other ranks (otherRankKey()).
+ *
+ * The keys are sorted by a permutation of their node, pi(node)*stride + e with pi(n) = n*a mod numStored, and for the
+ * particles of other ranks numStored + (n*b mod numNodes), a and b coprime with numStored and numNodes
+ * (scrambleFactor()); the largest value, with which OpenMM fills its buckets, stays the largest key.  The keys of a node
+ * stay contiguous and ordered by e, which is all that the kernels use, so neither the kernels nor the results depend on
+ * the permutation.  OpenMM's sort puts the keys into buckets of equal width
+ * between the smallest and the largest sort key, and sorts a bucket larger than a work group with a single work group
+ * in global memory, so the largest bucket sets its cost.  Sorted by value, the keys follow the particles, which crowd
+ * in some regions of the box; OpenMM's other way of choosing the buckets, from 64 keys at fixed intervals of the array,
+ * which is in particle order, failed with the particles of many copies of a protein in order: all the samples came
+ * from the copies of one layer of the box, and 97% of the keys of 5.6e4 particles went into one bucket (7.4 ms of a
+ * step of 8.7 ms on an A100).  The permutation spreads the sort keys uniformly over their range wherever the particles
+ * are.
  */
 class CouplingSortTrait : public ComputeSortImpl::SortTrait {
+public:
+    CouplingSortTrait(long long stride, long long numStored, long long numNodes) {
+        string node = "(value/" + to_string(stride) + ")", entry = "(value%" + to_string(stride) + ")";
+        sortKey = "(value == 0x7FFFFFFFFFFFFFFF ? value : " + node + " < " + to_string(numStored) + " ? ((" + node + "*" +
+                to_string(scrambleFactor(numStored)) + ")%" + to_string(numStored) + ")*" + to_string(stride) + " + " + entry +
+                " : (" + to_string(numStored) + " + ((" + node + " - " + to_string(numStored) + ")*" +
+                to_string(scrambleFactor(numNodes)) + ")%" + to_string(numNodes) + ")*" + to_string(stride) + " + " + entry + ")";
+    }
     int getDataSize() const {return 8;}
     int getKeySize() const {return 8;}
     const char* getDataType() const {return "mm_long";}
@@ -44,7 +78,9 @@ class CouplingSortTrait : public ComputeSortImpl::SortTrait {
     const char* getMinKey() const {return "0";}
     const char* getMaxKey() const {return "0x7FFFFFFFFFFFFFFF";}
     const char* getMaxValue() const {return "0x7FFFFFFFFFFFFFFF";}
-    const char* getSortKey() const {return "value";}
+    const char* getSortKey() const {return sortKey.c_str();}
+private:
+    string sortKey;
 };
 
 /**
@@ -534,7 +570,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         }
         noise.initialize<mm_float4>(cc, numCoupled, "lbmNoise");
         noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
-        sort = cc.createSort(new CouplingSortTrait(), numCoupled*stencilSize, false);
+        // The sort keys are spread uniformly over their range (CouplingSortTrait), so the sort uses buckets of equal width.
+        int numKeys = numCoupled*stencilSize;
+        sort = cc.createSort(new CouplingSortTrait(numKeys, numStored, numNodes), numKeys, true);
         cc.getIntegrationUtilities().initRandomNumberGenerator(seed);
         if (decomposed && numSolidNodes > 0) {
             globalIsFluid.initialize<int>(cc, numNodes, "lbmGlobalIsFluid");

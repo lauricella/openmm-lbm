@@ -679,7 +679,8 @@ Kassen et al. [16] (their case of a single node per point):
 
 1. one thread per particle computes its force and the key $`\mathrm{node}\cdot N_p + i`$, unique, with $`N_p`$ the
    number of coupled particles and $`i`$ the index of the particle in the list of the force;
-2. the keys are sorted with OpenMM's `ComputeSort`;
+2. the keys are sorted with OpenMM's `ComputeSort`, by $`\pi(\mathrm{node})\cdot N_p + i`$ with $`\pi`$ a permutation
+   of the nodes (below);
 3. the first entry of each node adds the reactions of its particles, in particle order, and writes the sum
    to the node: one writer per node;
 4. after the collision the nodes that received a reaction are set back to zero.
@@ -688,6 +689,18 @@ With the centred drag, step 1 computes $`\tilde{\mathbf v}_k`$ and the random fo
 sorted in every force evaluation, and in step 3 the first entry solves the node, writes the forces of its particles
 and, in a lattice step, the reaction $`-\mathbf S`$. The result is reproducible bit for bit, and the sum is taken in
 the order of the Reference platform.
+
+The keys of a node stay contiguous and in particle order whatever the order of the nodes, so the permutation
+$`\pi(n) = a\,n \bmod N`$, with $`N`$ the number of nodes stored and $`a`$ the integer nearest to $`0.618\,N`$ that
+is coprime with $`N`$, changes neither the kernels nor the results; it is the sort key of `ComputeSort`
+(`CouplingSortTrait` in `platforms/common/src/CommonLBMKernels.cpp`). It spreads the sort keys uniformly over their
+range wherever the particles are, and the sort uses buckets of equal width between the smallest and the largest sort
+key. `ComputeSort` sorts a bucket larger than a work group with a single work group in global memory, so the largest
+bucket sets the cost of the sort. Sorted by $`\mathrm{node}\cdot N_p + i`$ the keys follow the particles, which crowd
+in some regions of the box; and OpenMM's other way of choosing the buckets, from 64 keys taken at fixed intervals of
+the array, which is in particle order, failed with the particles of copies of a protein in order: all the samples
+came from one layer of copies, and 97% of the keys of $`5.6\cdot10^4`$ particles went into one bucket (7.4 ms of a
+step of 8.7 ms on an A100, versions 0.1.0 to 0.4.0).
 
 **Forces on the particles.** The coupling forces (in the evaluation of a step those of the step, between steps those
 of the next step: When the coupling forces are computed, above) are added to OpenMM's force buffer, in fixed point
@@ -1234,7 +1247,9 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
   set the force to zero and give the particle a sort key past all the nodes of the block, so that it enters no segment;
   the forces are summed over the ranks on the host. The sort key of a particle of another rank follows its nearest node
   in the lattice, $`(N_{\mathrm{block}} + \mathrm{node})\,N_p + i`$ with $`N_{\mathrm{block}}`$ the nodes stored by the
-  rank, rather than being one value for all those particles: OpenMM's `ComputeSort` puts the keys into buckets by value
+  rank, and is sorted by $`N_{\mathrm{block}} + \pi_{\mathrm{lattice}}(\mathrm{node})`$, with the permutation of section 2
+  (Per-cell reaction on the GPU platforms) over the nodes of the lattice, rather than being one value for all those
+  particles: OpenMM's `ComputeSort` puts the keys into buckets by value
   and sorts a bucket larger than a work group with a single work group, so with one value for the particles of the other
   ranks, most of them, the sort took most of a step (with $`10^5`$ particles on four GPUs, 8.7 ms per step, more than on
   one GPU). Summing the forces without blocking (`MPI_Iallreduce`) while the fluid advances was slower with many

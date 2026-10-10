@@ -1080,6 +1080,27 @@ instead of 3.37 to 3.56 ms on $`256^3`$ nodes with $`10^5`$ particles on one nod
 $`128^3`$ per GPU, and on four nodes ($`512^3`$, $`1 \times 4 \times 4`$) 10.3 to 11.1 ms instead of 9.1 to 9.3 ms: it
 was left out.
 
+**Copies of a protein, and the sort of the coupling keys.** With copies of SOD1 in COCOMO2 (110 beads each, the
+`sod1` example of `examples/cocomo` repeated on a grid of $`k^3`$ copies $`d`$ apart; friction 10/ps, time step 10 fs,
+removal of the fluid momentum at every step, CUDA, mixed precision, `DeterministicForces`; 500 steps timed after 200),
+the forces of OpenMM alone (no `LBMForce`), the fluid alone, and the coupled run with the explicit drag, in
+milliseconds per step on one GPU and on four ($`P_x \times P_y \times P_z`$ chosen by MPI):
+
+| Case | MD alone | Fluid: 1 GPU / 4 GPUs | Coupled until version 0.4.0: 1 / 4 | Coupled: 1 / 4 |
+|---|---|---|---|---|
+| 64 copies, 7040 beads, $`d`$ = 15 nm, $`120^3`$ nodes | 0.125 | 0.920 / 0.269 | 1.158 / 0.640 | 1.148 / 0.624 |
+| 512 copies, 56320 beads, $`d`$ = 7.5 nm, $`120^3`$ nodes | 0.254 | 0.918 / 0.271 | 8.660 / 7.046 | 1.336 / 1.392 |
+| 512 copies, 56320 beads, $`d`$ = 15 nm, $`240^3`$ nodes | 0.253 | 7.504 / 1.920 | 15.633 / 8.829 | 8.201 / 3.051 |
+
+The forces of OpenMM, which every rank computes for all the beads, take 0.13 to 0.25 ms. Until version 0.4.0 the sort
+of the coupling keys took most of the step with 512 copies (7.4 ms on one GPU, 5.8 ms on four, from a profile of rank
+0): the copies were in order, and OpenMM's sort, choosing its buckets from 64 keys at fixed intervals of the array,
+took all of them from the copies of one layer of the box and put 97% of the keys into one bucket (`docs/theory.md`,
+section 2, Per-cell reaction on the GPU platforms). The keys are now sorted by a permutation of their node, with
+buckets of equal width; the results are the same bit for bit (CUDA in the three precisions and OpenCL in double
+precision, nearest node and the three interpolation stencils, against the version before). On four GPUs the sum of
+the coupling forces over the ranks (`MPI_Allreduce` of $`3 N_p`$ numbers) took 0.26 to 0.29 ms of the step.
+
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
 With a fluctuating fluid every rank draws its own random numbers, so a run with the decomposition differs from one with
