@@ -28,7 +28,10 @@
  * the whole lattice (isFluid is then the mask of the whole lattice), the rank that owns the nearest node computes the
  * coupling force, the others set it to zero and give the particle a key that sorts after all the nodes of the block and
  * is skipped (otherRankKey()); the host sums the forces over the ranks.  SKIP_REFLECTION_MOMENTUM is defined on the
- * ranks other than 0, which reflect their copies of the particles but do not count the momentum of the wall.
+ * ranks other than 0, which reflect their copies of the particles but do not count the momentum of the wall.  With an
+ * interpolation stencil the owner of the nearest node reads the moments of the nodes of the stencil in the block and in
+ * its halo, where the host writes those of the other ranks (the coupling halo); every rank writes the weights and the
+ * keys of all the stencils (stencilKey()) and adds the reactions on the nodes of its block.
  */
 
 #ifndef DOMAIN_DECOMPOSITION
@@ -36,6 +39,8 @@
 #define GNX NX
 #define GNY NY
 #define GNZ NZ
+#define SX NX
+#define SY NY
 #endif
 
 DEVICE mixed4 loadPosition(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection, int index) {
@@ -294,18 +299,76 @@ DEVICE mixed stencilKernel(mixed r) {
  * [0, size): STENCIL_WIDTH nodes in increasing order from floor(s) (trilinear), round(s) - 1 (three-point) or
  * floor(s) - 1 (Keys), wrapped periodically, as LBMStencils::axisWeights().
  */
-DEVICE void stencilAxis(mixed s, int size, int* index, mixed* weight) {
+DEVICE int stencilFirst(mixed s) {
 #if STENCIL_WIDTH == 3
-    int first = (int) floor(s + (mixed) 0.5) - 1;
+    return (int) floor(s + (mixed) 0.5) - 1;
 #elif STENCIL_WIDTH == 4
-    int first = (int) floor(s) - 1;
+    return (int) floor(s) - 1;
 #else
-    int first = (int) floor(s);
+    return (int) floor(s);
 #endif
+}
+
+DEVICE void stencilAxis(mixed s, int size, int* index, mixed* weight) {
+    int first = stencilFirst(s);
     for (int a = 0; a < STENCIL_WIDTH; a++) {
         weight[a] = stencilKernel(s - (first + a));
         index[a] = ((first + a)%size + size)%size;
     }
+}
+
+#ifdef DOMAIN_DECOMPOSITION
+/**
+ * With the domain decomposition, for a particle whose nearest node belongs to the block: the positions along one axis,
+ * in the arrays of the block, of the nodes of its stencil.  They are at most pad nodes from the nearest node (pad = 1, or
+ * 2 with Keys), so they lie in the block or in its halo, at the same offsets from the nearest node as in the lattice; a
+ * node of the lattice may appear at two positions of the halo of a small block, which both hold its moments
+ * (unpackCouplingHalo).  s is the coordinate wrapped into [0, size), origin the first node of the block along the axis,
+ * and pad its layers of halo, 0 along an axis that is not divided, where the block is the whole axis.
+ */
+DEVICE void stencilAxisStored(mixed s, int size, int origin, int pad, int* stored) {
+    int first = stencilFirst(s);
+    int nearest = (int) floor(s + 0.5f);
+    for (int a = 0; a < STENCIL_WIDTH; a++)
+        stored[a] = (pad > 0 ? nearest%size - origin + (first + a - nearest) + pad : ((first + a)%size + size)%size);
+}
+
+/**
+ * Whether a node of the lattice, of coordinate index along an axis, lies within pad nodes of the block along that axis,
+ * across the periodic boundary: in the block or in its halo.
+ */
+DEVICE bool inStoredRange(int index, int size, int origin, int extent, int pad) {
+    int d = ((index - origin)%size + size)%size;
+    return (pad == 0 || d < extent + pad || d >= size - pad);
+}
+#endif
+
+/**
+ * The sort key of slot e of a stencil on a node of the lattice.  Without the decomposition the node is its own
+ * storage index.  With the decomposition the key holds the index of the node in the lattice, so that the keys of a node
+ * are together wherever it is stored; the nodes beyond the halo of the block, which only the stencils of the particles
+ * of other ranks reach, come after all the others.
+ */
+DEVICE mm_long stencilKey(int ix, int iy, int iz, int e) {
+    mm_long node = ix + GNX*(iy + (mm_long) GNY*iz);
+#ifdef DOMAIN_DECOMPOSITION
+    if (!(inStoredRange(ix, GNX, OX, NX, PAD_X) && inStoredRange(iy, GNY, OY, NY, PAD_Y) && inStoredRange(iz, GNZ, OZ, NZ, PAD_Z)))
+        node += (mm_long) GNX*GNY*GNZ;
+#endif
+    return node*KEY_STRIDE + e;
+}
+
+/**
+ * The node of the arrays of the block that receives the reaction of a stencil key, or NUM_STORED for the nodes of the
+ * halo and beyond (only with the decomposition).
+ */
+DEVICE int stencilReactionNode(mm_long key) {
+#ifdef DOMAIN_DECOMPOSITION
+    mm_long node = key/KEY_STRIDE;
+    return (node < (mm_long) GNX*GNY*GNZ ? storedNode((int) node) : NUM_STORED);
+#else
+    return keyNode(key);
+#endif
 }
 
 /**
@@ -315,7 +378,9 @@ DEVICE void stencilAxis(mixed s, int size, int* index, mixed* weight) {
  * stencilWeight[i*STENCIL_SIZE + n] and its key node*KEY_STRIDE + i*STENCIL_SIZE + n in sortKeys, sorted next to sum the
  * reactions -xi_j F of each node in particle order and, for a particle, in slot order.  In a lattice step the reaction
  * on the solid nodes of the stencil is added to wallMomentum.  The arguments are those of coupleParticles(), and then
- * stencilWeight.
+ * stencilWeight.  With the domain decomposition the rank that owns the nearest node computes the force, from the
+ * moments of the block and of its coupling halo; the other ranks set it to zero, and every rank writes the weights and
+ * keys of all the stencils (stencilKey()), for the reactions on its own nodes once the forces are summed.
  */
 KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection,
         GLOBAL const mixed4* RESTRICT velm, GLOBAL const int* RESTRICT atomIndex, GLOBAL const int* RESTRICT couplingIndex,
@@ -330,18 +395,36 @@ KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         mixed4 pos = loadPosition(posq, posqCorrection, j);
         int ix[STENCIL_WIDTH], iy[STENCIL_WIDTH], iz[STENCIL_WIDTH];
         mixed wx[STENCIL_WIDTH], wy[STENCIL_WIDTH], wz[STENCIL_WIDTH];
-        stencilAxis(wrapCoordinate(pos.x, GNX), GNX, ix, wx);
-        stencilAxis(wrapCoordinate(pos.y, GNY), GNY, iy, wy);
-        stencilAxis(wrapCoordinate(pos.z, GNZ), GNZ, iz, wz);
+        mixed sx = wrapCoordinate(pos.x, GNX), sy = wrapCoordinate(pos.y, GNY), sz = wrapCoordinate(pos.z, GNZ);
+        stencilAxis(sx, GNX, ix, wx);
+        stencilAxis(sy, GNY, iy, wy);
+        stencilAxis(sz, GNZ, iz, wz);
+#ifdef DOMAIN_DECOMPOSITION
+        // Positions of the nodes of the stencil in the arrays of the block, if the rank owns the nearest node.
+        bool owned = (storedNode(nearestNode(pos)) != NUM_STORED);
+        int jx[STENCIL_WIDTH], jy[STENCIL_WIDTH], jz[STENCIL_WIDTH];
+        if (owned) {
+            stencilAxisStored(sx, GNX, OX, PAD_X, jx);
+            stencilAxisStored(sy, GNY, OY, PAD_Y, jy);
+            stencilAxisStored(sz, GNZ, OZ, PAD_Z, jz);
+        }
+#else
+        const bool owned = true;
+        int* jx = ix;
+        int* jy = iy;
+        int* jz = iz;
+#endif
         mixed ux = 0, uy = 0, uz = 0;
         for (int c = 0; c < STENCIL_WIDTH; c++)
             for (int b = 0; b < STENCIL_WIDTH; b++)
                 for (int a = 0; a < STENCIL_WIDTH; a++) {
                     int slot = a + STENCIL_WIDTH*(b + STENCIL_WIDTH*c);
-                    int node = storedNode(ix[a] + GNX*(iy[b] + GNY*iz[c]));
                     mixed w = wx[a]*wy[b]*wz[c];
                     stencilWeight[i*STENCIL_SIZE+slot] = w;
-                    sortKeys[i*STENCIL_SIZE+slot] = ((mm_long) node)*KEY_STRIDE + i*STENCIL_SIZE + slot;
+                    sortKeys[i*STENCIL_SIZE+slot] = stencilKey(ix[a], iy[b], iz[c], i*STENCIL_SIZE + slot);
+                    if (!owned)
+                        continue;
+                    int node = jx[a] + SX*(jy[b] + SY*jz[c]);
                     mixed rho = 1 + densityDeviation[node];
                     if (rho > 0) {
                         ux += momentum[node]*(w/rho);
@@ -349,6 +432,15 @@ KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
                         uz += momentum[2*NUM_STORED+node]*(w/rho);
                     }
                 }
+        if (!owned) {
+            // Another rank owns the nearest node: it computes the force.  The random numbers are copied all the same.
+            if (kT > 0 && gamma > 0 && drawNoise)
+                noise[i] = random[randomIndex+i];
+            particleForce[i] = 0;
+            particleForce[NUM_COUPLED+i] = 0;
+            particleForce[2*NUM_COUPLED+i] = 0;
+            continue;
+        }
         mixed4 v = velm[j];
         mixed vx = v.x*(1/(mixed) VELOCITY_SCALE), vy = v.y*(1/(mixed) VELOCITY_SCALE), vz = v.z*(1/(mixed) VELOCITY_SCALE);
         mixed m = particleMass[i];
@@ -371,32 +463,38 @@ KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         particleForce[2*NUM_COUPLED+i] = fz;
 #ifdef HAS_SOLID_NODES
         if (isStep)
-            for (int slot = 0; slot < STENCIL_SIZE; slot++) {
-                int node = keyNode(sortKeys[i*STENCIL_SIZE+slot]);
-                if (!(1 + densityDeviation[node] > 0)) {
-                    mixed w = stencilWeight[i*STENCIL_SIZE+slot];
-                    wallMomentum[i] -= w*fx;
-                    wallMomentum[NUM_COUPLED+i] -= w*fy;
-                    wallMomentum[2*NUM_COUPLED+i] -= w*fz;
-                }
-            }
+            for (int c = 0; c < STENCIL_WIDTH; c++)
+                for (int b = 0; b < STENCIL_WIDTH; b++)
+                    for (int a = 0; a < STENCIL_WIDTH; a++) {
+                        int node = jx[a] + SX*(jy[b] + SY*jz[c]);
+                        if (!(1 + densityDeviation[node] > 0)) {
+                            mixed w = stencilWeight[i*STENCIL_SIZE + a + STENCIL_WIDTH*(b + STENCIL_WIDTH*c)];
+                            wallMomentum[i] -= w*fx;
+                            wallMomentum[NUM_COUPLED+i] -= w*fy;
+                            wallMomentum[2*NUM_COUPLED+i] -= w*fz;
+                        }
+                    }
 #endif
     }
 }
 
 /**
  * After sorting the keys of the stencils, the first entry of each node sums the reactions -xi_j F of the particles
- * whose stencils contain it, in particle order, and writes the sum to cellReaction: one writer per node.
+ * whose stencils contain it, in particle order, and writes the sum to cellReaction: one writer per node.  With the
+ * domain decomposition only the nodes of the block receive the reactions.
  */
 KERNEL void sumStencilReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const mixed* RESTRICT particleForce,
         GLOBAL mixed* RESTRICT cellReaction, GLOBAL const mixed* RESTRICT stencilWeight) {
     for (int k = GLOBAL_ID; k < NUM_KEYS; k += GLOBAL_SIZE) {
-        int node = keyNode(sortKeys[k]);
-        if (k > 0 && keyNode(sortKeys[k-1]) == node)
+        mm_long segment = sortKeys[k]/KEY_STRIDE;
+        if (k > 0 && sortKeys[k-1]/KEY_STRIDE == segment)
+            continue;
+        int node = stencilReactionNode(sortKeys[k]);
+        if (node == NUM_STORED)
             continue;
         mixed fx = 0, fy = 0, fz = 0;
-        for (int m = k; m < NUM_KEYS && keyNode(sortKeys[m]) == node; m++) {
-            int e = (int) (sortKeys[m] - ((mm_long) node)*KEY_STRIDE);
+        for (int m = k; m < NUM_KEYS && sortKeys[m]/KEY_STRIDE == segment; m++) {
+            int e = (int) (sortKeys[m] - segment*KEY_STRIDE);
             int i = e/STENCIL_SIZE;
             mixed w = stencilWeight[e];
             fx -= w*particleForce[i];
@@ -417,7 +515,10 @@ KERNEL void sumStencilReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL 
  * divided by m_k, with v~_k = v_k(t - h) + h Fc_k/m_k and u~_j = (j_j + h rho_j g)/rho_j; a solid node is a wall at rest
  * (u = 0, no 1/rho term).  Writes the right-hand side b_k/m_k (rhs), the diagonal (1 + a)/m_k + a K_kk, and for each slot
  * e = i*STENCIL_SIZE + n of the stencil its weight, xi/rho (0 at a solid node), its node and its sort key.  The other
- * forces Fc and the random numbers are handled as in prepareCenteredDrag().
+ * forces Fc and the random numbers are handled as in prepareCenteredDrag().  With the domain decomposition (and the
+ * argument particleOwned, after the others) the rank that owns the nearest node writes the right-hand side, the
+ * diagonal, xi/rho and the nodes of a particle, which the host sums over the ranks, and the others write zero, xi/rho = 0
+ * and NUM_STORED as the nodes; every rank writes the weights and keys of all the stencils (stencilKey()).
  */
 KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection,
         GLOBAL const mixed4* RESTRICT velm, GLOBAL const int* RESTRICT atomIndex, GLOBAL const int* RESTRICT couplingIndex,
@@ -428,6 +529,9 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         GLOBAL int* RESTRICT stencilNode, GLOBAL mixed* RESTRICT rhs, GLOBAL mixed* RESTRICT diagonal
 #ifdef HAS_FLOAT_FORCE_BUFFERS
         , GLOBAL const real4* RESTRICT floatForces, int numFloatForces
+#endif
+#ifdef DOMAIN_DECOMPOSITION
+        , GLOBAL int* RESTRICT particleOwned
 #endif
         ) {
     const mixed h = 0.5f;
@@ -457,21 +561,40 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         mixed4 pos = loadPosition(posq, posqCorrection, j);
         int ix[STENCIL_WIDTH], iy[STENCIL_WIDTH], iz[STENCIL_WIDTH];
         mixed wx[STENCIL_WIDTH], wy[STENCIL_WIDTH], wz[STENCIL_WIDTH];
-        stencilAxis(wrapCoordinate(pos.x, GNX), GNX, ix, wx);
-        stencilAxis(wrapCoordinate(pos.y, GNY), GNY, iy, wy);
-        stencilAxis(wrapCoordinate(pos.z, GNZ), GNZ, iz, wz);
+        mixed sx = wrapCoordinate(pos.x, GNX), sy = wrapCoordinate(pos.y, GNY), sz = wrapCoordinate(pos.z, GNZ);
+        stencilAxis(sx, GNX, ix, wx);
+        stencilAxis(sy, GNY, iy, wy);
+        stencilAxis(sz, GNZ, iz, wz);
+#ifdef DOMAIN_DECOMPOSITION
+        bool owned = (storedNode(nearestNode(pos)) != NUM_STORED);
+        particleOwned[i] = owned;
+        int jx[STENCIL_WIDTH], jy[STENCIL_WIDTH], jz[STENCIL_WIDTH];
+        if (owned) {
+            stencilAxisStored(sx, GNX, OX, PAD_X, jx);
+            stencilAxisStored(sy, GNY, OY, PAD_Y, jy);
+            stencilAxisStored(sz, GNZ, OZ, PAD_Z, jz);
+        }
+#else
+        const bool owned = true;
+        int* jx = ix;
+        int* jy = iy;
+        int* jz = iz;
+#endif
         mixed ux = 0, uy = 0, uz = 0, self = 0;
         for (int c = 0; c < STENCIL_WIDTH; c++)
             for (int b = 0; b < STENCIL_WIDTH; b++)
                 for (int a2 = 0; a2 < STENCIL_WIDTH; a2++) {
                     int e = i*STENCIL_SIZE + a2 + STENCIL_WIDTH*(b + STENCIL_WIDTH*c);
-                    int node = storedNode(ix[a2] + GNX*(iy[b] + GNY*iz[c]));
                     mixed w = wx[a2]*wy[b]*wz[c];
-                    mixed rho = 1 + densityDeviation[node];
                     stencilWeight[e] = w;
-                    stencilNode[e] = node;
-                    sortKeys[e] = ((mm_long) node)*KEY_STRIDE + e;
+                    sortKeys[e] = stencilKey(ix[a2], iy[b], iz[c], e);
                     interpWeight[e] = 0;
+                    stencilNode[e] = NUM_STORED;
+                    if (!owned)
+                        continue;
+                    int node = jx[a2] + SX*(jy[b] + SY*jz[c]);
+                    mixed rho = 1 + densityDeviation[node];
+                    stencilNode[e] = node;
                     if (rho > 0) {
                         ux += (momentum[node] + h*(rho*gx))*(w/rho);
                         uy += (momentum[NUM_STORED+node] + h*(rho*gy))*(w/rho);
@@ -480,6 +603,15 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
                         interpWeight[e] = w/rho;
                     }
                 }
+        if (!owned) {
+            if (kT > 0 && gamma > 0 && drawNoise)
+                noise[i] = random[randomIndex+i];
+            rhs[i] = 0;
+            rhs[NUM_COUPLED+i] = 0;
+            rhs[2*NUM_COUPLED+i] = 0;
+            diagonal[i] = 0;
+            continue;
+        }
         mixed bx = (kx-ux)*(-gamma*m), by = (ky-uy)*(-gamma*m), bz = (kz-uz)*(-gamma*m);
         if (kT > 0 && gamma > 0) {
             mixed sigma = sqrt(2*gamma*m*kT);
@@ -507,27 +639,33 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
  */
 KERNEL void findKeySegments(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL int* RESTRICT keyFirst) {
     for (int k = GLOBAL_ID; k < NUM_KEYS; k += GLOBAL_SIZE) {
-        int node = keyNode(sortKeys[k]);
-        if (k > 0 && keyNode(sortKeys[k-1]) == node)
+        mm_long segment = sortKeys[k]/KEY_STRIDE;
+        if (k > 0 && sortKeys[k-1]/KEY_STRIDE == segment)
             continue;
-        for (int m = k; m < NUM_KEYS && keyNode(sortKeys[m]) == node; m++)
-            keyFirst[(int) (sortKeys[m] - ((mm_long) node)*KEY_STRIDE)] = k;
+        for (int m = k; m < NUM_KEYS && sortKeys[m]/KEY_STRIDE == segment; m++)
+            keyFirst[(int) (sortKeys[m] - segment*KEY_STRIDE)] = k;
     }
 }
 
 /**
  * Conjugate gradients of the centred drag: the vector p of the particles spread on the nodes, sum_l xi_jl p_l in
- * particle order, written for node j at the position of its first sorted key (3 components of NUM_KEYS each).
+ * particle order, written for node j at the position of its first sorted key (3 components of NUM_KEYS each).  With the
+ * domain decomposition p is the same on every rank, and each rank spreads it on the nodes of its block and halo, from
+ * all the particles.
  */
 KERNEL void spreadStencilVector(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const mixed* RESTRICT stencilWeight,
         GLOBAL const mixed* RESTRICT p, GLOBAL mixed* RESTRICT spreadValue) {
     for (int k = GLOBAL_ID; k < NUM_KEYS; k += GLOBAL_SIZE) {
-        int node = keyNode(sortKeys[k]);
-        if (k > 0 && keyNode(sortKeys[k-1]) == node)
+        mm_long segment = sortKeys[k]/KEY_STRIDE;
+        if (k > 0 && sortKeys[k-1]/KEY_STRIDE == segment)
             continue;
+#ifdef DOMAIN_DECOMPOSITION
+        if (segment >= (mm_long) GNX*GNY*GNZ)
+            continue;       // beyond the halo: only particles of other ranks reach it
+#endif
         mixed sx = 0, sy = 0, sz = 0;
-        for (int m = k; m < NUM_KEYS && keyNode(sortKeys[m]) == node; m++) {
-            int e = (int) (sortKeys[m] - ((mm_long) node)*KEY_STRIDE);
+        for (int m = k; m < NUM_KEYS && sortKeys[m]/KEY_STRIDE == segment; m++) {
+            int e = (int) (sortKeys[m] - segment*KEY_STRIDE);
             int i = e/STENCIL_SIZE;
             mixed w = stencilWeight[e];
             sx += w*p[i];
@@ -546,9 +684,22 @@ KERNEL void spreadStencilVector(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL 
  */
 KERNEL void multiplyStencilMatrix(GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mixed* RESTRICT interpWeight,
         GLOBAL const int* RESTRICT keyFirst, GLOBAL const mixed* RESTRICT spreadValue, GLOBAL const mixed* RESTRICT p,
-        GLOBAL mixed* RESTRICT result, mixed gamma) {
+        GLOBAL mixed* RESTRICT result, mixed gamma
+#ifdef DOMAIN_DECOMPOSITION
+        , GLOBAL const int* RESTRICT particleOwned
+#endif
+        ) {
     const mixed a = gamma*0.5f;
     for (int i = GLOBAL_ID; i < NUM_COUPLED; i += GLOBAL_SIZE) {
+#ifdef DOMAIN_DECOMPOSITION
+        // The rows of the particles of other ranks are zero here, and the host sums the product over the ranks.
+        if (!particleOwned[i]) {
+            result[i] = 0;
+            result[NUM_COUPLED+i] = 0;
+            result[2*NUM_COUPLED+i] = 0;
+            continue;
+        }
+#endif
         mixed sx = 0, sy = 0, sz = 0;
         for (int n = 0; n < STENCIL_SIZE; n++) {
             int e = i*STENCIL_SIZE + n;
@@ -646,7 +797,8 @@ KERNEL void updateStencilDirection(GLOBAL const mixed* RESTRICT z, GLOBAL mixed*
 
 /**
  * In a lattice step with the centred drag: the reaction -xi_j F on the solid nodes of the stencil of each particle goes
- * to the walls, in wallMomentum.
+ * to the walls, in wallMomentum.  With the domain decomposition the rank that owns the nearest node counts it (the
+ * nodes of the other particles are NUM_STORED).
  */
 KERNEL void addStencilWallMomentum(GLOBAL const int* RESTRICT stencilNode, GLOBAL const mixed* RESTRICT stencilWeight,
         GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT particleForce,
@@ -654,7 +806,8 @@ KERNEL void addStencilWallMomentum(GLOBAL const int* RESTRICT stencilNode, GLOBA
     for (int i = GLOBAL_ID; i < NUM_COUPLED; i += GLOBAL_SIZE)
         for (int n = 0; n < STENCIL_SIZE; n++) {
             int e = i*STENCIL_SIZE + n;
-            if (!(1 + densityDeviation[stencilNode[e]] > 0)) {
+            int node = stencilNode[e];
+            if (node < NUM_STORED && !(1 + densityDeviation[node] > 0)) {
                 mixed w = stencilWeight[e];
                 wallMomentum[i] -= w*particleForce[i];
                 wallMomentum[NUM_COUPLED+i] -= w*particleForce[NUM_COUPLED+i];
@@ -662,6 +815,25 @@ KERNEL void addStencilWallMomentum(GLOBAL const int* RESTRICT stencilNode, GLOBA
             }
         }
 }
+
+#ifdef DOMAIN_DECOMPOSITION
+/**
+ * The coupling halo (CommonCalcLBMForceKernel::exchangeCouplingHalo()): write rho - 1 and j received from the owners,
+ * four values per node, into the positions of the halo of the moments; slots lists the storage index of each position
+ * and sources the node received for it, which may fill several positions.
+ */
+KERNEL void unpackCouplingHalo(GLOBAL mixed* RESTRICT densityDeviation, GLOBAL mixed* RESTRICT momentum,
+        GLOBAL const int* RESTRICT slots, GLOBAL const int* RESTRICT sources, GLOBAL const mixed* RESTRICT received,
+        int numSlots) {
+    for (int i = GLOBAL_ID; i < numSlots; i += GLOBAL_SIZE) {
+        int s = slots[i], h = sources[i];
+        densityDeviation[s] = received[4*h];
+        momentum[s] = received[4*h+1];
+        momentum[NUM_STORED+s] = received[4*h+2];
+        momentum[2*NUM_STORED+s] = received[4*h+3];
+    }
+}
+#endif
 #endif
 
 /**
@@ -669,7 +841,11 @@ KERNEL void addStencilWallMomentum(GLOBAL const int* RESTRICT stencilNode, GLOBA
  */
 KERNEL void clearCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL mixed* RESTRICT cellReaction) {
     for (int k = GLOBAL_ID; k < NUM_KEYS; k += GLOBAL_SIZE) {
+#ifdef STENCIL_WIDTH
+        int node = stencilReactionNode(sortKeys[k]);
+#else
         int node = keyNode(sortKeys[k]);
+#endif
 #ifdef DOMAIN_DECOMPOSITION
         if (node == NUM_STORED)
             continue;

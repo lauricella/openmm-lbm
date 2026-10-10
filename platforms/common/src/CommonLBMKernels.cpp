@@ -142,12 +142,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         throw OpenMMException("LBMForce does not support running on multiple devices");
     decomposition = LBMDecomposition(lattice.nx, lattice.ny, lattice.nz, lattice.procs);
     bool decomposed = decomposition.isDecomposed();
-    if (lattice.interpolationStencil != LBMForce::NearestNode && decomposed)
-        throw OpenMMException("LBMForce: on the " + getPlatform().getName() + " platform the interpolation stencils "
-                "other than NearestNode are not available yet with the domain decomposition (in development for version "
-                "0.5.0; the Reference platform has them)");
     int stencilWidth = LBMStencils::width(lattice.interpolationStencil);
     stencilSize = stencilWidth*stencilWidth*stencilWidth;
+    int stencilReach = (lattice.interpolationStencil == LBMForce::Keys ? 2 : 1);
     if (decomposed) {
         // The same collective check of the platform and precision as on the Reference platform, so that ranks on
         // different platforms all stop with the same error.  The parts not available yet with the decomposition on
@@ -168,14 +165,15 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     forceGroup = force.getForceGroup();
     bool centered = (lattice.dragScheme == LBMForce::Centered);
 
-    // The block of the rank, the whole lattice without the decomposition.  Along the divided axes the arrays hold a
-    // layer of halo nodes on each side (kernels/lbmFluid.cc); stored is their extent.
+    // The block of the rank, the whole lattice without the decomposition.  Along the divided axes the arrays hold
+    // layers of halo nodes on each side (kernels/lbmFluid.cc), as many as the stencil of the coupling reaches from the
+    // nearest node of a particle: one, or two with Keys; stored is their extent.
 
     int numNodes = lattice.getNumNodes();
     int size[3] = {lattice.nx, lattice.ny, lattice.nz}, stored[3];
     decomposition.getLocalDomain(localStart, localCount);
     for (int a = 0; a < 3; a++) {
-        pad[a] = (localCount[a] < size[a] ? 1 : 0);
+        pad[a] = (localCount[a] < size[a] ? stencilReach : 0);
         stored[a] = localCount[a]+2*pad[a];
     }
     numLocal = localCount[0]*localCount[1]*localCount[2];
@@ -196,7 +194,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     auto neighborStorage = [&] (const int local[3], const int c[3]) {
         int index[3];
         for (int a = 0; a < 3; a++)
-            index[a] = (pad[a] ? local[a]+c[a]+1 : (local[a]+c[a]+localCount[a])%localCount[a]);
+            index[a] = (pad[a] ? local[a]+c[a]+pad[a] : (local[a]+c[a]+localCount[a])%localCount[a]);
         return index[0] + stored[0]*(index[1] + stored[1]*index[2]);
     };
     auto localIndex = [&] (int node) {
@@ -513,6 +511,74 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             if (lattice.velocityHaloExchange)
                 haloVelocity.assign(3*haloIndex.size(), nan);
         }
+
+        // The coupling halo of an interpolation stencil, as on the Reference platform (docs/theory.md, section 9): the
+        // rank couples the particles whose nearest node it owns, and reads the moments of the nodes of their stencils, up
+        // to pad nodes from its block.  Every position of the halo of rank q (its stored nodes outside its block) gets
+        // rho - 1 and j of its node from the owner; with small blocks a node can fill several positions of a halo, or be
+        // a node of q itself.  Sender and receiver list the nodes of each pair of ranks in the order of the lattice.
+        couplingHaloSendCounts.assign(numRanks, 0);
+        couplingHaloReceiveCounts.assign(numRanks, 0);
+        if (stencilSize > 1 && !lattice.particles.empty()) {
+            int rank = decomposition.getRank();
+            vector<set<int> > sendNodes(numRanks), receiveNodes(numRanks);
+            map<int, vector<int> > receiveSlots;
+            for (int q = 0; q < numRanks; q++) {
+                int start[3], count[3], extent[3];
+                decomposition.getDomainOfRank(q, start, count);
+                for (int a = 0; a < 3; a++)
+                    extent[a] = count[a]+2*pad[a];
+                for (int c = 0; c < extent[2]; c++)
+                    for (int b = 0; b < extent[1]; b++) {
+                        bool rowInBlock = (b >= pad[1] && b < pad[1]+count[1] && c >= pad[2] && c < pad[2]+count[2]);
+                        for (int a = 0; a < extent[0]; a++) {
+                            if (rowInBlock && a == pad[0]) {
+                                a += count[0]-1;    // skip the nodes of the block
+                                continue;
+                            }
+                            int local[3] = {a-pad[0], b-pad[1], c-pad[2]}, index[3];
+                            for (int k = 0; k < 3; k++)
+                                index[k] = ((start[k]+local[k])%size[k] + size[k])%size[k];
+                            int node = index[0] + lattice.nx*(index[1] + lattice.ny*index[2]);
+                            int r = decomposition.ownerOfNode(node);
+                            if (r == rank)
+                                sendNodes[q].insert(node);
+                            if (q == rank) {
+                                receiveNodes[r].insert(node);
+                                receiveSlots[node].push_back(a + stored[0]*(b + stored[1]*c));
+                            }
+                        }
+                    }
+            }
+            vector<int> sendStorage, slots, sources;
+            for (int r = 0; r < numRanks; r++) {
+                for (int node : sendNodes[r])
+                    sendStorage.push_back(storageIndex(localIndex(node)));
+                couplingHaloSendCounts[r] = sendNodes[r].size();
+            }
+            int numReceived = 0;
+            for (int r = 0; r < numRanks; r++) {
+                for (int node : receiveNodes[r]) {
+                    for (int slot : receiveSlots[node]) {
+                        slots.push_back(slot);
+                        sources.push_back(numReceived);
+                    }
+                    numReceived++;
+                }
+                couplingHaloReceiveCounts[r] = receiveNodes[r].size();
+            }
+            couplingHaloStorage.initialize<int>(cc, max<int>(1, sendStorage.size()), "lbmCouplingHaloStorage");
+            couplingHaloBuffer.initialize(cc, 4*max<int>(1, sendStorage.size()), elementSize, "lbmCouplingHaloBuffer");
+            couplingHaloReceived.initialize(cc, 4*max(1, numReceived), elementSize, "lbmCouplingHaloReceived");
+            couplingHaloSlots.initialize<int>(cc, max<int>(1, slots.size()), "lbmCouplingHaloSlots");
+            couplingHaloSources.initialize<int>(cc, max<int>(1, sources.size()), "lbmCouplingHaloSources");
+            if (!sendStorage.empty())
+                couplingHaloStorage.upload(sendStorage);
+            if (!slots.empty()) {
+                couplingHaloSlots.upload(slots);
+                couplingHaloSources.upload(sources);
+            }
+        }
     }
 
     // Coupled particles: their index in the list of the force for every atom, masses in units of the mass of a
@@ -567,12 +633,16 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             for (ComputeArray* array : {&gradientRhs, &gradientResidual, &gradientPreconditioned, &gradientDirection, &gradientProduct})
                 array->initialize(cc, 3*numCoupled, elementSize, "lbmGradientVector");
             gradientScalars.initialize(cc, 15, elementSize, "lbmGradientScalars");
+            if (decomposed)
+                particleOwned.initialize<int>(cc, numCoupled, "lbmParticleOwned");
         }
         noise.initialize<mm_float4>(cc, numCoupled, "lbmNoise");
         noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
         // The sort keys are spread uniformly over their range (CouplingSortTrait), so the sort uses buckets of equal width.
+        // With the decomposition the keys of the stencils hold the nodes of the lattice (stencilKey()).
         int numKeys = numCoupled*stencilSize;
-        sort = cc.createSort(new CouplingSortTrait(numKeys, numStored, numNodes), numKeys, true);
+        int keyNodes = (decomposed && stencilSize > 1 ? numNodes : numStored);
+        sort = cc.createSort(new CouplingSortTrait(numKeys, keyNodes, numNodes), numKeys, true);
         cc.getIntegrationUtilities().initRandomNumberGenerator(seed);
         if (decomposed && numSolidNodes > 0) {
             globalIsFluid.initialize<int>(cc, numNodes, "lbmGlobalIsFluid");
@@ -698,6 +768,14 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             packFieldsKernel->addArg(haloBuffer);
             packFieldsKernel->addArg((int) haloSendStorage.getSize());
         }
+        if (couplingHaloStorage.isInitialized()) {
+            packCouplingHaloKernel = program->createKernel("packFields");
+            packCouplingHaloKernel->addArg(densityDeviation);
+            packCouplingHaloKernel->addArg(momentum);
+            packCouplingHaloKernel->addArg(couplingHaloStorage);
+            packCouplingHaloKernel->addArg(couplingHaloBuffer);
+            packCouplingHaloKernel->addArg((int) accumulate(couplingHaloSendCounts.begin(), couplingHaloSendCounts.end(), 0));
+        }
     }
     if (numWallNodes > 0) {
         bounceBackKernel = program->createKernel("bounceBack");
@@ -802,6 +880,15 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         clearReactionsKernel = coupling->createKernel("clearCellReactions");
         clearReactionsKernel->addArg(sortKeys);
         clearReactionsKernel->addArg(cellReaction);
+        if (couplingHaloStorage.isInitialized()) {
+            unpackCouplingHaloKernel = coupling->createKernel("unpackCouplingHalo");
+            unpackCouplingHaloKernel->addArg(densityDeviation);
+            unpackCouplingHaloKernel->addArg(momentum);
+            unpackCouplingHaloKernel->addArg(couplingHaloSlots);
+            unpackCouplingHaloKernel->addArg(couplingHaloSources);
+            unpackCouplingHaloKernel->addArg(couplingHaloReceived);
+            unpackCouplingHaloKernel->addArg((int) couplingHaloSlots.getSize());
+        }
         applyForcesKernel = coupling->createKernel("applyCouplingForces");
         applyForcesKernel->addArg(cc.getAtomIndexArray());
         applyForcesKernel->addArg(couplingIndex);
@@ -831,6 +918,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             if (hasFloatForceBuffers())
                 for (int i = 0; i < 2; i++)
                     prepareCenteredKernel->addArg();    // floating point force buffers and their number, set on first use
+            if (decomposed)
+                prepareCenteredKernel->addArg(particleOwned);
             keySegmentsKernel = coupling->createKernel("findKeySegments");
             keySegmentsKernel->addArg(sortKeys);
             keySegmentsKernel->addArg(keyFirst);
@@ -847,6 +936,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             multiplyKernel->addArg(gradientDirection);
             multiplyKernel->addArg(gradientProduct);
             multiplyKernel->addArg();       // gamma, set later
+            if (decomposed)
+                multiplyKernel->addArg(particleOwned);
             dotKernel = coupling->createKernel("dotStencilVectors");
             dotKernel->addArg(gradientResidual);
             dotKernel->addArg(gradientResidual);
@@ -1269,6 +1360,13 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
     int numCoupled = lattice.particles.size();
     bool draw = (lattice.kT > 0 && lattice.friction > 0 && !noiseDrawn);
     int randomIndex = 0;
+    // With the domain decomposition a stencil reads the moments of the coupling halo, exchanged after the removal of
+    // the fluid momentum; the forces are summed over the ranks before the reactions, which every rank adds on its own
+    // nodes from all the particles, and with the centred drag the conjugate gradients sum the right-hand side, the
+    // diagonal and every product over the ranks (as on the Reference platform).
+    bool stencilDecomposed = (stencilSize > 1 && decomposition.isDecomposed());
+    if (stencilDecomposed)
+        exchangeCouplingHalo();
     if (draw) {
         randomIndex = cc.getIntegrationUtilities().prepareRandomNumbers(cc.getPaddedNumAtoms());
         noiseDrawn = true;
@@ -1292,6 +1390,10 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
             prepareCenteredKernel->setArg(12, randomIndex);
         prepareCenteredKernel->setArg(13, draw ? 1 : 0);
         prepareCenteredKernel->execute(cc.getNumAtoms());
+        if (stencilDecomposed) {
+            sumOverRanks(gradientRhs);
+            sumOverRanks(gradientDiagonal);
+        }
         sort->sort(sortKeys);
         if (stencilSize > 1) {
             keySegmentsKernel->execute(numCoupled*stencilSize);
@@ -1313,6 +1415,8 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
         coupleKernel->setArg(14, draw ? 1 : 0);
         coupleKernel->setArg(15, isStep ? 1 : 0);
         coupleKernel->execute(cc.getNumAtoms());
+        if (stencilDecomposed)
+            sumParticleForces();
         if (isStep) {
             sort->sort(sortKeys);
             sumReactionsKernel->execute(numCoupled*stencilSize);
@@ -1320,8 +1424,42 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
     }
     if (isStep)
         noiseDrawn = false;
-    if (decomposition.isDecomposed())
+    if (decomposition.isDecomposed() && !stencilDecomposed)
         sumParticleForces();
+}
+
+void CommonCalcLBMForceKernel::exchangeCouplingHalo() {
+    // Through the host: the moments of the nodes of the block in the coupling halo of other ranks are packed, sent and
+    // received rank by rank, and written into the halo.  A rank whose halo holds its own nodes sends them to itself.
+    int numRanks = decomposition.getSize();
+    int numSent = accumulate(couplingHaloSendCounts.begin(), couplingHaloSendCounts.end(), 0);
+    int numReceived = accumulate(couplingHaloReceiveCounts.begin(), couplingHaloReceiveCounts.end(), 0);
+    vector<double> packed;
+    if (numSent > 0) {
+        packCouplingHaloKernel->execute(numSent);
+        downloadAsDouble(couplingHaloBuffer, packed);
+    }
+    vector<vector<double> > send(numRanks), receive(numRanks);
+    for (int r = 0, offset = 0; r < numRanks; r++) {
+        send[r].assign(packed.begin()+4*offset, packed.begin()+4*(offset+couplingHaloSendCounts[r]));
+        offset += couplingHaloSendCounts[r];
+        receive[r].resize(4*couplingHaloReceiveCounts[r]);
+    }
+    decomposition.exchange(send, receive);
+    if (numReceived > 0) {
+        vector<double> received;
+        for (int r = 0; r < numRanks; r++)
+            received.insert(received.end(), receive[r].begin(), receive[r].end());
+        couplingHaloReceived.upload(received, true);
+        unpackCouplingHaloKernel->execute(couplingHaloSlots.getSize());
+    }
+}
+
+void CommonCalcLBMForceKernel::sumOverRanks(ComputeArray& array) {
+    vector<double> values;
+    downloadAsDouble(array, values);
+    decomposition.sum(values.data(), values.size());
+    array.upload(values, true);
 }
 
 void CommonCalcLBMForceKernel::solveStencilDrag() {
@@ -1337,6 +1475,8 @@ void CommonCalcLBMForceKernel::solveStencilDrag() {
         spreadKernel->execute(numCoupled*stencilSize);
         multiplyKernel->setArg(4, p);
         multiplyKernel->execute(numCoupled);
+        if (decomposition.isDecomposed())
+            sumOverRanks(gradientProduct);
     };
     auto dot = [&](ComputeArray& x, ComputeArray& y, int offset) {
         dotKernel->setArg(0, x);

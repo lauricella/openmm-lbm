@@ -110,6 +110,13 @@ private:
     /** With the domain decomposition and the exchange of the halo: send the fields of the nodes of the block to the
         ranks whose halo contains them, and receive those of the halo of the rank (collective). */
     void exchangeHalo();
+    /** With the domain decomposition and an interpolation stencil: send rho - 1 and j of the nodes of the block to the
+        ranks whose coupling halo contains them, and write those of the coupling halo of the rank into the halo of the
+        moments (collective). */
+    void exchangeCouplingHalo();
+    /** With the domain decomposition: sum an array of the device over the ranks (collective; exact when at most one
+        rank has a nonzero value in each entry). */
+    void sumOverRanks(OpenMM::ComputeArray& array);
     /** The global index of node n of the block, its storage index (kernels/lbmFluid.cc), and the index in the block of
         a node of the lattice that belongs to the block. */
     int globalNode(int n) const;
@@ -118,10 +125,10 @@ private:
     OpenMM::ComputeContext& cc;
     const OpenMM::System& system;
     LBMLatticeParameters lattice;
-    /** The decomposition of the lattice, the first node and the extent of the block of the rank along each axis, 1
-        along the divided axes (which have a layer of halo nodes on each side) and 0 along the others, and the number
-        of nodes of the block and of entries per component of the arrays.  Without the decomposition the block is the
-        lattice and numStored = numLocal. */
+    /** The decomposition of the lattice, the first node and the extent of the block of the rank along each axis, the
+        layers of halo nodes on each side along the divided axes (1, or 2 with the Keys stencil) and 0 along the others,
+        and the number of nodes of the block and of entries per component of the arrays.  Without the decomposition the
+        block is the lattice and numStored = numLocal. */
     LBMDecomposition decomposition;
     int localStart[3], localCount[3], pad[3];
     int numLocal, numStored;
@@ -199,6 +206,13 @@ private:
     OpenMM::ComputeArray haloSendStorage, haloBuffer;
     std::map<int, int> haloIndex;
     std::vector<double> haloDensity, haloVelocity;
+    /** The coupling halo of an interpolation stencil with the domain decomposition (exchangeCouplingHalo()): the storage
+        indices of the nodes of the block to send, rank after rank, each in the order of the lattice, and the buffer of
+        their moments; the moments received (4 per node, rank after rank in the same order) and, for each position of the
+        halo of the block that they fill, its storage index and the node received; the number of nodes sent to and
+        received from each rank. */
+    OpenMM::ComputeArray couplingHaloStorage, couplingHaloBuffer, couplingHaloReceived, couplingHaloSlots, couplingHaloSources;
+    std::vector<int> couplingHaloSendCounts, couplingHaloReceiveCounts;
     /** Boundary nodes (regularized walls and open faces, internal/LBMBoundaries.h): the nodes, the bits of their
         unknown and solid directions, kind + 4*(face + 1), the momentum given to the wall by each node in the last
         step (deviations f - w, 3 components of numBoundaryNodes each), and the velocity and density minus 1 of the
@@ -217,6 +231,9 @@ private:
         at [i*stencilSize + slot]. */
     int stencilSize;
     OpenMM::ComputeArray stencilWeight;
+    /** With the domain decomposition and the centred drag with a stencil: 1 for the particles whose nearest node the
+        rank owns, which it couples, and 0 for the others. */
+    OpenMM::ComputeArray particleOwned;
     /** The centred drag with a stencil: for each slot its weight divided by the density of its node (0 at a solid
         node), its node and the position of the first sorted key of that node; the vector spread on the nodes (at those
         positions, 3 components of numCoupled*stencilSize each); the right-hand side, diagonal, residual, preconditioned
@@ -235,7 +252,8 @@ private:
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel, packFieldsKernel;
     OpenMM::ComputeKernel keySegmentsKernel, spreadKernel, multiplyKernel, dotKernel, startGradientsKernel;
-    OpenMM::ComputeKernel advanceGradientsKernel, directionKernel, stencilWallKernel;
+    OpenMM::ComputeKernel advanceGradientsKernel, directionKernel, stencilWallKernel, packCouplingHaloKernel;
+    OpenMM::ComputeKernel unpackCouplingHaloKernel;
 };
 
 } // namespace LBMPlugin

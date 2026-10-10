@@ -25,9 +25,9 @@ together: copies of the particles that differ between the ranks, an AndersenTher
 (the state of one domain), and (with the optional argument OpenCL) rank 0 on the Reference platform and the others on
 OpenCL.  Last, the checkpoint files and the VTK files written by all the ranks with MPI-IO, in the folder
 mpi_decomposition_files of the working directory: a run continued from a checkpoint with the same decomposition, with
-another one and with one domain, and VTK files against those of one domain.  On the Reference platform the particle
-cases run also with the interpolation stencils (explicit and centred drag, Trilinear, ThreePoint and Keys), and the
-fluctuating case with Keys.  A line with FAILED marks a failure."""
+another one and with one domain, and VTK files against those of one domain.  The particle cases run also with the
+interpolation stencils (explicit and centred drag, Trilinear, ThreePoint and Keys), and the fluctuating case with Keys.
+A line with FAILED marks a failure."""
 import hashlib
 import os
 import sys
@@ -257,7 +257,6 @@ PRESSURE_FORCE = 602.214*(0.5/0.01)**2/3*4*3
 def verdict(diff):
     return 'bitwise identical' if diff == 0 else 'max difference %.1e' % diff
 
-reference = (PLATFORM == 'Reference')
 ON = dict(platform=PLATFORM, properties=PROPERTIES)
 single_precision = (PROPERTIES.get('Precision') == 'single')
 for case in ('periodic', 'bounceback', 'regularized', 'faces', 'removal', 'velocityhalo', 'densityhalo'):
@@ -322,9 +321,8 @@ if PLATFORM in ('CUDA', 'HIP'):
 expect_error('checkpoint', 'checkpoints are written to a file', case='fluid', density_halo=False, velocity_halo=False,
              checkpoint=True, **ON)
 
-# The interpolation stencils run on the Reference platform for now (in development for version 0.5.0).
 STENCIL_CASES = [drag + '_' + stencil for drag in ('explicit', 'centered') for stencil in ('Trilinear', 'ThreePoint', 'Keys')]
-for case in ['explicit', 'centered', 'faces'] + (STENCIL_CASES if reference else []):
+for case in ['explicit', 'centered', 'faces'] + STENCIL_CASES:
     single, wall1, solid, particles1, _ = run_particles(case, (1, 1, 1), **ON)
     split, wall2, _, particles2, domain = run_particles(case, (px, py, pz), **ON)
     fluid = fluid_of_block(solid, domain)
@@ -342,7 +340,7 @@ for case in ['explicit', 'centered', 'faces'] + (STENCIL_CASES if reference else
 # With the fluctuating fluid the ranks draw different random numbers, so the run differs from that of one domain; the
 # copies of the particles must stay identical (the plugin compares them every 10 steps here, and the hash printed by
 # every rank must be the same).
-for case in ['thermal'] + (['thermal_Keys'] if reference else []):
+for case in ['thermal', 'thermal_Keys']:
     _, _, _, particles, _ = run_particles(case, (px, py, pz), steps=50, **ON)
     print('rank %d/%d %s %-12s runs; hash of the particles %s'
           % (rank, size, (px, py, pz), case, hashlib.md5(particles.tobytes()).hexdigest()[:16]), flush=True)

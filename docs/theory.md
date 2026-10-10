@@ -1362,9 +1362,8 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
 
 Version 0.5.0 will couple a particle to several nodes around it, as in Ahlrichs and Dünweg [5] and in the immersed
 boundary method [30]. This section gives the model and its derivation. Both drags with the three kernels are
-implemented on the Reference platform, also with the domain decomposition, and on the CUDA, OpenCL and HIP platforms
-with one domain, with periodic faces (`setInterpolationStencil()`); the domain decomposition on the GPU platforms and
-the open faces are in development. The coupling
+implemented on every platform (Reference, CUDA, OpenCL, HIP), with one domain and with the domain decomposition, with
+periodic faces (`setInterpolationStencil()`); the open faces are in development. The coupling
 of sections 2 and 8 uses the nearest node, which remains the default. The properties stated below were checked
 with linear models of the lattice (the fluid of section 1 linearized about rest, on a periodic lattice, with the
 particles at fixed positions) and then measured with the plugin on the Reference platform (`docs/validation.md`,
@@ -1533,7 +1532,7 @@ position and $`\tau`$ (Reference platform, a particle held almost at its place b
   the Oseen tensor for $`\tau \le 1.1`$; the stencils change the near field, where the nearest node gives a mobility
   that jumps from cell to cell.
 
-**Domain decomposition** (section 8; Reference platform). The rank that owns the nearest node of a particle computes
+**Domain decomposition** (section 8). The rank that owns the nearest node of a particle computes
 its coupling, as with the nearest node. From the nearest node the stencil reaches one node in each direction with the
 trilinear and three-point kernels and two with Keys: before the coupling the ranks exchange the density and the
 momentum of the nodes within that distance of their blocks (the coupling halo, after the removal of the fluid
@@ -1542,8 +1541,13 @@ own nodes the reactions of all the particles, in particle order, so that the sum
 centred drag the right-hand sides, the diagonal and every product of the conjugate gradients are summed over the
 ranks in the same way (one `MPI_Allreduce` of $`3N_p`$ numbers per iteration), and all the ranks run the same
 iterations. Without random numbers fluid and particles are identical, bit for bit, to one domain (2 to 8 ranks,
-`python/tests/mpi_decomposition.py`). A stencil across an open face is not defined yet: open faces with a stencil
-stop with an error.
+`python/tests/mpi_decomposition.py`). On the GPU platforms the arrays of the block hold as many layers of halo as the
+stencil reaches, one, or two with Keys (the populations still stream into the first), and the coupling halo is written
+into the halo of the moments, through the host; a node may fill two positions of the halo of a small block. Every rank
+computes the weights and sort keys of all the stencils; the keys of a stencil then hold the index of the node in the
+lattice rather than its position in the arrays, so that the keys of a node stay together wherever it is stored, and
+the nodes beyond the halo come after all the others. A stencil across an open face is not defined yet: open faces
+with a stencil stop with an error.
 
 ## References
 

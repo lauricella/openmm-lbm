@@ -832,12 +832,16 @@ $`1 \times 2 \times 2`$), on OpenCL on the CPU and on CUDA and OpenCL with A100 
 precision). With one domain `test_local_fields_halo_and_gather` checks the same rules (pytest, with and without open
 faces).
 
-**Interpolation stencils** (Reference platform, in development for version 0.5.0; `docs/theory.md`, section 9). The
-particle case with the walls, with the explicit and the centred drag and each of the three stencils (`Trilinear`,
-`ThreePoint`, `Keys`): fluid and particles identical bit for bit to one domain on every rank, with
-$`2 \times 1 \times 1`$, $`1 \times 2 \times 2`$, $`2 \times 2 \times 1`$ and $`2 \times 2 \times 2`$ domains (the
-particles share nodes, cross the borders of the blocks and reach the solid nodes with their stencils). With the
-fluctuating fluid and `Keys` the copies of the particles stay identical on every rank.
+**Interpolation stencils** (in development for version 0.5.0; `docs/theory.md`, section 9). The particle case with
+the walls, with the explicit and the centred drag and each of the three stencils (`Trilinear`, `ThreePoint`, `Keys`):
+fluid and particles identical bit for bit to one domain on every rank, on the Reference platform with
+$`2 \times 1 \times 1`$, $`1 \times 2 \times 2`$, $`2 \times 2 \times 1`$ and $`2 \times 2 \times 2`$ domains, and on
+OpenCL on the CPU in double precision with $`2 \times 1 \times 1`$, $`2 \times 2 \times 1`$, $`1 \times 1 \times 4`$ and
+$`2 \times 2 \times 2`$ and in single precision with $`2 \times 2 \times 1`$, and on four A100 GPUs with CUDA in double
+($`2 \times 2 \times 1`$), mixed ($`1 \times 2 \times 2`$) and single precision ($`1 \times 1 \times 4`$) and OpenCL in
+double precision ($`2 \times 1 \times 1`$) (the particles share nodes, cross the borders of the blocks and reach the
+solid nodes with their stencils). With the fluctuating fluid and `Keys` the copies
+of the particles stay identical on every rank.
 
 **CUDA and OpenCL platforms.** All the cases of this section, the fluid ones with the exchange of the halo and the
 coupled particles, on one node with four A100 GPUs, one GPU per rank, against one domain on the same platform and

@@ -29,10 +29,11 @@
  *
  * With the domain decomposition (DOMAIN_DECOMPOSITION, docs/theory.md, section 8) NX, NY and NZ are the extents of
  * the block of the rank and NUM_NODES its number of nodes, and node indices are local, i + NX*(j + NY*k) within the
- * block.  Along the divided axes (PAD_X, PAD_Y, PAD_Z equal to 1) the arrays hold one more layer of nodes on each
- * side, the halo, into which the streaming pushes the populations that leave the block; the host sends them to the
- * ranks that own those nodes (packPopulations, unpackPopulations).  Along the other axes the block is the whole axis
- * and the streaming wraps around within it, as without the decomposition.  The node n of the block is stored at
+ * block.  Along the divided axes (PAD_X, PAD_Y, PAD_Z nonzero) the arrays hold PAD_X (PAD_Y, PAD_Z) more layers of
+ * nodes on each side, the halo: one, or two with the Keys interpolation stencil, whose coupling reads the moments of
+ * nodes two layers away (CommonLBMKernels.cpp).  The streaming pushes the populations that leave the block into the
+ * first layer; the host sends them to the ranks that own those nodes (packPopulations, unpackPopulations).  Along the
+ * other axes the block is the whole axis and the streaming wraps around within it, as without the decomposition.  The node n of the block is stored at
  * STORAGE_INDEX(n) of arrays of NUM_STORED entries per component (populations, moments, isFluid).
  * Without the decomposition the storage index is the node index and NUM_STORED is NUM_NODES.
  */
@@ -60,17 +61,17 @@
  */
 DEVICE int neighborIndex(int i, int j, int k, int dx, int dy, int dz) {
 #if PAD_X
-    int a = i+dx+1;
+    int a = i+dx+PAD_X;
 #else
     int a = (i+dx+NX)%NX;
 #endif
 #if PAD_Y
-    int b = j+dy+1;
+    int b = j+dy+PAD_Y;
 #else
     int b = (j+dy+NY)%NY;
 #endif
 #if PAD_Z
-    int c = k+dz+1;
+    int c = k+dz+PAD_Z;
 #else
     int c = (k+dz+NZ)%NZ;
 #endif
