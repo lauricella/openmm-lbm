@@ -241,8 +241,8 @@ private:
         rank owns, which it couples, and 0 for the others. */
     OpenMM::ComputeArray particleOwned;
     /** The centred drag with a stencil: for each slot its weight divided by the density of its node (0 at a solid
-        node), its node and the segment of the sorted keys of that node; the vector spread on the nodes (by segment, 3
-        components of numCoupled*stencilSize each); the right-hand side, diagonal, residual, preconditioned residual,
+        node), its node and the segment of the sorted keys of that node; the vector spread on the nodes (by segment, the 3
+        components of a segment together); the right-hand side, diagonal, residual, preconditioned residual,
         direction and product of the conjugate gradients, and their dot products. */
     OpenMM::ComputeArray interpWeight, stencilNode, keySegment, spreadValue, gradientRhs, gradientDiagonal, gradientResidual;
     OpenMM::ComputeArray gradientPreconditioned, gradientDirection, gradientProduct, gradientScalars;

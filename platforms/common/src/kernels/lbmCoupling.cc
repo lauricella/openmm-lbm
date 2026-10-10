@@ -763,7 +763,8 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
 
 /**
  * Conjugate gradients of the centred drag: the vector p of the particles spread on the nodes, sum_l xi_jl p_l in
- * particle order, written for the node of segment s at spreadValue[s] (3 components of NUM_KEYS each).  With the domain
+ * particle order, written for the node of segment s at spreadValue[3*s ... 3*s+2], the three components together for
+ * the scattered reads of multiplyStencilMatrix().  With the domain
  * decomposition p is the same on every rank, and each rank spreads it on the nodes of its block and halo, from all the
  * particles.
  */
@@ -785,9 +786,9 @@ KERNEL void spreadStencilVector(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL 
             sy += w*p[NUM_COUPLED+i];
             sz += w*p[2*NUM_COUPLED+i];
         }
-        spreadValue[s] = sx;
-        spreadValue[NUM_KEYS+s] = sy;
-        spreadValue[2*NUM_KEYS+s] = sz;
+        spreadValue[3*s] = sx;
+        spreadValue[3*s+1] = sy;
+        spreadValue[3*s+2] = sz;
     }
 }
 
@@ -818,9 +819,9 @@ KERNEL void multiplyStencilMatrix(GLOBAL const mixed* RESTRICT particleMass, GLO
             int e = i*STENCIL_SIZE + n;
             int k = keySegment[e];
             mixed w = interpWeight[e];
-            sx += spreadValue[k]*w;
-            sy += spreadValue[NUM_KEYS+k]*w;
-            sz += spreadValue[2*NUM_KEYS+k]*w;
+            sx += spreadValue[3*k]*w;
+            sy += spreadValue[3*k+1]*w;
+            sz += spreadValue[3*k+2]*w;
         }
         mixed d = (1+a)/particleMass[i];
         result[i] = p[i]*d + sx*a;
