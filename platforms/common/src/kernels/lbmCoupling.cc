@@ -633,6 +633,160 @@ KERNEL void sumStencilReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL 
  * stencils (stencilKey()), and xi/rho of all of them comes later, from the densities of the nodes summed over the
  * ranks (gatherSegmentDensity(), stencilInterpolationWeights()).
  */
+#if STENCIL_SIZE >= 27
+/*
+ * With the three-point kernel and Keys a work group of LBM_BLOCK_SIZE threads takes LBM_BLOCK_SIZE/STENCIL_SIZE atoms at
+ * a time: one thread per slot computes its weight, key and node and the terms of the interpolated velocity and of the
+ * self weight, written to local memory; four threads per particle add them in slot order (the three components of u
+ * and the self weight); then one thread per particle writes the right-hand side and the diagonal.  The arithmetic is
+ * that of the loop over the slots below, so the results are the same.
+ */
+#define STENCIL_ATOMS_PER_GROUP (LBM_BLOCK_SIZE/STENCIL_SIZE)
+
+KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection,
+        GLOBAL const mixed4* RESTRICT velm, GLOBAL const int* RESTRICT atomIndex, GLOBAL const int* RESTRICT couplingIndex,
+        GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mm_long* RESTRICT longForces,
+        GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum, GLOBAL mm_long* RESTRICT sortKeys,
+        GLOBAL const float4* RESTRICT random, GLOBAL float4* RESTRICT noise, int randomIndex, int drawNoise, mixed gamma,
+        mixed kT, mixed gx, mixed gy, mixed gz, GLOBAL mixed* RESTRICT stencilWeight, GLOBAL mixed* RESTRICT interpWeight,
+        GLOBAL int* RESTRICT stencilNode, GLOBAL mixed* RESTRICT rhs, GLOBAL mixed* RESTRICT diagonal
+#ifdef HAS_FLOAT_FORCE_BUFFERS
+        , GLOBAL const real4* RESTRICT floatForces, int numFloatForces
+#endif
+        ) {
+    LOCAL mixed term[5*LBM_BLOCK_SIZE];
+    LOCAL int termUsed[LBM_BLOCK_SIZE];
+    LOCAL mixed sums[4*STENCIL_ATOMS_PER_GROUP];
+    const mixed h = 0.5f;
+    const mixed a = gamma*h;
+    const mixed fixedPointScale = 1/(mixed) 0x100000000;
+    for (int firstAtom = GROUP_ID*STENCIL_ATOMS_PER_GROUP; firstAtom < NUM_ATOMS; firstAtom += NUM_GROUPS*STENCIL_ATOMS_PER_GROUP) {
+        // One thread per slot.
+        int slotAtom = firstAtom + LOCAL_ID/STENCIL_SIZE;
+        termUsed[LOCAL_ID] = 0;
+        int i = (LOCAL_ID < STENCIL_ATOMS_PER_GROUP*STENCIL_SIZE && slotAtom < NUM_ATOMS ? couplingIndex[atomIndex[slotAtom]] : -1);
+        if (i >= 0) {
+            int slot = LOCAL_ID%STENCIL_SIZE;
+            int a2 = slot%STENCIL_WIDTH, b = (slot/STENCIL_WIDTH)%STENCIL_WIDTH, c = slot/(STENCIL_WIDTH*STENCIL_WIDTH);
+            mixed4 pos = loadPosition(posq, posqCorrection, slotAtom);
+            int ix[STENCIL_WIDTH], iy[STENCIL_WIDTH], iz[STENCIL_WIDTH];
+            mixed wx[STENCIL_WIDTH], wy[STENCIL_WIDTH], wz[STENCIL_WIDTH];
+            mixed sx = wrapCoordinate(pos.x, GNX), sy = wrapCoordinate(pos.y, GNY), sz = wrapCoordinate(pos.z, GNZ);
+            stencilAxis(sx, GNX, OPEN_X, ix, wx);
+            stencilAxis(sy, GNY, OPEN_Y, iy, wy);
+            stencilAxis(sz, GNZ, OPEN_Z, iz, wz);
+#ifdef DOMAIN_DECOMPOSITION
+            bool owned = (storedNode(stencilOwnerNode(pos)) != NUM_STORED);
+            int jx[STENCIL_WIDTH], jy[STENCIL_WIDTH], jz[STENCIL_WIDTH];
+            if (owned) {
+                stencilAxisStored(sx, GNX, OX, PAD_X, OPEN_X, jx);
+                stencilAxisStored(sy, GNY, OY, PAD_Y, OPEN_Y, jy);
+                stencilAxisStored(sz, GNZ, OZ, PAD_Z, OPEN_Z, jz);
+            }
+#else
+            const bool owned = true;
+            int* jx = ix;
+            int* jy = iy;
+            int* jz = iz;
+#endif
+            int e = i*STENCIL_SIZE + slot;
+            mixed w = wx[a2]*wy[b]*wz[c];
+            stencilWeight[e] = w;
+            sortKeys[e] = stencilKey(ix[a2], iy[b], iz[c], e);
+            interpWeight[e] = 0;
+            stencilNode[e] = NUM_STORED;
+            if (owned) {
+                int node = jx[a2] + SX*(jy[b] + SY*jz[c]);
+                mixed rho = 1 + densityDeviation[node];
+                stencilNode[e] = node;
+                if (rho > 0) {
+                    term[5*LOCAL_ID] = momentum[node] + h*(rho*gx);
+                    term[5*LOCAL_ID+1] = momentum[NUM_STORED+node] + h*(rho*gy);
+                    term[5*LOCAL_ID+2] = momentum[2*NUM_STORED+node] + h*(rho*gz);
+                    term[5*LOCAL_ID+3] = w/rho;
+                    term[5*LOCAL_ID+4] = w*w/rho;
+                    termUsed[LOCAL_ID] = 1;
+                    interpWeight[e] = w/rho;
+                }
+            }
+        }
+        SYNC_THREADS;
+        // Four threads per particle: the components of the interpolated velocity and the self weight, in slot order.
+        int sumAtom = LOCAL_ID/4, component = LOCAL_ID%4;
+        if (sumAtom < STENCIL_ATOMS_PER_GROUP) {
+            mixed sum = 0;
+            for (int n = 0; n < STENCIL_SIZE; n++) {
+                int t = sumAtom*STENCIL_SIZE + n;
+                if (termUsed[t]) {
+                    if (component < 3)
+                        sum += term[5*t+component]*term[5*t+3];
+                    else
+                        sum += term[5*t+4];
+                }
+            }
+            sums[LOCAL_ID] = sum;
+        }
+        SYNC_THREADS;
+        // One thread per particle.
+        int j = firstAtom + LOCAL_ID;
+        i = (LOCAL_ID < STENCIL_ATOMS_PER_GROUP && j < NUM_ATOMS ? couplingIndex[atomIndex[j]] : -1);
+        if (i >= 0) {
+            mixed fx = longForces[j]*fixedPointScale;
+            mixed fy = longForces[j+PADDED_NUM_ATOMS]*fixedPointScale;
+            mixed fz = longForces[j+2*PADDED_NUM_ATOMS]*fixedPointScale;
+#ifdef HAS_FLOAT_FORCE_BUFFERS
+            for (int b = 0; b < numFloatForces; b++) {
+                real4 f = floatForces[j+b*PADDED_NUM_ATOMS];
+                fx += f.x;
+                fy += f.y;
+                fz += f.z;
+            }
+#endif
+            mixed4 v = velm[j];
+            mixed m = particleMass[i];
+            mixed scale = h/(m*FORCE_SCALE);
+            mixed kx = v.x*(1/(mixed) VELOCITY_SCALE) + fx*scale;
+            mixed ky = v.y*(1/(mixed) VELOCITY_SCALE) + fy*scale;
+            mixed kz = v.z*(1/(mixed) VELOCITY_SCALE) + fz*scale;
+#ifdef DOMAIN_DECOMPOSITION
+            bool owned = (storedNode(stencilOwnerNode(loadPosition(posq, posqCorrection, j))) != NUM_STORED);
+#else
+            const bool owned = true;
+#endif
+            mixed ux = sums[4*LOCAL_ID], uy = sums[4*LOCAL_ID+1], uz = sums[4*LOCAL_ID+2], self = sums[4*LOCAL_ID+3];
+            if (!owned) {
+                if (kT > 0 && gamma > 0 && drawNoise)
+                    noise[i] = random[randomIndex+i];
+                rhs[i] = 0;
+                rhs[NUM_COUPLED+i] = 0;
+                rhs[2*NUM_COUPLED+i] = 0;
+                diagonal[i] = 0;
+            }
+            else {
+                mixed bx = (kx-ux)*(-gamma*m), by = (ky-uy)*(-gamma*m), bz = (kz-uz)*(-gamma*m);
+                if (kT > 0 && gamma > 0) {
+                    mixed sigma = sqrt(2*gamma*m*kT);
+                    float4 xi;
+                    if (drawNoise) {
+                        xi = random[randomIndex+i];
+                        noise[i] = xi;
+                    }
+                    else
+                        xi = noise[i];
+                    bx += xi.x*sigma;
+                    by += xi.y*sigma;
+                    bz += xi.z*sigma;
+                }
+                rhs[i] = bx*(1/m);
+                rhs[NUM_COUPLED+i] = by*(1/m);
+                rhs[2*NUM_COUPLED+i] = bz*(1/m);
+                diagonal[i] = (1+a)/m + a*self;
+            }
+        }
+        SYNC_THREADS;
+    }
+}
+#else
 KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection,
         GLOBAL const mixed4* RESTRICT velm, GLOBAL const int* RESTRICT atomIndex, GLOBAL const int* RESTRICT couplingIndex,
         GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mm_long* RESTRICT longForces,
@@ -741,6 +895,7 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         diagonal[i] = (1+a)/m + a*self;
     }
 }
+#endif
 
 /**
  * Conjugate gradients of the centred drag: the vector p of the particles spread on the nodes, sum_l xi_jl p_l in

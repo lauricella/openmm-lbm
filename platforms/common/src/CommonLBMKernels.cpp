@@ -1449,7 +1449,12 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
         if (draw)
             prepareCenteredKernel->setArg(12, randomIndex);
         prepareCenteredKernel->setArg(13, draw ? 1 : 0);
-        prepareCenteredKernel->execute(cc.getNumAtoms());
+        if (stencilSize >= 27) {
+            int atomsPerGroup = blockSize/stencilSize;
+            prepareCenteredKernel->execute(((cc.getNumAtoms()+atomsPerGroup-1)/atomsPerGroup)*blockSize, blockSize);
+        }
+        else
+            prepareCenteredKernel->execute(cc.getNumAtoms());
         if (stencilDecomposed) {
             sumOverRanks(gradientRhs);
             sumOverRanks(gradientDiagonal);

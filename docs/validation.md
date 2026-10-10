@@ -1166,9 +1166,9 @@ explicit / centred drag:
 
 | Stencil | 1 GPU, $`120^3`$ nodes | 4 GPUs, $`120^3`$ nodes | 4 GPUs, $`240^3`$ nodes |
 |---|---|---|---|
-| `Trilinear` | 1.62 / 2.51 | 2.42 / 4.40 | 6.75 / 8.74 |
-| `ThreePoint` | 2.95 / 5.60 | 3.43 / 7.70 | 7.67 / 11.74 |
-| `Keys` | 5.49 / 12.48 | 6.86 / 16.08 | 13.69 / 23.52 |
+| `Trilinear` | 1.62 / 2.53 | 2.42 / 4.50 | 6.75 / 8.72 |
+| `ThreePoint` | 2.95 / 4.98 | 3.43 / 7.19 | 7.67 / 11.81 |
+| `Keys` | 5.49 / 11.02 | 6.86 / 15.08 | 13.69 / 22.30 |
 
 The beads are crowded (8 to 64 sort keys each, 3.6 million with `Keys`), so the coupling takes most of the step. The
 sums over the nodes of the stencils run one thread per node, from a list of the segments of the sorted keys made after
@@ -1177,7 +1177,11 @@ a warp were idle: with `Keys` and the centred drag on one GPU the spreading of t
 ms per step, now 2.7 of 12.9 (profile of the step). The product of the conjugate gradients reads the values of the
 slots of a stencil scattered over the nodes: with the three-point kernel and Keys a work group reads those of a
 particle together and three threads add them in order (`Keys` 2.06 to 1.72 ms per step, three-point 0.82 to 0.57;
-the trilinear kernel keeps one thread per particle, which is faster with 8 slots). With the domain decomposition the ranks sum once per force
+the trilinear kernel keeps one thread per particle, which is faster with 8 slots), and the preparation of the system,
+`prepareCenteredStencil`, computes the slots of a particle the same way, one thread per slot (`Keys` 1.86 to 0.73 ms,
+three-point 0.80 to 0.40). On the CUDA platform this changes the rounding of the centred drag with these two
+stencils in some cases (by $`2\cdot10^{-18}`$ in one of the 64 arrays of the comparison in double precision), although
+the operations are the same; on OpenCL the results are the same bit for bit. With the domain decomposition the ranks sum once per force
 evaluation the densities of the nodes of the stencils, and every rank then solves the centred drag for all the
 particles; when instead the product of the conjugate gradients was summed over the ranks at every iteration, through
 the host, the centred drag on four GPUs took 9.63 ms per step with the trilinear stencil on $`120^3`$ nodes (11.6 ms
