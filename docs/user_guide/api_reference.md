@@ -380,7 +380,13 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
   Bounce-back is never applied across an open face.
 - **The body acceleration** (`setBodyAcceleration()`) still acts on all the fluid.
 - **Particles** still live in OpenMM's periodic box: a particle that crosses an open face reappears on the
-  opposite side. Keep coupled particles away from the open faces.
+  opposite side. Keep coupled particles away from the open faces. With an interpolation stencil the stencil stops at
+  the last nodes ([interpolation.md](interpolation.md#4-what-the-plugin-does-with-the-weights)).
+- **Fluctuating fluid.** The fluid next to a `Velocity` face is colder and next to a `Density` face hotter than the
+  set temperature, on the planes of the faces (196 K and 349 K at 300 K) and, for a `Density` face, a few planes
+  into the fluid; coupled particles near a `Velocity` face keep the set temperature, near a `Density` face they are
+  up to 8% hotter within four nodes ([validation](../validation.md), Temperature near open faces). Keep coupled
+  particles at least five nodes away from `Density` faces.
 - **Mass** is not conserved with open faces (fluid enters and leaves), and `getWallForce()` counts only the
   solid walls, not the open faces.
 - **Keep the flow slow and the density differences small**: a few percent at most, so that the fluid stays

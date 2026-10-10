@@ -1558,8 +1558,11 @@ checks the interpolated velocity near the faces for every kernel). Two other rul
 nodes beyond a face holding the value that the face imposes keep linear fields exact at a `Velocity` face, but at a
 `Density` face the velocity beyond it depends on the fluid while its share of the reaction would leave the box, so
 interpolation and spreading would no longer be transposes; a stencil truncated at the face and renormalized is not
-defined in the cell between node $`n - 1`$ and the end of the box, where the weights of the nodes inside vanish. The
-temperature of particles near open faces with the fluctuating fluid is part of the validation of version 0.5.0.
+defined in the cell between node $`n - 1`$ and the end of the box, where the weights of the nodes inside vanish. With
+the fluctuating fluid and the centred drag, particles near `Velocity` faces have the set temperature with every
+stencil, also in the cell between node $`n - 1`$ and the end of the box; near a `Density` face they are hotter, up to
+8% within four nodes, with the nearest node as well, because the fluid there is hotter (`docs/validation.md`,
+Interpolation stencils, Temperature near open faces).
 
 **Domain decomposition** (section 8). The rank that owns the nearest node of a particle computes
 its coupling, as with the nearest node. From the nearest node the stencil reaches one node in each direction with the

@@ -408,6 +408,48 @@ statistical error. With the trilinear kernel and Keys the response depends on wh
 kicked within $`0.2\,\Delta x`$ of a node, where these kernels approach the nearest node, the particle keeps its
 velocity longer, and the ratio of the autocorrelation to that response falls to 0.69 (trilinear) and 0.75 (Keys) at 0.5 ps.
 
+**Temperature near open faces** (CUDA, mixed precision, one NVIDIA A100). $`16^3`$ nodes ($`\Delta x`$ = 0.5 nm,
+$`\Delta t`$ = 10 fs, water, $`\tau = 0.62`$), fluctuating fluid at 300 K, centred drag, friction 10/ps, open faces
+along $`z`$: `Velocity` at rest on both (vv), or `Velocity` at $`z_{\min}`$ and `Density` (602.2 Da/nm³) at
+$`z_{\max}`$ (vd); periodic along $`x`$ and $`y`$. Layers of 16 beads of 100 Da at the heights $`z/\Delta x`$ of the
+table, each held at its height by a harmonic spring (1000 kJ/mol/nm², thermal amplitude 0.05 nm) and free along
+$`x`$ and $`y`$; the temperature of a layer from the $`x`$ and $`y`$ velocities at the half step, over
+$`2\cdot10^5`$ steps after $`2\cdot10^4`$, with the error from 20 blocks. Every column has the same random numbers,
+so their fluctuations are correlated. The nodes are at $`z/\Delta x`$ = 0 to 15, the values of the faces hold at
+$`-1`$ and 16, and a bead at 15.75 is in the cell between node 15 and the end of the box (with the nearest node it is
+coupled to node 0, next to the other face). Temperatures in K:
+
+| $`z/\Delta x`$ | nearest node, vv | `Trilinear`, vv | `ThreePoint`, vv | `Keys`, vv | nearest node, vd | `ThreePoint`, vd | `Keys`, vd |
+|---|---|---|---|---|---|---|---|
+| 0.25 | 301.2 ± 0.6 | 301.1 ± 0.7 | 301.0 ± 0.6 | 301.4 ± 0.6 | 301.5 ± 0.7 | 301.1 ± 0.6 | 301.5 ± 0.7 |
+| 0.75 | 300.4 ± 0.4 | 300.6 ± 0.5 | 300.6 ± 0.5 | 300.7 ± 0.6 | 300.1 ± 0.5 | 300.6 ± 0.5 | 300.7 ± 0.6 |
+| 1.5 | 300.7 ± 0.5 | 300.8 ± 0.6 | 300.9 ± 0.6 | 300.2 ± 0.6 | 300.6 ± 0.5 | 301.0 ± 0.6 | 300.6 ± 0.6 |
+| 2.5 | 298.5 ± 0.6 | 298.6 ± 0.6 | 298.6 ± 0.6 | 298.9 ± 0.5 | 299.1 ± 0.6 | 299.1 ± 0.6 | 299.1 ± 0.6 |
+| 4 | 301.0 ± 0.6 | 300.6 ± 0.7 | 300.7 ± 0.7 | 300.5 ± 0.7 | 300.9 ± 0.6 | 300.9 ± 0.7 | 301.4 ± 0.7 |
+| 8 | 300.0 ± 0.6 | 299.9 ± 0.6 | 300.1 ± 0.6 | 300.0 ± 0.7 | 300.5 ± 0.6 | 301.1 ± 0.6 | 301.1 ± 0.7 |
+| 12 | 300.4 ± 0.7 | 299.6 ± 0.8 | 299.6 ± 0.7 | 299.6 ± 0.7 | 303.1 ± 0.6 | 302.8 ± 0.7 | 302.9 ± 0.8 |
+| 13.5 | 299.8 ± 0.5 | 299.8 ± 0.5 | 299.9 ± 0.4 | 299.8 ± 0.4 | 307.0 ± 0.5 | 305.2 ± 0.4 | 306.1 ± 0.6 |
+| 14.5 | 300.6 ± 0.5 | 300.5 ± 0.5 | 300.5 ± 0.5 | 300.8 ± 0.5 | 315.4 ± 0.7 | 309.7 ± 0.6 | 312.3 ± 0.5 |
+| 15.25 | 300.5 ± 0.5 | 300.9 ± 0.7 | 300.6 ± 0.6 | 301.0 ± 0.6 | 323.1 ± 0.8 | 315.0 ± 0.9 | 322.9 ± 0.9 |
+| 15.75 | 300.2 ± 0.6 | 300.2 ± 0.6 | 300.0 ± 0.5 | 300.5 ± 0.6 | 300.1 ± 0.7 | 316.3 ± 0.7 | 320.8 ± 0.7 |
+
+With `Velocity` faces every stencil gives the set temperature at every height, within 0.5%, also in the cell between
+the last node and the end of the box (the low value at 2.5 is in every column: the shared random numbers). Near a
+`Density` face the beads are hotter, from 4 nodes away (+1% at 12, +2% at 13.5, +3% to 5% at 14.5, +5% to 8% at 15.25),
+**with the nearest node as well**: the cause is the fluid next to the `Density` face, not the stencils. The kinetic
+temperature of the fluid per plane, $`\rho\Delta x^3\langle\lvert\mathbf u - \bar{\mathbf u}\rvert^2\rangle/(3k_B)`$
+with $`\bar{\mathbf u}`$ the mean velocity of the plane (`getFluidFields()` every 500 steps, the runs with the nearest
+node), in K:
+
+| plane $`z/\Delta x`$ | 0 | 1 | 2 | 3 | 4 to 11 | 12 | 13 | 14 | 15 |
+|---|---|---|---|---|---|---|---|---|---|
+| vv | 196.4 | 290.1 | 297.5 | 298.0 | 297.8 to 299.7 | 298.1 | 297.7 | 291.3 | 196.1 |
+| vd | 196.5 | 290.2 | 297.5 | 298.1 | 297.9 to 299.8 | 300.3 | 302.9 | 307.0 | 349.4 |
+
+The planes of the faces are cold at a `Velocity` face and hot at a `Density` face, whose excess reaches about three
+planes into the fluid; beads next to a `Velocity` face nevertheless have the set temperature. With a fluctuating fluid
+keep coupled particles at least five nodes away from `Density` faces.
+
 ## Fluctuating fluid (`tests/TestLBMFluctuations.h`, all platforms)
 
 The platforms draw different random numbers (the generator of the force on the Reference platform, OpenMM's on the
