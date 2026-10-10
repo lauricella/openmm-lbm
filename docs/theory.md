@@ -1570,15 +1570,18 @@ trilinear and three-point kernels and two with Keys: before the coupling the ran
 momentum of the nodes within that distance of their blocks (the coupling halo, after the removal of the fluid
 momentum). The coupling forces are summed over the ranks, as with the nearest node, and then every rank adds to its
 own nodes the reactions of all the particles, in particle order, so that the sums are those of one domain. With the
-centred drag the right-hand sides, the diagonal and every product of the conjugate gradients are summed over the
-ranks in the same way (one `MPI_Allreduce` of $`3N_p`$ numbers per iteration), and all the ranks run the same
-iterations. Without random numbers fluid and particles are identical, bit for bit, to one domain (2 to 8 ranks,
+centred drag, on the Reference platform the right-hand sides, the diagonal and every product of the conjugate
+gradients are summed over the ranks in the same way (one `MPI_Allreduce` of $`3N_p`$ numbers per iteration); on the
+GPU platforms the ranks sum once per force evaluation the right-hand sides, the diagonal and the density of every node
+that a stencil reaches, from the rank whose block holds it, and then every rank solves the system for all the
+particles with the same numbers, without communication during the iterations. In both cases all the ranks run the
+same iterations. Without random numbers fluid and particles are identical, bit for bit, to one domain (2 to 8 ranks,
 `python/tests/mpi_decomposition.py`). On the GPU platforms the arrays of the block hold as many layers of halo as the
 stencil reaches, one, or two with Keys (the populations still stream into the first), and the coupling halo is written
 into the halo of the moments, through the host; a node may fill two positions of the halo of a small block. Every rank
 computes the weights and sort keys of all the stencils; the keys of a stencil then hold the index of the node in the
-lattice rather than its position in the arrays, so that the keys of a node stay together wherever it is stored, and
-the nodes beyond the halo come after all the others. Along an axis with open faces the owner of a particle is the rank
+lattice rather than its position in the arrays, so that the keys, and the segments of the sorted keys, are the same on
+every rank. Along an axis with open faces the owner of a particle is the rank
 of the nearest node of the lattice (Open faces, above), whose block and halo hold the whole stencil.
 
 ## References

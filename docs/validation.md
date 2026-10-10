@@ -1166,16 +1166,21 @@ explicit / centred drag:
 
 | Stencil | 1 GPU, $`120^3`$ nodes | 4 GPUs, $`120^3`$ nodes | 4 GPUs, $`240^3`$ nodes |
 |---|---|---|---|
-| `Trilinear` | 1.62 / 2.58 | 2.42 / 9.63 | 6.75 / 13.48 |
-| `ThreePoint` | 2.95 / 5.71 | 3.43 / 10.41 | 7.67 / 14.17 |
-| `Keys` | 5.49 / 12.86 | 6.86 / 18.09 | 13.69 / 24.43 |
+| `Trilinear` | 1.62 / 2.51 | 2.42 / 4.40 | 6.75 / 8.74 |
+| `ThreePoint` | 2.95 / 5.60 | 3.43 / 7.70 | 7.67 / 11.74 |
+| `Keys` | 5.49 / 12.48 | 6.86 / 16.08 | 13.69 / 23.52 |
 
 The beads are crowded (8 to 64 sort keys each, 3.6 million with `Keys`), so the coupling takes most of the step. The
 sums over the nodes of the stencils run one thread per node, from a list of the segments of the sorted keys made after
 each sort; before, one thread per key scanned the keys of its node when it was the first of them, and most threads of
 a warp were idle: with `Keys` and the centred drag on one GPU the spreading of the conjugate gradients took 14 of 28.6
-ms per step, now 2.7 of 12.9 (profile of the step). The centred drag on four GPUs sums the product of the conjugate
-gradients over the ranks at every iteration (through the host), which costs more than the work it divides.
+ms per step, now 2.7 of 12.9 (profile of the step). With the domain decomposition the ranks sum once per force
+evaluation the densities of the nodes of the stencils, and every rank then solves the centred drag for all the
+particles; when instead the product of the conjugate gradients was summed over the ranks at every iteration, through
+the host, the centred drag on four GPUs took 9.63 ms per step with the trilinear stencil on $`120^3`$ nodes (11.6 ms
+under the profiler, of which the GPUs worked 2.7 and the 10 sums took 3.5), 10.41 with the three-point one and 18.09
+with Keys. The particles are replicated, so every rank sorts all the keys and solves for all the particles: with so
+many crowded beads four GPUs pay off only when the fluid takes most of the step.
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 

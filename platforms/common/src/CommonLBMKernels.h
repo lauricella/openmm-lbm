@@ -119,6 +119,10 @@ private:
     /** With the domain decomposition: sum an array of the device over the ranks (collective; exact when at most one
         rank has a nonzero value in each entry). */
     void sumOverRanks(OpenMM::ComputeArray& array);
+    /** With the domain decomposition and the centred drag with a stencil, after listKeySegments(): the density of the
+        node of every segment from the rank that holds it, summed over the ranks, and the weights divided by it of
+        all the stencils, so that every rank solves the centred drag for all the particles (collective). */
+    void exchangeSegmentDensity();
     /** The global index of node n of the block, its storage index (kernels/lbmFluid.cc), and the index in the block of
         a node of the lattice that belongs to the block. */
     int globalNode(int n) const;
@@ -237,9 +241,9 @@ private:
         start in each chunk of blockSize keys and their offsets, followed by the number of segments; the first key of each
         segment; the weight and particle of each sorted key. */
     OpenMM::ComputeArray chunkCount, chunkOffset, segmentStart, sortedWeight, sortedParticle;
-    /** With the domain decomposition and the centred drag with a stencil: 1 for the particles whose nearest node the
-        rank owns, which it couples, and 0 for the others. */
-    OpenMM::ComputeArray particleOwned;
+    /** With the domain decomposition and the centred drag with a stencil: the density of the node of each segment of
+        the sorted keys, summed over the ranks (exchangeSegmentDensity()), resized when the segments outgrow it. */
+    OpenMM::ComputeArray segmentDensity;
     /** The centred drag with a stencil: for each slot its weight divided by the density of its node (0 at a solid
         node), its node and the segment of the sorted keys of that node; the vector spread on the nodes (by segment, the 3
         components of a segment together); the right-hand side, diagonal, residual, preconditioned residual,
@@ -262,7 +266,8 @@ private:
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel, packFieldsKernel;
     OpenMM::ComputeKernel countSegmentsKernel, scanSegmentsKernel, listSegmentsKernel, spreadKernel, multiplyKernel;
     OpenMM::ComputeKernel dotKernel, startGradientsKernel, advanceGradientsKernel, directionKernel, stencilWallKernel;
-    OpenMM::ComputeKernel packCouplingHaloKernel, unpackCouplingHaloKernel, dotFinishKernel;
+    OpenMM::ComputeKernel packCouplingHaloKernel, unpackCouplingHaloKernel, dotFinishKernel, gatherDensityKernel;
+    OpenMM::ComputeKernel interpWeightsKernel;
 };
 
 } // namespace LBMPlugin

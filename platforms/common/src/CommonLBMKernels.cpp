@@ -667,7 +667,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             gradientScalars.initialize(cc, 15, elementSize, "lbmGradientScalars");
             gradientPartials.initialize(cc, 3*dotGroups, elementSize, "lbmGradientPartials");
             if (decomposed)
-                particleOwned.initialize<int>(cc, numCoupled, "lbmParticleOwned");
+                segmentDensity.initialize(cc, max(1, numKeys/stencilSize), elementSize, "lbmSegmentDensity");
         }
         noise.initialize<mm_float4>(cc, numCoupled, "lbmNoise");
         noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
@@ -973,11 +973,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             if (hasFloatForceBuffers())
                 for (int i = 0; i < 2; i++)
                     prepareCenteredKernel->addArg();    // floating point force buffers and their number, set on first use
-            if (decomposed)
-                prepareCenteredKernel->addArg(particleOwned);
             spreadKernel = coupling->createKernel("spreadStencilVector");
-            for (ComputeArray* array : {&sortKeys, &segmentStart, &chunkOffset, &sortedWeight, &sortedParticle, &gradientDirection,
-                    &spreadValue})
+            for (ComputeArray* array : {&segmentStart, &chunkOffset, &sortedWeight, &sortedParticle, &gradientDirection, &spreadValue})
                 spreadKernel->addArg(*array);
             multiplyKernel = coupling->createKernel("multiplyStencilMatrix");
             multiplyKernel->addArg(particleMass);
@@ -987,8 +984,14 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             multiplyKernel->addArg(gradientDirection);
             multiplyKernel->addArg(gradientProduct);
             multiplyKernel->addArg();       // gamma, set later
-            if (decomposed)
-                multiplyKernel->addArg(particleOwned);
+            if (decomposed) {
+                gatherDensityKernel = coupling->createKernel("gatherSegmentDensity");
+                for (ComputeArray* array : {&sortKeys, &segmentStart, &chunkOffset, &densityDeviation, &segmentDensity})
+                    gatherDensityKernel->addArg(*array);
+                interpWeightsKernel = coupling->createKernel("stencilInterpolationWeights");
+                for (ComputeArray* array : {&stencilWeight, &keySegment, &segmentDensity, &interpWeight})
+                    interpWeightsKernel->addArg(*array);
+            }
             dotKernel = coupling->createKernel("dotStencilPartials");
             dotKernel->addArg(gradientResidual);
             dotKernel->addArg(gradientResidual);
@@ -1451,6 +1454,8 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
         sort->sort(sortKeys);
         if (stencilSize > 1) {
             listKeySegments();
+            if (stencilDecomposed)
+                exchangeSegmentDensity();
             solveStencilDrag();
             if (isStep) {
                 sumReactionsKernel->execute(numCoupled*stencilSize);
@@ -1528,6 +1533,23 @@ void CommonCalcLBMForceKernel::listKeySegments() {
     listSegmentsKernel->execute(numChunks*blockSize, blockSize);
 }
 
+void CommonCalcLBMForceKernel::exchangeSegmentDensity() {
+    // The segments are the same on every rank, and each node is in the block of one rank: the sum over the ranks of
+    // the densities of the segments is exact.  The array grows with some room, so that it is not reallocated at every
+    // step, and only the densities of the segments travel.
+    vector<int> offsets;
+    chunkOffset.download(offsets);
+    int numSegments = offsets.back();
+    if (numSegments > (int) segmentDensity.getSize())
+        segmentDensity.resize(numSegments + numSegments/4);
+    gatherDensityKernel->execute(numSegments);
+    vector<double> values;
+    downloadAsDouble(segmentDensity, values);
+    decomposition.sum(values.data(), numSegments);
+    segmentDensity.upload(values, true);
+    interpWeightsKernel->execute((int) lattice.particles.size()*stencilSize);
+}
+
 void CommonCalcLBMForceKernel::solveStencilDrag() {
     // The linear system of the centred drag with a stencil (prepareCenteredStencil()), solved as on the Reference
     // platform by conjugate gradients with the diagonal as preconditioner, from the solution of the diagonal, until the
@@ -1537,12 +1559,10 @@ void CommonCalcLBMForceKernel::solveStencilDrag() {
     // to decide when to stop.
     int numCoupled = lattice.particles.size();
     auto multiply = [&](ComputeArray& p) {
-        spreadKernel->setArg(5, p);
+        spreadKernel->setArg(4, p);
         spreadKernel->execute(numCoupled*stencilSize);
         multiplyKernel->setArg(4, p);
         multiplyKernel->execute(numCoupled);
-        if (decomposition.isDecomposed())
-            sumOverRanks(gradientProduct);
     };
     auto dot = [&](ComputeArray& x, ComputeArray& y, int offset) {
         dotKernel->setArg(0, x);
