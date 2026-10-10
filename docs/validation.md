@@ -839,8 +839,10 @@ $`2 \times 1 \times 1`$, $`1 \times 2 \times 2`$, $`2 \times 2 \times 1`$ and $`
 OpenCL on the CPU in double precision with $`2 \times 1 \times 1`$, $`2 \times 2 \times 1`$, $`1 \times 1 \times 4`$ and
 $`2 \times 2 \times 2`$ and in single precision with $`2 \times 2 \times 1`$, and on four A100 GPUs with CUDA in double
 ($`2 \times 2 \times 1`$), mixed ($`1 \times 2 \times 2`$) and single precision ($`1 \times 1 \times 4`$) and OpenCL in
-double precision ($`2 \times 1 \times 1`$) (the particles share nodes, cross the borders of the blocks and reach the
-solid nodes with their stencils). With the fluctuating fluid and `Keys` the copies
+double precision ($`2 \times 1 \times 1`$), and on two nodes with eight A100 GPUs with CUDA in double
+($`2 \times 2 \times 2`$) and mixed precision ($`4 \times 2 \times 1`$) and OpenCL in double precision
+($`2 \times 2 \times 2`$) (the particles share nodes, cross the borders of the blocks and reach the solid nodes with
+their stencils). With the fluctuating fluid and `Keys` the copies
 of the particles stay identical on every rank.
 
 **CUDA and OpenCL platforms.** All the cases of this section, the fluid ones with the exchange of the halo and the
