@@ -668,6 +668,9 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             chunkSegments.initialize<int>(cc, numBrickChunks+1, "lbmChunkSegments");
             chunkSlots.initialize<int>(cc, numBrickChunks+1, "lbmChunkSlots");
             chunkCandidates.initialize<int>(cc, numBrickChunks+1, "lbmChunkCandidates");
+            brickActive.initialize<int>(cc, numBricks, "lbmBrickActive");
+            chunkActive.initialize<int>(cc, numBrickChunks+1, "lbmChunkActive");
+            activeBrick.initialize<int>(cc, numBricks, "lbmActiveBrick");
             // A particle is a candidate of the bricks of nodes whose bricks of cells hold its cell: at most 2 along each axis.
             mergedCoverage.initialize<mm_int4>(cc, 8*numCoupled, "lbmMergedCoverage");
             mergedSource.initialize<int>(cc, 8*numCoupled, "lbmMergedSource");
@@ -961,19 +964,33 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             listCandidatesKernel = coupling->createKernel("listCandidates");
             for (ComputeArray* array : {&sortKeys, &stencilOrigin, &candidateParticle, &candidateFirst})
                 listCandidatesKernel->addArg(*array);
+            flagBricksKernel = coupling->createKernel("flagBricks");
+            for (ComputeArray* array : {&brickStart, &brickActive, &brickCandidates, &brickSegments, &brickSlots})
+                flagBricksKernel->addArg(*array);
+            scanActiveChunksKernel = coupling->createKernel("scanBrickChunks");
+            for (ComputeArray* array : {&brickActive, &brickCandidates, &chunkActive, &chunkCandidates})
+                scanActiveChunksKernel->addArg(*array);
+            scanActiveTotalsKernel = coupling->createKernel("scanBrickTotals");
+            for (ComputeArray* array : {&chunkActive, &chunkCandidates, &segmentStart})
+                scanActiveTotalsKernel->addArg(*array);
+            scanActiveTotalsKernel->addArg(0);
+            writeActiveKernel = coupling->createKernel("writeActiveBricks");
+            for (ComputeArray* array : {&brickActive, &chunkActive, &activeBrick})
+                writeActiveKernel->addArg(*array);
             countBricksKernel = coupling->createKernel("countBrickSegments");
-            for (ComputeArray* array : {&brickStart, &candidateFirst, &brickSegments, &brickSlots, &brickCandidates})
+            for (ComputeArray* array : {&brickStart, &candidateFirst, &brickSegments, &brickSlots, &activeBrick, &chunkActive})
                 countBricksKernel->addArg(*array);
             scanBrickChunksKernel = coupling->createKernel("scanBrickChunks");
-            for (ComputeArray* array : {&brickSegments, &brickSlots, &brickCandidates, &chunkSegments, &chunkSlots, &chunkCandidates})
+            for (ComputeArray* array : {&brickSegments, &brickSlots, &chunkSegments, &chunkSlots})
                 scanBrickChunksKernel->addArg(*array);
             scanBrickTotalsKernel = coupling->createKernel("scanBrickTotals");
-            for (ComputeArray* array : {&chunkSegments, &chunkSlots, &chunkCandidates, &segmentStart})
+            for (ComputeArray* array : {&chunkSegments, &chunkSlots, &segmentStart})
                 scanBrickTotalsKernel->addArg(*array);
+            scanBrickTotalsKernel->addArg(1);
             listBricksKernel = coupling->createKernel("listBrickSegments");
             for (ComputeArray* array : {&brickStart, &candidateParticle, &candidateFirst, &brickSegments, &brickSlots,
                     &brickCandidates, &chunkSegments, &chunkSlots, &chunkCandidates, &segmentStart, &segmentNode,
-                    &mergedCoverage, &mergedSource})
+                    &mergedCoverage, &mergedSource, &activeBrick, &chunkActive})
                 listBricksKernel->addArg(*array);
             writeEntriesKernel = coupling->createKernel("writeSegmentEntries");
             for (ComputeArray* array : {&segmentStart, &segmentNode, &chunkSegments, &brickCandidates, &chunkCandidates,
@@ -1612,6 +1629,10 @@ void CommonCalcLBMForceKernel::listKeySegments() {
     findBrickStartsKernel->execute(numBricks+1);
     listCandidatesKernel->execute(numCoupled);
     int groupSize = bricksPerGroup*blockSize, brickThreads = ((numBricks+bricksPerGroup-1)/bricksPerGroup)*groupSize;
+    flagBricksKernel->execute(numBricks);
+    scanActiveChunksKernel->execute(numBrickChunks*blockSize, blockSize);
+    scanActiveTotalsKernel->execute(blockSize, blockSize);
+    writeActiveKernel->execute(numBricks);
     countBricksKernel->execute(brickThreads, groupSize);
     scanBrickChunksKernel->execute(numBrickChunks*blockSize, blockSize);
     scanBrickTotalsKernel->execute(blockSize, blockSize);
