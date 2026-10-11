@@ -400,24 +400,6 @@ DEVICE int stencilIndex(int first, int a, int size, int open) {
 }
 
 /**
- * The number of slots of a stencil whose first node along an axis is first that fall on node j of that axis: one or
- * none, from the distance j - first, except at the end nodes of an axis with open faces and along a periodic axis
- * shorter than the stencil, where several slots may fall on a node and the slots are counted.
- */
-DEVICE int axisMatches(int first, int j, int size, int open) {
-    if (open ? (j > 0 && j < size - 1) : size >= STENCIL_WIDTH) {
-        int d = j - first;
-        if (!open)
-            d = (d < 0 ? d + size : (d >= size ? d - size : d));
-        return (d >= 0 && d < STENCIL_WIDTH ? 1 : 0);
-    }
-    int n = 0;
-    for (int a = 0; a < STENCIL_WIDTH; a++)
-        n += (stencilIndex(first, a, size, open) == j ? 1 : 0);
-    return n;
-}
-
-/**
  * The brick along an axis of a cell c.
  */
 DEVICE int brickOfCell(int c, int numBricks) {
@@ -527,16 +509,23 @@ KERNEL void listCandidates(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const
 }
 
 /**
- * The number of slots of the stencil of a candidate, with first nodes (fx, fy, fz), that fall on node (jx, jy, jz).
+ * The slots of a stencil whose first node along an axis is first that fall on each node lo + j of a brick of width nodes
+ * along that axis, packed 3 bits per node: (packed >> 3j) & 7 (width < 2*BRICK_SIZE <= 8 nodes, at most STENCIL_WIDTH
+ * slots per node).  The product over the three axes of these counts at the coordinates of a node in the brick is the
+ * number of slots that fall on it, so that testing a candidate against a node costs a few shifts.
  */
-DEVICE int coveredSlots(int fx, int fy, int fz, int jx, int jy, int jz) {
-    int n = axisMatches(fx, jx, GNX, OPEN_X);
-    if (n == 0)
-        return 0;
-    n *= axisMatches(fy, jy, GNY, OPEN_Y);
-    if (n == 0)
-        return 0;
-    return n*axisMatches(fz, jz, GNZ, OPEN_Z);
+DEVICE int axisCoverage(int first, int lo, int width, int size, int open) {
+    int packed = 0;
+    for (int a = 0; a < STENCIL_WIDTH; a++) {
+        int j = stencilIndex(first, a, size, open) - lo;
+        if (j >= 0 && j < width)
+            packed += 1 << (3*j);
+    }
+    return packed;
+}
+
+DEVICE int brickSlotsAt(int px, int py, int pz, int lx, int ly, int lz) {
+    return ((px >> (3*lx)) & 7)*((py >> (3*ly)) & 7)*((pz >> (3*lz)) & 7);
 }
 
 /**
@@ -589,15 +578,11 @@ KERNEL void countBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL con
             maxNodes = max(maxNodes, brickNodes[8*b+7]);
             maxCandidates = max(maxCandidates, rangeOffset[(MAX_SOURCE_BRICKS+1)*b + brickNodes[8*b+6]]);
         }
+        const int wz = brickNodes[B+5]-brickNodes[B+2];
         int segments = 0, slots = 0, loaded = -1;
         for (int base = 0; base < maxNodes; base += LBM_BLOCK_SIZE) {
             int l = base + lane;
-            int jx = 0, jy = 0, jz = 0;
-            if (l < numNodes) {
-                jx = brickNodes[B] + l%wx;
-                jy = brickNodes[B+1] + (l/wx)%wy;
-                jz = brickNodes[B+2] + l/(wx*wy);
-            }
+            int lx = l%max(wx, 1), ly = (l/max(wx, 1))%max(wy, 1), lz = l/max(wx*wy, 1);
             int count = 0;
             for (int cb = 0; cb < maxCandidates; cb += CANDIDATE_CHUNK) {
                 int n = min(numCandidates-cb, CANDIDATE_CHUNK);
@@ -608,16 +593,16 @@ KERNEL void countBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL con
                         while (cb+c >= rangeOffset[O+r+1])
                             r++;
                         int4 f = candidateFirst[rangeFirst[R+r] + cb + c - rangeOffset[O+r]];
-                        chunkX[C+c] = f.x;
-                        chunkY[C+c] = f.y;
-                        chunkZ[C+c] = f.z;
+                        chunkX[C+c] = axisCoverage(f.x, brickNodes[B], wx, GNX, OPEN_X);
+                        chunkY[C+c] = axisCoverage(f.y, brickNodes[B+1], wy, GNY, OPEN_Y);
+                        chunkZ[C+c] = axisCoverage(f.z, brickNodes[B+2], wz, GNZ, OPEN_Z);
                     }
                     SYNC_THREADS;
                     loaded = cb;
                 }
                 if (l < numNodes)
                     for (int c = 0; c < n; c++)
-                        count += coveredSlots(chunkX[C+c], chunkY[C+c], chunkZ[C+c], jx, jy, jz);
+                        count += brickSlotsAt(chunkX[C+c], chunkY[C+c], chunkZ[C+c], lx, ly, lz);
             }
             segments += (count > 0 ? 1 : 0);
             slots += count;
@@ -733,8 +718,9 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
     LOCAL int sums[2*BRICKS_PER_GROUP*LBM_BLOCK_SIZE];
     LOCAL int rangeFirst[BRICKS_PER_GROUP*MAX_SOURCE_BRICKS], rangeOffset[BRICKS_PER_GROUP*(MAX_SOURCE_BRICKS+1)];
     LOCAL int brickNodes[8*BRICKS_PER_GROUP];
-    LOCAL int chunkParticle[BRICKS_PER_GROUP*CANDIDATE_CHUNK], chunkX[BRICKS_PER_GROUP*CANDIDATE_CHUNK];
-    LOCAL int chunkY[BRICKS_PER_GROUP*CANDIDATE_CHUNK], chunkZ[BRICKS_PER_GROUP*CANDIDATE_CHUNK];
+    LOCAL int chunkParticle[BRICKS_PER_GROUP*CANDIDATE_CHUNK], chunkSource[BRICKS_PER_GROUP*CANDIDATE_CHUNK];
+    LOCAL int chunkX[BRICKS_PER_GROUP*CANDIDATE_CHUNK], chunkY[BRICKS_PER_GROUP*CANDIDATE_CHUNK];
+    LOCAL int chunkZ[BRICKS_PER_GROUP*CANDIDATE_CHUNK];
     const int q = LOCAL_ID/LBM_BLOCK_SIZE, lane = LOCAL_ID%LBM_BLOCK_SIZE;
     const int R = q*MAX_SOURCE_BRICKS, O = q*(MAX_SOURCE_BRICKS+1), B = 8*q, C = q*CANDIDATE_CHUNK, S = 2*q*LBM_BLOCK_SIZE;
     for (int firstBrick = GROUP_ID*BRICKS_PER_GROUP; firstBrick < NUM_BRICKS; firstBrick += NUM_GROUPS*BRICKS_PER_GROUP) {
@@ -768,15 +754,12 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
             segmentBase = chunkSegments[tb/LBM_BLOCK_SIZE] + brickSegments[tb];
             slotBase = chunkSlots[tb/LBM_BLOCK_SIZE] + brickSlots[tb];
         }
+        const int wz = brickNodes[B+5]-brickNodes[B+2];
         int loaded = -1;
         for (int base = 0; base < maxNodes; base += LBM_BLOCK_SIZE) {
             int l = base + lane;
-            int jx = 0, jy = 0, jz = 0;
-            if (l < numNodes) {
-                jx = brickNodes[B] + l%wx;
-                jy = brickNodes[B+1] + (l/wx)%wy;
-                jz = brickNodes[B+2] + l/(wx*wy);
-            }
+            int lx = l%max(wx, 1), ly = (l/max(wx, 1))%max(wy, 1), lz = l/max(wx*wy, 1);
+            int jx = brickNodes[B] + lx, jy = brickNodes[B+1] + ly, jz = brickNodes[B+2] + lz;
             int count = 0;
             for (int pass = 0; pass < 2; pass++) {
                 int s = 0, k = 0;
@@ -829,9 +812,10 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
                             if (position >= cb && position < cb+n) {
                                 int4 f = candidateFirst[p];
                                 chunkParticle[C+position-cb] = i;
-                                chunkX[C+position-cb] = f.x;
-                                chunkY[C+position-cb] = f.y;
-                                chunkZ[C+position-cb] = f.z;
+                                chunkSource[C+position-cb] = p;
+                                chunkX[C+position-cb] = axisCoverage(f.x, brickNodes[B], wx, GNX, OPEN_X);
+                                chunkY[C+position-cb] = axisCoverage(f.y, brickNodes[B+1], wy, GNY, OPEN_Y);
+                                chunkZ[C+position-cb] = axisCoverage(f.z, brickNodes[B+2], wz, GNZ, OPEN_Z);
                             }
                         }
                         SYNC_THREADS;
@@ -840,8 +824,7 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
                     if (l >= numNodes || (pass == 1 && count == 0))
                         continue;
                     for (int c = 0; c < n; c++) {
-                        int fx = chunkX[C+c], fy = chunkY[C+c], fz = chunkZ[C+c];
-                        int covered = coveredSlots(fx, fy, fz, jx, jy, jz);
+                        int covered = brickSlotsAt(chunkX[C+c], chunkY[C+c], chunkZ[C+c], lx, ly, lz);
                         if (pass == 0) {
                             count += covered;
                             continue;
@@ -849,6 +832,8 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
                         if (covered == 0)
                             continue;
                         int i = chunkParticle[C+c];
+                        int4 f = candidateFirst[chunkSource[C+c]];
+                        int fx = f.x, fy = f.y, fz = f.z;
                         for (int cz = 0; cz < STENCIL_WIDTH; cz++) {
                             if (stencilIndex(fz, cz, GNZ, OPEN_Z) != jz)
                                 continue;
