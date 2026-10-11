@@ -29,8 +29,9 @@ f_i(\mathbf x + \mathbf c_i, t + 1) = f_i + \omega\bigl(f_i^{\mathrm{eq}}(\rho, 
 \Bigl(1 - \frac{\omega}{2}\Bigr) S_i,
 ```
 
-written in the regularized form of accLB and LBFAST [3, 4]. With the non-equilibrium part defined as
-$`f_i^{\mathrm{neq}} = f_i - f_i^{\mathrm{eq}}(\rho, \mathbf u^{*}) + \tfrac12 S_i`$, the update reads
+written in the regularized form used by accLB and LBFAST [3, 4], which apply it to an incompressible model with a
+pressure-based equilibrium; here the equilibrium is the weakly compressible one above. With the non-equilibrium
+part defined as $`f_i^{\mathrm{neq}} = f_i - f_i^{\mathrm{eq}}(\rho, \mathbf u^{*}) + \tfrac12 S_i`$, the update reads
 $`f_i^{\mathrm{eq}} + (1 - \omega)\, f_i^{\mathrm{neq}} + \tfrac12 S_i`$, and the regularized collision keeps only the
 second-order Hermite part of $`f^{\mathrm{neq}}`$. The post-collision populations are
 
@@ -79,6 +80,10 @@ lattice, with random populations off equilibrium and random forces. In $`\Pi^{\m
 of $`H^{(2)}`$ does not contribute, because the equilibrium has the same density as the populations and
 $`\sum_i (f_i - f_i^{\mathrm{eq}}) = 0`$: $`\Pi^{\mathrm{neq}}`$ is also the plain second moment of
 $`f - f^{\mathrm{eq}}`$, which is how the reference library computes it.
+
+The forcing is checked by the Poiseuille flows driven by a body force, between bounce-back walls and between
+regularized walls, whose steady profiles match the exact solutions of the scheme (`docs/validation.md`, Fluid on its
+own, and Walls and open faces).
 
 **Relaxation and streaming.** The relaxation frequency is $`\omega = 1/\tau`$, with
 $`\tau = 3\nu\,\Delta t/\Delta x^2 + 1/2`$.
