@@ -262,6 +262,10 @@ private:
     /** Whether each brick of nodes has candidates (then its offset in the list), the bricks per chunk, and the list of
         the bricks with candidates, which the kernels of the bricks visit. */
     OpenMM::ComputeArray brickActive, chunkActive, activeBrick;
+    /** With the trilinear stencil (slotKeys) a sort key per slot, as until version 0.5.1: the segments that start in each
+        chunk of blockSize sorted keys. */
+    bool slotKeys;
+    OpenMM::ComputeArray chunkCount;
     int numBricks, bricksPerGroup;
     /** With the domain decomposition and the centred drag with a stencil: the density of the node of each segment of
         the sorted keys, summed over the ranks (exchangeSegmentDensity()), resized when the segments outgrow it. */
@@ -289,6 +293,7 @@ private:
     OpenMM::ComputeKernel findBrickStartsKernel, listCandidatesKernel, countBricksKernel, scanBrickChunksKernel;
     OpenMM::ComputeKernel scanBrickTotalsKernel, listBricksKernel, writeEntriesKernel, findChunkSegmentsKernel;
     OpenMM::ComputeKernel flagBricksKernel, scanActiveChunksKernel, scanActiveTotalsKernel, writeActiveKernel;
+    OpenMM::ComputeKernel countSegmentsKernel, scanSegmentsKernel, listSegmentsKernel;
     OpenMM::ComputeKernel spreadKernel, multiplyKernel;
     OpenMM::ComputeKernel dotKernel, startGradientsKernel, advanceGradientsKernel, directionKernel, stencilWallKernel;
     OpenMM::ComputeKernel packCouplingHaloKernel, unpackCouplingHaloKernel, dotFinishKernel, gatherDensityKernel;
