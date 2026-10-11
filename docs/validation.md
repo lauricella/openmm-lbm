@@ -248,6 +248,20 @@ platform: coupled particles) also runs the three stencils with both drags, witho
 - The nearest node is unchanged: 64 arrays (fluid state, positions, velocities, forces) of 16 runs with both drags,
   both coupling schemes, with and without fluid fluctuations, with bounce-back and regularized walls, identical bit
   for bit to version 0.4.0.
+- The segments of the stencils built from one sort key per particle (since version 0.6.0 with the three-point
+  stencil and `Keys`; `docs/architecture.md`, The sort of the coupling and the segments of the stencils), against
+  version 0.5.1, with the nearest node and every stencil: the 16 runs of the item above (64 arrays, 40 steps), and 8
+  runs on a lattice of $`9 \times 3 \times 10`$ nodes, shorter than the `Keys` stencil along $`y`$, periodic along
+  $`z`$ or with a `Velocity` and a `DensityVelocity` face, with particles next to the faces and two on one node, both
+  drags, with and without fluid fluctuations (32 arrays, 30 steps). Identical bit for bit on OpenCL on the CPU (double
+  and mixed precision) and on an A100 GPU (double precision), and on CUDA in the three precisions except one case: the
+  three-point stencil with the explicit drag and the random force on the particles (Euler–Maruyama), with and without
+  fluid fluctuations. There, in double and mixed precision only the fluid differs, by at most $`2.6\cdot10^{-18}`$
+  ($`1.1\cdot10^{-19}`$ without fluid fluctuations; the populations, stored as deviations from the rest equilibrium,
+  reach 0.33); in single precision the positions, velocities and forces differ too, by at most $`2.8\cdot10^{-7}`$ of
+  the largest value of each array. With the NVE scheme and with the centred drag the three-point stencil is identical.
+  The sums run in the same order as in version 0.5.1, and OpenCL on the same GPU gives the same bits; the cause of the
+  difference on CUDA is not identified.
 
 **Self-mobility.** Reference platform, $`16^3`$ nodes, $`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 0.01 ps, $`T = 0`$, one
 particle of 1000 Da with $`\gamma`$ = 5/ps held almost at its place by a constant force along x (velocity
@@ -1004,7 +1018,13 @@ double precision ($`2 \times 1 \times 1`$), and on two nodes with eight A100 GPU
 ($`2 \times 2 \times 2`$) and mixed precision ($`4 \times 2 \times 1`$) and OpenCL in double precision
 ($`2 \times 2 \times 2`$) (the particles share nodes, cross the borders of the blocks and reach the solid nodes with
 their stencils). With the fluctuating fluid and `Keys` the copies
-of the particles stay identical on every rank.
+of the particles stay identical on every rank. With the segments of version 0.6.0 (one sort key per particle with the
+three-point stencil and `Keys`) the script gives 0 `FAILED` on four A100 GPUs with CUDA in double
+($`2 \times 2 \times 1`$, $`1 \times 2 \times 2`$), mixed ($`2 \times 1 \times 1`$, $`1 \times 2 \times 2`$) and
+single precision ($`4 \times 1 \times 1`$, $`1 \times 1 \times 4`$) and OpenCL in double precision
+($`2 \times 1 \times 1`$), and on two nodes with eight A100 GPUs with CUDA in double ($`2 \times 2 \times 2`$), mixed
+($`1 \times 2 \times 4`$) and single precision ($`4 \times 2 \times 1`$) and OpenCL in double precision
+($`2 \times 2 \times 2`$).
 
 **CUDA and OpenCL platforms.** All the cases of this section, the fluid ones with the exchange of the halo and the
 coupled particles, on one node with four A100 GPUs, one GPU per rank, against one domain on the same platform and
@@ -1283,21 +1303,37 @@ buckets of equal width; the results are the same bit for bit (CUDA in the three 
 precision, nearest node and the three interpolation stencils, against the version before). On four GPUs the sum of
 the coupling forces over the ranks (`MPI_Allreduce` of $`3 N_p`$ numbers) took 0.26 to 0.29 ms of the step.
 
-With the interpolation stencils and the same 512 copies, milliseconds per step, explicit / centred drag:
+With the interpolation stencils and the same 512 copies, milliseconds per step, explicit / centred drag, version 0.5.1
+against version 0.6.0, where the three-point stencil and `Keys` sort one key per particle instead of one per slot and
+the trilinear stencil keeps one key per slot (`docs/architecture.md`, The sort of the coupling and the segments of the
+stencils). On one GPU two runs of the same program agreed within 0.01 ms; on four GPUs three runs differed by up to
+0.8 ms with $`120^3`$ nodes and 1.4 ms with $`240^3`$, so there the values are the mean of three runs of each version,
+alternated in one job:
 
-| Stencil | 1 GPU, $`120^3`$ nodes | 4 GPUs, $`120^3`$ nodes | 4 GPUs, $`240^3`$ nodes |
-|---|---|---|---|
-| `Trilinear` | 1.62 / 2.51 | 2.42 / 4.30 | 6.75 / 8.80 |
-| `ThreePoint` | 2.95 / 4.91 | 3.43 / 7.46 | 7.67 / 12.00 |
-| `Keys` | 5.49 / 10.56 | 6.86 / 14.76 | 13.69 / 21.34 |
+| Stencil | 1 GPU, $`120^3`$: 0.5.1 | 0.6.0 | 4 GPUs, $`120^3`$: 0.5.1 | 0.6.0 | 4 GPUs, $`240^3`$: 0.5.1 | 0.6.0 |
+|---|---|---|---|---|---|---|
+| `Trilinear` | 1.60 / 2.51 | 1.61 / 2.52 | 2.35 / 4.31 | 2.32 / 4.48 | 6.55 / 8.90 | 6.84 / 8.57 |
+| `ThreePoint` | 2.93 / 4.89 | 2.22 / 4.22 | 3.51 / 7.29 | 3.07 / 6.72 | 7.64 / 11.89 | 7.10 / 10.63 |
+| `Keys` | 5.50 / 10.46 | 3.24 / 7.92 | 6.94 / 14.79 | 4.90 / 12.57 | 14.05 / 21.70 | 11.58 / 19.15 |
 
-The beads are crowded (8 to 64 sort keys each, 3.6 million with `Keys`), so the coupling takes most of the step: on
-one GPU with `Keys` and the centred drag (profile of a step of 10.5 ms) the spreading of the conjugate gradients takes
-2.2 ms, the range pass of OpenMM's sort 1.9 ms, the product of the conjugate gradients 1.7 ms and
-`prepareCenteredStencil` 0.7 ms. How the kernels work, and what other designs gave on this case:
-- The sums over the nodes of the stencils run one thread per node, from a list of the segments of the sorted keys made
-  after each sort; in the spreading of the conjugate gradients the threads of a work group first read the keys of the
-  segments that start among 64 keys together, into local memory, and each then adds those of its node in key order.
+With one key per particle the step is shorter in every case: on one GPU by 24% (three-point) and 41% (`Keys`) with the
+explicit drag and by 14% and 24% with the centred drag; on four GPUs by 13% and 29%, 8% and 15% with $`120^3`$ nodes,
+and by 7% and 18%, 11% and 12% with $`240^3`$ nodes. The trilinear stencil sorts and lists its keys as in version
+0.5.1, and its differences are within the scatter of the runs.
+
+The beads are crowded (8 to 64 slots each, 3.6 million with `Keys`), so the coupling takes most of the step: in
+version 0.5.1, on one GPU with `Keys` and the centred drag (profile of a step of 10.5 ms), the spreading of the
+conjugate gradients took 2.2 ms, the range pass of OpenMM's sort of the $`3.6\cdot10^6`$ keys 1.9 ms, the product of
+the conjugate gradients 1.7 ms and `prepareCenteredStencil` 0.7 ms. With one key per particle the sort and the
+segments take 1.6 ms instead of 3.3 to 3.7 with `Keys`, and 0.9 instead of 1.3 to 1.4 with the three-point stencil.
+How the kernels work, and what other designs gave on this case:
+- The segments of the three-point stencil and `Keys` are built after the sort of one key per particle through bricks
+  of $`4^3`$ nodes, in the order of the keys of version 0.5.1; the kernels, and the designs tried before them with
+  their costs, are in `docs/architecture.md`.
+- The sums over the nodes of the stencils run one thread per node, from a list of the segments of the nodes made
+  after each sort; in the spreading of the conjugate gradients the threads of a work group first read the entries of
+  the segments that start among 64 entries (the sorted keys of the slots until version 0.5.1) together, into local
+  memory, and each then adds those of its node in order.
   One thread per key, scanning the keys of its node when it was the first of them, left most threads of a warp idle:
   the spreading took 14 of the 28.6 ms of the step. One thread per node reading its own keys took 2.6 ms (0.84 with
   the three-point stencil; the same with the trilinear one), with the same results bit for bit.

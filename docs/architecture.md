@@ -302,7 +302,9 @@ stencils; the way is chosen when the program is compiled (`SLOT_KEYS`, defined w
   through the bricks takes longer than the sort it saves. Measured on the whole step, 512 copies of SOD1, explicit /
   centred drag, milliseconds per step, with the bricks against one key per slot: one A100 and $`120^3`$ nodes,
   1.95 / 2.83 against 1.60 / 2.51 (22% and 13% longer); four A100s and $`120^3`$ nodes, 2.56 / 4.85 against
-  2.42 / 4.38; four A100s and $`240^3`$ nodes, 7.46 / 9.00 against 6.57 / 8.51 (14% and 6% longer).
+  2.42 / 4.38; four A100s and $`240^3`$ nodes, 7.46 / 9.00 against 6.57 / 8.51 (14% and 6% longer). The runs on
+  four GPUs are single runs, and on four GPUs runs of the same program scatter by up to 1.4 ms (`docs/validation.md`);
+  the difference on one GPU is well above the scatter there.
 - **Three-point stencil and `Keys`: one key per particle, through the bricks**, as above. With 27 and 64 slots per
   particle the sort of a key per slot cost more than building the segments: with the crowded beads on one A100 the
   sort and the segments take 0.9 instead of 1.3 to 1.4 ms with the three-point stencil and 1.6 instead of 3.3 to 3.7

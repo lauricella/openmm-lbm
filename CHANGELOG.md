@@ -12,10 +12,12 @@ versions the API may still change.
   (`docs/architecture.md`, The sort of the coupling and the segments of the stencils). OpenMM's sort of $`3.6\cdot10^6`$
   keys took most of the cost of the coupling with `Keys` and many particles. With 512 copies of SOD1 (56320 beads) on
   one A100 the step is 41% shorter with `Keys` and the explicit drag (5.50 to 3.24 ms), 24% with the centred drag, 24%
-  and 14% with the three-point stencil; on four A100s with $`240^3`$ nodes 6% to 18% shorter. The trilinear stencil
-  keeps one key per slot, which is faster for its 8 slots. The sums run in the same order as before: the results are the same bit for bit with OpenCL, and with CUDA except the
-  three-point stencil with the explicit drag and a fluctuating fluid, whose fluid differs in the last bits (up to
-  $`2.6\cdot10^{-18}`$ in the populations in double precision; cause not identified).
+  and 14% with the three-point stencil; on four A100s 7% to 29% shorter (`docs/validation.md`, Performance of the
+  domain decomposition). The trilinear stencil keeps one key per slot, which is faster for its 8 slots. The sums run
+  in the same order as before: the results are the same bit for bit with OpenCL, and with CUDA except the three-point
+  stencil with the explicit drag and the Euler–Maruyama scheme, with or without fluid fluctuations, whose results
+  differ by rounding (in double and mixed precision only the fluid, by up to $`2.6\cdot10^{-18}`$ in the populations;
+  cause not identified).
 
 ## 0.5.1 (2026-10-11)
 
