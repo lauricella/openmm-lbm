@@ -3,7 +3,9 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.5.1 (2026-10-11)
+
+A faster domain decomposition with coupled particles; the results are those of version 0.5.0 bit for bit.
 
 ### Changed
 - Domain decomposition with coupled particles at the nearest node: in a lattice step the sum of the coupling forces
