@@ -3,7 +3,9 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.6.1 (2026-10-12)
+
+A correction of the documentation of the Guo forcing; the code is that of version 0.6.0.
 
 ### Documentation
 - `docs/theory.md`, section 1: the regularized collision is now derived from the BGK update with Guo forcing, with the
@@ -11,7 +13,8 @@ versions the API may still change.
   in the second-order non-equilibrium Hermite coefficient, so the forcing enters the second moment with weight
   $`1 - \omega/2`$, as in the BGK form; the text said only that the prefactor 1/2 gives the right momentum. The section
   also says how the plugin computes $`\Pi^{\mathrm{neq}}`$, with the equilibrium at $`\mathbf j/\rho`$: this holds
-  the half forcing, up to a term $`\mathbf F\mathbf F/(4\rho)`$ quadratic in the force. The code is unchanged.
+  the half forcing, up to a term $`\mathbf F\mathbf F/(4\rho)`$ quadratic in the force, and points to the Poiseuille
+  flows driven by a body force that check the forcing. The code is unchanged.
 
 ## 0.6.0 (2026-10-12)
 

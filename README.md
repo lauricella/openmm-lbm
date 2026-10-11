@@ -3,12 +3,13 @@ OpenMM plugin coupling molecular dynamics to a thread-safe lattice Boltzmann flu
 forcing) for coarse-grained simulations with hydrodynamics. Particles exchange friction and thermal noise with the
 fluid. Native OpenMM plugin with Reference, CUDA, OpenCL and HIP platforms.
 
-**Version 0.6.0 (2026-10-12).** The fluid, solid walls (bounce-back or regularized), open faces with an imposed
+**Version 0.6.1 (2026-10-12).** The fluid, solid walls (bounce-back or regularized), open faces with an imposed
 velocity, density or both, thermal fluctuations of the fluid and the particle-fluid coupling, with the explicit or the
 centred drag, at the nearest node or through an interpolation stencil, run on all platforms (Reference, CUDA, OpenCL,
 HIP), with one domain or with the lattice divided over MPI ranks, one GPU per rank ([running on several
 GPUs](docs/user_guide/parallel.md)); the platforms agree with each other, and the explicit drag at the nearest node
-with the reference CUDA library of the DragOpenMM project. Version 0.6.0 makes the coupling through the three-point
+with the reference CUDA library of the DragOpenMM project. Version 0.6.1 corrects the description of the Guo
+forcing in `docs/theory.md`, with the code of version 0.6.0. Version 0.6.0 makes the coupling through the three-point
 and Keys stencils faster on the GPUs (up to 41% shorter steps with many particles), and version 0.5.1 the domain
 decomposition with coupled particles, both with the same results (in one case on CUDA up to rounding, see the
 CHANGELOG). New in version 0.5.0: the interpolation stencils of the coupling, trilinear, three-point and Keys
