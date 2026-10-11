@@ -400,9 +400,17 @@ DEVICE int stencilIndex(int first, int a, int size, int open) {
 }
 
 /**
- * The number of slots of a stencil whose first node along an axis is first that fall on node j of that axis.
+ * The number of slots of a stencil whose first node along an axis is first that fall on node j of that axis: one or
+ * none, from the distance j - first, except at the end nodes of an axis with open faces and along a periodic axis
+ * shorter than the stencil, where several slots may fall on a node and the slots are counted.
  */
 DEVICE int axisMatches(int first, int j, int size, int open) {
+    if (open ? (j > 0 && j < size - 1) : size >= STENCIL_WIDTH) {
+        int d = j - first;
+        if (!open)
+            d = (d < 0 ? d + size : (d >= size ? d - size : d));
+        return (d >= 0 && d < STENCIL_WIDTH ? 1 : 0);
+    }
     int n = 0;
     for (int a = 0; a < STENCIL_WIDTH; a++)
         n += (stencilIndex(first, a, size, open) == j ? 1 : 0);
@@ -519,29 +527,24 @@ KERNEL void listCandidates(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const
 }
 
 /**
- * The number of slots of the stencil of a candidate that fall on node (jx, jy, jz).
+ * The number of slots of the stencil of a candidate, with first nodes (fx, fy, fz), that fall on node (jx, jy, jz).
  */
-DEVICE int coveredSlots(int4 first, int jx, int jy, int jz) {
-    int n = axisMatches(first.x, jx, GNX, OPEN_X);
+DEVICE int coveredSlots(int fx, int fy, int fz, int jx, int jy, int jz) {
+    int n = axisMatches(fx, jx, GNX, OPEN_X);
     if (n == 0)
         return 0;
-    n *= axisMatches(first.y, jy, GNY, OPEN_Y);
+    n *= axisMatches(fy, jy, GNY, OPEN_Y);
     if (n == 0)
         return 0;
-    return n*axisMatches(first.z, jz, GNZ, OPEN_Z);
+    return n*axisMatches(fz, jz, GNZ, OPEN_Z);
 }
 
 /**
- * The slots that fall on node (jx, jy, jz) of the candidates in the ranges [first[r], end[r]).
+ * The kernels of the bricks of nodes run one work group per brick.  Thread 0 finds the ranges of the candidates in the
+ * sorted keys (brickSources()) and writes them, with the nodes of the brick, to local memory; the group then reads the
+ * candidates CANDIDATE_CHUNK at a time into local memory, and every thread tests them against its node.
  */
-DEVICE int countNodeSlots(GLOBAL const int4* RESTRICT candidateFirst, int numRanges, const int* first, const int* end,
-        int jx, int jy, int jz) {
-    int count = 0;
-    for (int r = 0; r < numRanges; r++)
-        for (int m = first[r]; m < end[r]; m++)
-            count += coveredSlots(candidateFirst[m], jx, jy, jz);
-    return count;
-}
+#define CANDIDATE_CHUNK (4*LBM_BLOCK_SIZE)
 
 /**
  * For every brick of nodes, one work group: the number of its nodes that the stencils reach (segments) and of the slots
@@ -550,20 +553,54 @@ DEVICE int countNodeSlots(GLOBAL const int4* RESTRICT candidateFirst, int numRan
 KERNEL void countBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL const int4* RESTRICT candidateFirst,
         GLOBAL int* RESTRICT brickSegments, GLOBAL int* RESTRICT brickSlots) {
     LOCAL int sums[2*LBM_BLOCK_SIZE];
+    LOCAL int rangeFirst[MAX_SOURCE_BRICKS], rangeOffset[MAX_SOURCE_BRICKS+1], brickNodes[7];
+    LOCAL int chunkX[CANDIDATE_CHUNK], chunkY[CANDIDATE_CHUNK], chunkZ[CANDIDATE_CHUNK];
     for (int tb = GROUP_ID; tb < NUM_BRICKS; tb += NUM_GROUPS) {
-        int lo[3], hi[3], first[MAX_SOURCE_BRICKS], end[MAX_SOURCE_BRICKS];
-        int numRanges = brickSources(tb, brickStart, lo, hi, first, end);
-        bool any = false;
-        for (int r = 0; r < numRanges; r++)
-            any = any || (end[r] > first[r]);
-        int segments = 0, slots = 0;
-        if (any) {
-            int wx = hi[0]-lo[0], wy = hi[1]-lo[1], numNodes = wx*wy*(hi[2]-lo[2]);
-            for (int l = LOCAL_ID; l < numNodes; l += LBM_BLOCK_SIZE) {
-                int count = countNodeSlots(candidateFirst, numRanges, first, end, lo[0] + l%wx, lo[1] + (l/wx)%wy, lo[2] + l/(wx*wy));
-                segments += (count > 0 ? 1 : 0);
-                slots += count;
+        if (LOCAL_ID == 0) {
+            int lo[3], hi[3], first[MAX_SOURCE_BRICKS], end[MAX_SOURCE_BRICKS];
+            int n = brickSources(tb, brickStart, lo, hi, first, end);
+            rangeOffset[0] = 0;
+            for (int r = 0; r < MAX_SOURCE_BRICKS; r++) {
+                rangeFirst[r] = (r < n ? first[r] : 0);
+                rangeOffset[r+1] = rangeOffset[r] + (r < n ? end[r] - first[r] : 0);
             }
+            for (int a = 0; a < 3; a++) {
+                brickNodes[a] = lo[a];
+                brickNodes[3+a] = hi[a];
+            }
+            brickNodes[6] = n;
+        }
+        SYNC_THREADS;
+        const int numCandidates = rangeOffset[brickNodes[6]];
+        const int wx = brickNodes[3]-brickNodes[0], wy = brickNodes[4]-brickNodes[1];
+        const int numNodes = (numCandidates > 0 ? wx*wy*(brickNodes[5]-brickNodes[2]) : 0);
+        int segments = 0, slots = 0, loaded = -1;
+        for (int base = 0; base < numNodes; base += LBM_BLOCK_SIZE) {
+            int l = base + LOCAL_ID;
+            int jx = brickNodes[0] + l%wx, jy = brickNodes[1] + (l/wx)%wy, jz = brickNodes[2] + l/(wx*wy);
+            int count = 0;
+            for (int cb = 0; cb < numCandidates; cb += CANDIDATE_CHUNK) {
+                int n = min(numCandidates-cb, CANDIDATE_CHUNK);
+                if (loaded != cb) {
+                    SYNC_THREADS;
+                    for (int c = LOCAL_ID; c < n; c += LBM_BLOCK_SIZE) {
+                        int r = 0;
+                        while (cb+c >= rangeOffset[r+1])
+                            r++;
+                        int4 f = candidateFirst[rangeFirst[r] + cb + c - rangeOffset[r]];
+                        chunkX[c] = f.x;
+                        chunkY[c] = f.y;
+                        chunkZ[c] = f.z;
+                    }
+                    SYNC_THREADS;
+                    loaded = cb;
+                }
+                if (l < numNodes)
+                    for (int c = 0; c < n; c++)
+                        count += coveredSlots(chunkX[c], chunkY[c], chunkZ[c], jx, jy, jz);
+            }
+            segments += (count > 0 ? 1 : 0);
+            slots += count;
         }
         sums[LOCAL_ID] = segments;
         sums[LBM_BLOCK_SIZE+LOCAL_ID] = slots;
@@ -656,10 +693,12 @@ KERNEL void scanBrickTotals(GLOBAL int* RESTRICT chunkSegments, GLOBAL int* REST
 
 /**
  * For every brick of nodes, one work group: the segments of the nodes that the stencils reach, in the order of the
- * nodes in the brick (x fastest), from the offsets of the brick.  The thread of a node merges the candidates of the
- * bricks of cells in particle order and writes, for each slot of each particle that falls on its node in slot order,
- * the weight and particle of the entry and, with the centred drag, the segment of the slot.  The nodes are taken
- * LBM_BLOCK_SIZE at a time: each counts its slots, a scan of the group gives its segment and first entry.
+ * nodes in the brick (x fastest), from the offsets of the brick.  The candidates are read into local memory merged in
+ * particle order: the position of a candidate is its position in its range plus, for each other range, the number of
+ * candidates with a smaller particle index (a binary search; the ranges are sorted by particle).  The thread of a node
+ * counts its slots, a scan of the group gives its segment and first entry, and it then writes, for each candidate in
+ * particle order and each of its slots that falls on the node in slot order, the weight and particle of the entry and,
+ * with the centred drag, the segment of the slot.  The nodes are taken LBM_BLOCK_SIZE at a time.
  */
 KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL const int* RESTRICT candidateParticle,
         GLOBAL const int4* RESTRICT candidateFirst, GLOBAL const int* RESTRICT brickSegments,
@@ -671,77 +710,130 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
 #endif
         ) {
     LOCAL int sums[2*LBM_BLOCK_SIZE];
+    LOCAL int rangeFirst[MAX_SOURCE_BRICKS], rangeOffset[MAX_SOURCE_BRICKS+1], brickNodes[7];
+    LOCAL int chunkParticle[CANDIDATE_CHUNK], chunkX[CANDIDATE_CHUNK], chunkY[CANDIDATE_CHUNK], chunkZ[CANDIDATE_CHUNK];
     for (int tb = GROUP_ID; tb < NUM_BRICKS; tb += NUM_GROUPS) {
-        int lo[3], hi[3], first[MAX_SOURCE_BRICKS], end[MAX_SOURCE_BRICKS];
-        int numRanges = brickSources(tb, brickStart, lo, hi, first, end);
-        bool any = false;
-        for (int r = 0; r < numRanges; r++)
-            any = any || (end[r] > first[r]);
-        if (!any)
-            continue;
-        int c = tb/LBM_BLOCK_SIZE;
-        int segmentBase = chunkSegments[c] + brickSegments[tb], slotBase = chunkSlots[c] + brickSlots[tb];
-        int wx = hi[0]-lo[0], wy = hi[1]-lo[1], numNodes = wx*wy*(hi[2]-lo[2]);
+        if (LOCAL_ID == 0) {
+            int lo[3], hi[3], first[MAX_SOURCE_BRICKS], end[MAX_SOURCE_BRICKS];
+            int n = brickSources(tb, brickStart, lo, hi, first, end);
+            rangeOffset[0] = 0;
+            for (int r = 0; r < MAX_SOURCE_BRICKS; r++) {
+                rangeFirst[r] = (r < n ? first[r] : 0);
+                rangeOffset[r+1] = rangeOffset[r] + (r < n ? end[r] - first[r] : 0);
+            }
+            for (int a = 0; a < 3; a++) {
+                brickNodes[a] = lo[a];
+                brickNodes[3+a] = hi[a];
+            }
+            brickNodes[6] = n;
+        }
+        SYNC_THREADS;
+        const int numRanges = brickNodes[6], numCandidates = rangeOffset[numRanges];
+        const int wx = brickNodes[3]-brickNodes[0], wy = brickNodes[4]-brickNodes[1];
+        const int numNodes = (numCandidates > 0 ? wx*wy*(brickNodes[5]-brickNodes[2]) : 0);
+        const int c0 = tb/LBM_BLOCK_SIZE;
+        int segmentBase = chunkSegments[c0] + brickSegments[tb], slotBase = chunkSlots[c0] + brickSlots[tb];
+        int loaded = -1;
         for (int base = 0; base < numNodes; base += LBM_BLOCK_SIZE) {
             int l = base + LOCAL_ID;
-            int jx = lo[0] + l%wx, jy = lo[1] + (l/wx)%wy, jz = lo[2] + l/(wx*wy);
-            int count = (l < numNodes ? countNodeSlots(candidateFirst, numRanges, first, end, jx, jy, jz) : 0);
-            sums[LOCAL_ID] = (count > 0 ? 1 : 0);
-            sums[LBM_BLOCK_SIZE+LOCAL_ID] = count;
-            for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
-                SYNC_THREADS;
-                int addSegments = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
-                int addSlots = (LOCAL_ID >= step ? sums[LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
-                SYNC_THREADS;
-                sums[LOCAL_ID] += addSegments;
-                sums[LBM_BLOCK_SIZE+LOCAL_ID] += addSlots;
-            }
-            SYNC_THREADS;
-            if (count > 0) {
-                int s = segmentBase + sums[LOCAL_ID] - 1;
-                int k = slotBase + sums[LBM_BLOCK_SIZE+LOCAL_ID] - count;
-                segmentStart[s] = k;
-                segmentNode[s] = jx + GNX*(jy + GNY*jz);
-                int position[MAX_SOURCE_BRICKS];
-                for (int r = 0; r < numRanges; r++)
-                    position[r] = first[r];
-                while (true) {
-                    int best = -1, i = NUM_COUPLED;
-                    for (int r = 0; r < numRanges; r++)
-                        if (position[r] < end[r] && candidateParticle[position[r]] < i) {
-                            i = candidateParticle[position[r]];
-                            best = r;
-                        }
-                    if (best < 0)
-                        break;
-                    int4 f = candidateFirst[position[best]++];
-                    if (coveredSlots(f, jx, jy, jz) == 0)
-                        continue;
-                    for (int cz = 0; cz < STENCIL_WIDTH; cz++) {
-                        if (stencilIndex(f.z, cz, GNZ, OPEN_Z) != jz)
-                            continue;
-                        for (int cy = 0; cy < STENCIL_WIDTH; cy++) {
-                            if (stencilIndex(f.y, cy, GNY, OPEN_Y) != jy)
-                                continue;
-                            for (int cx = 0; cx < STENCIL_WIDTH; cx++) {
-                                if (stencilIndex(f.x, cx, GNX, OPEN_X) != jx)
+            int jx = brickNodes[0] + l%wx, jy = brickNodes[1] + (l/wx)%wy, jz = brickNodes[2] + l/(wx*wy);
+            int count = 0;
+            for (int pass = 0; pass < 2; pass++) {
+                int s = 0, k = 0;
+                if (pass == 1) {
+                    // The segment and first entry of the node, from a scan of the counts of the group.
+                    sums[LOCAL_ID] = (count > 0 ? 1 : 0);
+                    sums[LBM_BLOCK_SIZE+LOCAL_ID] = count;
+                    for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
+                        SYNC_THREADS;
+                        int addSegments = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
+                        int addSlots = (LOCAL_ID >= step ? sums[LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
+                        SYNC_THREADS;
+                        sums[LOCAL_ID] += addSegments;
+                        sums[LBM_BLOCK_SIZE+LOCAL_ID] += addSlots;
+                    }
+                    SYNC_THREADS;
+                    s = segmentBase + sums[LOCAL_ID] - 1;
+                    k = slotBase + sums[LBM_BLOCK_SIZE+LOCAL_ID] - count;
+                    if (count > 0) {
+                        segmentStart[s] = k;
+                        segmentNode[s] = jx + GNX*(jy + GNY*jz);
+                    }
+                    segmentBase += sums[LBM_BLOCK_SIZE-1];
+                    slotBase += sums[2*LBM_BLOCK_SIZE-1];
+                }
+                for (int cb = 0; cb < numCandidates; cb += CANDIDATE_CHUNK) {
+                    int n = min(numCandidates-cb, CANDIDATE_CHUNK);
+                    if (loaded != cb) {
+                        SYNC_THREADS;
+                        for (int c = LOCAL_ID; c < numCandidates; c += LBM_BLOCK_SIZE) {
+                            int r = 0;
+                            while (c >= rangeOffset[r+1])
+                                r++;
+                            int p = rangeFirst[r] + c - rangeOffset[r];
+                            int i = candidateParticle[p];
+                            int position = c - rangeOffset[r];
+                            for (int q = 0; q < numRanges; q++) {
+                                if (q == r)
                                     continue;
-                                int e = i*STENCIL_SIZE + cx + STENCIL_WIDTH*(cy + STENCIL_WIDTH*cz);
-                                sortedWeight[k] = stencilWeight[e];
-                                sortedParticle[k] = i;
+                                int lo = rangeFirst[q], hi = rangeFirst[q] + rangeOffset[q+1] - rangeOffset[q];
+                                while (lo < hi) {
+                                    int mid = (lo + hi)/2;
+                                    if (candidateParticle[mid] < i)
+                                        lo = mid + 1;
+                                    else
+                                        hi = mid;
+                                }
+                                position += lo - rangeFirst[q];
+                            }
+                            if (position >= cb && position < cb+n) {
+                                int4 f = candidateFirst[p];
+                                chunkParticle[position-cb] = i;
+                                chunkX[position-cb] = f.x;
+                                chunkY[position-cb] = f.y;
+                                chunkZ[position-cb] = f.z;
+                            }
+                        }
+                        SYNC_THREADS;
+                        loaded = cb;
+                    }
+                    if (l >= numNodes || (pass == 1 && count == 0))
+                        continue;
+                    for (int c = 0; c < n; c++) {
+                        int fx = chunkX[c], fy = chunkY[c], fz = chunkZ[c];
+                        int covered = coveredSlots(fx, fy, fz, jx, jy, jz);
+                        if (pass == 0) {
+                            count += covered;
+                            continue;
+                        }
+                        if (covered == 0)
+                            continue;
+                        int i = chunkParticle[c];
+                        for (int cz = 0; cz < STENCIL_WIDTH; cz++) {
+                            if (stencilIndex(fz, cz, GNZ, OPEN_Z) != jz)
+                                continue;
+                            for (int cy = 0; cy < STENCIL_WIDTH; cy++) {
+                                if (stencilIndex(fy, cy, GNY, OPEN_Y) != jy)
+                                    continue;
+                                for (int cx = 0; cx < STENCIL_WIDTH; cx++) {
+                                    if (stencilIndex(fx, cx, GNX, OPEN_X) != jx)
+                                        continue;
+                                    int e = i*STENCIL_SIZE + cx + STENCIL_WIDTH*(cy + STENCIL_WIDTH*cz);
+                                    sortedWeight[k] = stencilWeight[e];
+                                    sortedParticle[k] = i;
 #ifdef CENTERED_DRAG
-                                keySegment[e] = s;
+                                    keySegment[e] = s;
 #endif
-                                k++;
+                                    k++;
+                                }
                             }
                         }
                     }
                 }
             }
-            segmentBase += sums[LBM_BLOCK_SIZE-1];
-            slotBase += sums[2*LBM_BLOCK_SIZE-1];
             SYNC_THREADS;
         }
+        SYNC_THREADS;
     }
 }
 
