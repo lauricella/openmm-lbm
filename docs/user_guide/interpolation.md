@@ -1,7 +1,7 @@
 # Interpolation stencils, step by step
 
-> **Status:** in development for version 0.5.0. The stencils work on every platform, with one domain and with the
-> domain decomposition, with both drag schemes, walls and open faces.
+> **Status:** since version 0.5.0. The stencils work on every platform, with one domain and with the domain
+> decomposition, with both drag schemes, walls and open faces.
 
 This page explains, from the beginning, how a particle that sits between the nodes of the lattice sees the fluid and
 pushes on it. It needs no knowledge of the lattice Boltzmann method: only what a function, a sum and a polynomial

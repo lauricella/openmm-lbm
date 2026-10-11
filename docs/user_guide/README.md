@@ -30,11 +30,11 @@ Know these before using the plugin for a study:
   drag](lattice.md#choosing-the-drag)).
 - **Nearest-node coupling.** By default each particle is coupled to the nearest lattice node, so the forces jump
   when a particle crosses from one cell to the next, and the hydrodynamic radius of a single bead depends on the
-  lattice spacing and on $`\tau`$. The interpolation stencils, in development for version 0.5.0
-  ([interpolation.md](interpolation.md)), couple a particle to 8, 27 or 64 nodes around it and remove the jump.
+  lattice spacing and on $`\tau`$. The interpolation stencils (version 0.5.0,
+  [interpolation.md](interpolation.md)) couple a particle to 8, 27 or 64 nodes around it and remove the jump.
 - **Walls and open faces.** Solid nodes are no-slip walls at rest, with bounce-back (the default) or
   regularized walls (`setWallScheme()`); a moving plate, an inlet or an outlet is an open face with an
-  imposed velocity, density or both (`setFaceBoundary()`; both in development for version 0.5.0). The particles stay in OpenMM's periodic box also with
+  imposed velocity, density or both (`setFaceBoundary()`; both since version 0.5.0). The particles stay in OpenMM's periodic box also with
   open faces: keep coupled particles away from them. With fluid fluctuations, faces with the density alone
   (`Density`) are an error: use `DensityVelocity` or `Velocity` faces ([open faces](api_reference.md#open-faces)).
 
@@ -66,7 +66,7 @@ Know these before using the plugin for a study:
 8. [Troubleshooting](troubleshooting.md): error messages and common pitfalls.
 9. [Running on several GPUs](parallel.md): the lattice divided into domains, one MPI rank per GPU: when it pays,
    building with MPI, a complete script, job scripts for one and several nodes.
-10. [Interpolation stencils, step by step](interpolation.md) (in development for version 0.5.0): how a particle
+10. [Interpolation stencils, step by step](interpolation.md): how a particle
     between the nodes sees the fluid and pushes on it, the weights of the trilinear, three-point and Keys stencils
     written out in one and three dimensions, walls and open faces, which stencil to choose.
 
@@ -79,9 +79,9 @@ Know these before using the plugin for a study:
 | Fluid update: collision, streaming, body force, removal of the fluid momentum, Mach number check | yes | yes |
 | Solid nodes (`setSolidNodes()`) and the force of the fluid on the walls (`getWallForce()`) | yes | yes |
 | Regularized walls (`setWallScheme(LBMForce.Regularized)`) | yes | yes |
-| Open faces with an imposed velocity, density or both ([`setFaceBoundary()`](api_reference.md#open-faces); both in development for version 0.5.0) | yes | yes |
+| Open faces with an imposed velocity, density or both ([`setFaceBoundary()`](api_reference.md#open-faces); both since version 0.5.0) | yes | yes |
 | Particle-fluid coupling: friction and random force at the nearest node or with an interpolation stencil, reaction on the fluid, reflection at walls | yes | yes |
-| Interpolation stencils of the coupling ([`setInterpolationStencil()`](interpolation.md), in development for version 0.5.0) | yes | yes |
+| Interpolation stencils of the coupling ([`setInterpolationStencil()`](interpolation.md), version 0.5.0) | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |
 | Checkpoints of the fluid (`createCheckpoint()`, `saveCheckpointFile()`, `openmmlbm.saveCheckpoint()`, `LBMCheckpointReporter`) | yes | yes |

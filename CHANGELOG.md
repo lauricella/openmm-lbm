@@ -3,9 +3,15 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.5.0 (2026-10-11)
 
-### Added (in development)
+Interpolation stencils of the particle-fluid coupling (trilinear, three-point and Keys) on every platform, with one
+domain and with the domain decomposition; open faces with both the density and the velocity imposed; with a
+fluctuating fluid, regularized walls and the new faces exactly at equilibrium, and `Density` faces refused. With the
+nearest node, the default, the results of version 0.4.0 are unchanged bit for bit, except fluctuating runs with
+regularized walls (Changed).
+
+### Added
 - Interpolation stencils of the coupling, `setInterpolationStencil()`/`getInterpolationStencil()` with
   `NearestNode` (the default, unchanged bit for bit), `Trilinear`, `ThreePoint` and `Keys` (`docs/theory.md`,
   section 9): with both drag schemes, periodic and open faces on every platform, with one domain and with the
@@ -71,11 +77,13 @@ versions the API may still change.
   the open faces since version 0.3.0 (`docs/user_guide/api_reference.md`, Open faces); `Density` faces are now an
   error with fluid fluctuations (Changed).
 - `docs/user_guide/interpolation.md`: the interpolation stencils step by step, with their weights written out.
-- `docs/theory.md`, new section 9: the interpolation stencils of the coupling planned for version 0.5.0 (trilinear,
+- `docs/theory.md`, new section 9: the interpolation stencils of the coupling (trilinear,
   three-point and Keys kernels; interpolation of the node velocity and spreading of the reaction with the same
   weights; conservation of momentum and angular momentum; fluctuation-dissipation balance, exact for the centred drag
   in the fluctuating fluid; the centred drag as a linear system; self-mobility), and `docs/validation.md`,
   Interpolation stencils, with the measured self-mobility and temperatures.
+- The documentation revised against the code: serialization and checkpoint versions, files, kernels and tests of the
+  stencils, random numbers of the boundary nodes, warnings, error messages and the cases of the tests.
 
 ## 0.4.0 (2026-10-09)
 

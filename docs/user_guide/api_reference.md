@@ -511,15 +511,15 @@ force.setDragScheme(LBMForce.Centered)      # then system.addForce(force), after
 
 ### `setInterpolationStencil(stencil)`, `getInterpolationStencil()`
 
-In development for version 0.5.0. How the drag takes the fluid velocity at a coupled particle
-([theory.md](../theory.md#9-interpolation-stencils-in-development-for-version-050)):
+Version 0.5.0. How the drag takes the fluid velocity at a coupled particle
+([theory.md](../theory.md#9-interpolation-stencils-implemented-on-all-platforms)):
 - `LBMForce.NearestNode`, the default: the velocity of the nearest node, which receives the whole reaction.
 - `LBMForce.Trilinear` ($`2^3`$ nodes), `LBMForce.ThreePoint` ($`3^3`$ nodes, the kernel of Roma, Peskin and
   Berger) and `LBMForce.Keys` ($`4^3`$ nodes, cubic convolution): the velocity interpolated from the nodes around
   the particle; the nodes receive the reaction with the same weights, so the momentum is conserved exactly. A solid
   node of the stencil counts as a wall at rest: zero velocity, and its share of the reaction goes to the wall.
 
-For now the stencils other than `NearestNode` work with both drag schemes on every platform, with periodic and open
+The stencils other than `NearestNode` work with both drag schemes on every platform, with periodic and open
 faces, with one domain and with the domain decomposition. Along an axis with open faces a stencil stops at the last
 nodes, which take the weights of the nodes beyond the faces: momentum is conserved, but a linear flow is no longer
 interpolated exactly in the last cells, so keep coupled particles a few nodes away from open faces
