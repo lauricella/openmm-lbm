@@ -6,14 +6,14 @@ versions the API may still change.
 ## Unreleased
 
 ### Changed
-- GPU platforms, interpolation stencils: the coupling sorts one key per particle, from the brick of $`4^3`$ nodes of
-  the lattice that holds the first node of its stencil, instead of one key per node of its stencil (64 per particle
-  with `Keys`), and builds from them the segments of the nodes, the slots that fall on each node in particle order
+- GPU platforms, three-point and `Keys` stencils: the coupling sorts one key per particle, from the brick of $`4^3`$
+  nodes of the lattice that holds the first node of its stencil, instead of one key per node of its stencil (27 and
+  64 per particle), and builds from them the segments of the nodes, the slots that fall on each node in particle order
   (`docs/architecture.md`, The sort of the coupling and the segments of the stencils). OpenMM's sort of $`3.6\cdot10^6`$
-  keys took most of the cost of the coupling with `Keys` and many particles. On an A100 with 56320 crowded beads the
-  step is 39% shorter with `Keys` and the explicit drag (5.54 to 3.36 ms), 23% with the centred drag, 22% and 12% with
-  the three-point stencil; with the trilinear stencil, whose keys were few, it is 0.3 ms longer (1.63 to 1.94 ms).
-  The sums run in the same order as before: the results are the same bit for bit with OpenCL, and with CUDA except the
+  keys took most of the cost of the coupling with `Keys` and many particles. With 512 copies of SOD1 (56320 beads) on
+  one A100 the step is 41% shorter with `Keys` and the explicit drag (5.50 to 3.24 ms), 24% with the centred drag, 24%
+  and 14% with the three-point stencil; on four A100s with $`240^3`$ nodes 6% to 18% shorter. The trilinear stencil
+  keeps one key per slot, which is faster for its 8 slots. The sums run in the same order as before: the results are the same bit for bit with OpenCL, and with CUDA except the
   three-point stencil with the explicit drag and a fluctuating fluid, whose fluid differs in the last bits (up to
   $`2.6\cdot10^{-18}`$ in the populations in double precision; cause not identified).
 

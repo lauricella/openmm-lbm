@@ -177,7 +177,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    |---|---|---|---|
    | `coupleParticlesStencil` (explicit drag) | one per atom | positions, velocities, moments of the nodes of the stencil (with the decomposition, of the block and of the coupling halo), OpenMM's random numbers | force of the particle (zero on the ranks that do not own its nearest node), weights of its slots, first nodes of its stencil and its key, in a lattice step the reaction on its solid nodes as wall momentum |
    | `prepareCenteredStencil` (centred drag) | one per atom with the trilinear stencil; with the three-point and Keys stencils one per slot, in work groups of 64/`STENCIL_SIZE` atoms, then four threads per atom add the slots in order | as `prepareCenteredDrag`, and the moments of the nodes of the stencil | right-hand side $`b_k/m_k`$ and diagonal of the linear system (zero on the ranks that do not own the particle), weight, $`\xi/\rho`$ and node of every slot, first nodes of the stencil and key of the particle |
-   | `findBrickStarts`, `listCandidates`, `countBrickSegments`, `scanBrickChunks`, `scanBrickTotals`, `listBrickSegments`, `writeSegmentEntries`, `findChunkSegments` (after every sort, `listKeySegments()`) | one per brick; one per particle; work groups of 256 threads, four bricks of nodes each; one work group per 64 bricks; one work group; one work group of 256 threads per brick of nodes, four threads per node; one per segment; one per chunk of 64 entries | sorted keys, first nodes of the stencils, weights of the slots | where each brick starts in the sorted keys; the particle and first nodes of each sorted key; per brick the nodes that the stencils reach, their slots and the candidates, turned into offsets by integer scans in a fixed order; the first entry and node of each segment, and the candidates of the brick merged in particle order (binary searches between the sorted ranges) with how many of their slots fall on each node of the brick along each axis; the weight and particle of each entry (the slots of a particle in slot order), with the centred drag the segment of each slot; the first segment of each chunk of 64 entries |
+   | `countKeySegments`, `scanKeySegments`, `listKeySegments` (trilinear stencil, after every sort, `listKeySegments()`) | work groups of 64 keys; one work group; work groups of 64 keys | sorted keys, weights of the slots | the first key and the node of each segment (the keys of one node), the weight and particle of each sorted key, with the centred drag the segment of each slot; integer counts and a scan in a fixed order |
+   | `findBrickStarts`, `listCandidates`, `flagBricks`, `writeActiveBricks`, `countBrickSegments`, `scanBrickChunks`, `scanBrickTotals`, `listBrickSegments`, `writeSegmentEntries`, `findChunkSegments` (three-point stencil and `Keys`, after every sort, `listKeySegments()`) | one per brick; one per particle; one per brick; one per brick; work groups of 256 threads, four bricks of nodes each; one work group per 64 bricks; one work group; one work group of 256 threads per brick of nodes, four threads per node; one per segment; one per chunk of 64 entries | sorted keys, first nodes of the stencils, weights of the slots | where each brick starts in the sorted keys; the particle and first nodes of each sorted key; the list of the bricks with candidates; per brick the nodes that the stencils reach, their slots and the candidates, turned into offsets by integer scans in a fixed order; the first entry and node of each segment, and the candidates of the brick merged in particle order (binary searches between the sorted ranges) with how many of their slots fall on each node of the brick along each axis; the weight and particle of each entry (the slots of a particle in slot order), with the centred drag the segment of each slot; the first segment of each chunk of 64 entries |
    | `gatherSegmentDensity`, `stencilInterpolationWeights` (centred drag with the domain decomposition) | one per segment; one per slot | nodes of the segments, densities of the block; weights, segments of the slots, densities of the segments | the density of the node of each segment (0 outside the block), which the host sums over the ranks (`exchangeSegmentDensity()`); $`\xi/\rho`$ of every slot of every stencil |
    | `startStencilGradients`, `spreadStencilVector`, `multiplyStencilMatrix`, `dotStencilPartials`, `dotStencilFinish`, `advanceStencilGradients`, `updateStencilDirection` (centred drag, the conjugate gradients of `solveStencilDrag()`) | one per particle; work groups of 64 entries, one thread per segment that starts among them; one per particle with the trilinear stencil, with the three-point and Keys stencils one per slot to read the values of the slots, then three per particle; `DOT_GROUPS` work groups, then one | the vectors of the particles, the segments, $`\xi/\rho`$ | the forces of the particles, in `particleForce`; the dot products in `gradientScalars`, which the host reads at every iteration to decide when to stop |
    | `sumStencilReactions` (in a lattice step) | one per segment | segments, weights and particles of their entries, forces | the reaction of each node of the block, summed in particle order |
@@ -235,8 +236,9 @@ them into buckets of equal width and sorts each bucket in a work group. Its cost
    OpenMM's sort always computes the range of the keys, in a single work group: with `Keys` on the crowded beads of
    `docs/validation.md` this pass took 1.9 ms, the whole sort 2.8 ms and the list of the segments 0.5 to 0.8 ms of a
    step of 5.5 ms (explicit drag) or 10.5 ms (centred drag) on an A100.
-3. **Since version 0.6.0.** One key per particle, so that the sort takes 0.13 ms, and the segments are built from it
-   by the kernels of the plugin, as below. The sums run in the same order as before.
+3. **Since version 0.6.0, with the three-point stencil and `Keys`.** One key per particle, so that the sort takes
+   0.13 ms, and the segments are built from it by the kernels of the plugin, as below. The sums run in the same order
+   as before. **The trilinear stencil keeps one key per slot** (Two ways, below).
 
 **Bricks.** The cell of a particle along an axis is the first node of its stencil, wrapped into the lattice or, along
 an axis with open faces, moved into it. The cells are grouped into bricks of $`4^3`$ nodes (`BRICK_SIZE`), the last
@@ -286,11 +288,25 @@ by permuted node), but no sum runs over it.
   segments, although the branch was the same for all the threads of the group: the kernels of the bricks have no
   early exit before a barrier.
 
-**Cost.** With `Keys` and the crowded beads the sort and the segments take 1.6 ms instead of 3.3 to 3.7 (the step is
-39% shorter with the explicit drag and 23% with the centred one), with the three-point stencil 0.9 instead of 1.3 to
-1.4 ms. With the trilinear stencil, whose 8 keys per particle were cheap to sort (0.35 ms in all), building the
-segments takes longer than the sort it saves: its step is 0.3 ms longer on these beads. The coupling keeps a single
-way for the three stencils. Times in `docs/validation.md`.
+- **Empty bricks.** On a large lattice with dilute particles most bricks of nodes have no candidates, and visiting all
+  of them, with the barriers of their work groups, made the step longer than with one key per slot (on four A100s with
+  $`240^3`$ nodes). A thread per brick counts its candidates (`flagBricks`), a scan lists the bricks that have any
+  (`writeActiveBricks`), and the count and the list visit only those.
+
+**Two ways.** The kernels write the same segments either way, so the kernels that use them are the same for the three
+stencils; the way is chosen when the program is compiled (`SLOT_KEYS`, defined with the trilinear stencil).
+- **Trilinear stencil: one key per slot, as until version 0.5.1.** The keys of the slots (`stencilKey()`, a permutation
+  of the node, `STENCIL_SCRAMBLE`) are sorted by OpenMM, and `countKeySegments`, `scanKeySegments` and
+  `listKeySegments` list the segments of the sorted keys, writing also the node of each segment
+  (`STENCIL_UNSCRAMBLE`). Its 8 keys per particle sort in about 0.3 ms with 56320 beads, and building the segments
+  through the bricks takes longer than the sort it saves. Measured on the whole step, 512 copies of SOD1, explicit /
+  centred drag, milliseconds per step, with the bricks against one key per slot: one A100 and $`120^3`$ nodes,
+  1.95 / 2.83 against 1.60 / 2.51 (22% and 13% longer); four A100s and $`120^3`$ nodes, 2.56 / 4.85 against
+  2.42 / 4.38; four A100s and $`240^3`$ nodes, 7.46 / 9.00 against 6.57 / 8.51 (14% and 6% longer).
+- **Three-point stencil and `Keys`: one key per particle, through the bricks**, as above. With 27 and 64 slots per
+  particle the sort of a key per slot cost more than building the segments: with the crowded beads on one A100 the
+  sort and the segments take 0.9 instead of 1.3 to 1.4 ms with the three-point stencil and 1.6 instead of 3.3 to 3.7
+  with `Keys`, and the step is 24% and 41% shorter with the explicit drag (`docs/validation.md`).
 
 ## Invariants
 
