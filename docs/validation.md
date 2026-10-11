@@ -1247,9 +1247,16 @@ the same bit for bit.
 
 The last part grows with the nodes of the block, which is why the same particles cost more in the larger box: on
 $`512^3`$ nodes ($`1 \times 2 \times 2`$) $`10^5`$ particles add 2.5 ms per step (18.0 against 15.5 ms), on $`256^3`$
-nodes 1.5 to 1.7 ms. Reading the reaction only at the nodes that have particles would remove it; it is not done. With
-$`2 \times 2 \times 1`$ the moments, which do not depend on the particles, also took 1.0 ms more in the run with
-particles; that difference is not explained. Starting the sum without blocking (`MPI_Iallreduce`) after the coupling and
+nodes 1.5 to 1.7 ms. It is not mainly the reading of the reaction: with one coupled particle, which makes the collision
+read the reaction of every node while the fluid stays almost as without particles, the collision takes 0.18 ms more on
+$`512^3`$ nodes ($`1 \times 2 \times 2`$: 9.65 against 9.48 ms) and 0.05 ms more on $`256^3`$ nodes on one GPU (4.59
+against 4.54 ms). Reading the reaction only at the nodes that have particles, considered for version 0.5.1, would save
+at most that, and was not done. The collision and the moments take longer as the number of particles grows, although
+the moments read nothing of the particles: on $`512^3`$ nodes ($`2 \times 2 \times 1`$) with 0, 1, 1000 and $`10^5`$
+particles the collision takes 11.97, 12.22, 12.80 and 13.05 ms and the moments 9.00, 8.92, 9.39 and 10.02 ms; on
+$`256^3`$ nodes on one GPU, with 1 and $`10^5`$ particles, 4.59 and 4.85 ms and 2.89 and 3.04 ms. The cause is not
+found: it is not the content of the fluid (without particles a fluctuating fluid leaves the moments as they are, 9.02
+against 9.03 ms) nor the place of the arrays in memory (those of the fluid are allocated first). Starting the sum without blocking (`MPI_Iallreduce`) after the coupling and
 waiting for it at the end of the lattice step, so that it would run while the fluid advances, gave 2.99 to 3.09 ms
 instead of 3.37 to 3.56 ms on $`256^3`$ nodes with $`10^5`$ particles on one node, but 2.58 instead of 2.41 ms with
 $`128^3`$ per GPU, and on four nodes ($`512^3`$, $`1 \times 4 \times 4`$) 10.3 to 11.1 ms instead of 9.1 to 9.3 ms: it
