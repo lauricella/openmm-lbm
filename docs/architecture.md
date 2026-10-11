@@ -13,10 +13,11 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `openmmapi/include/internal/LBMDecomposition.h`, `openmmapi/src/LBMDecomposition.cpp` | `LBMDecomposition`: the blocks of the domain decomposition and every MPI call of the plugin (collective errors, sums in rank order, the exchanges, gathering and scattering); `LBMParallelFile`: the files written and read by all the ranks together with MPI-IO, each rank the nodes of its domain at their place in an array of the lattice (checkpoint files, VTK files of the fluid); the initialization of MPI on first use and its finalization (`finalizeMPI()`, which the Python module calls when the script ends). The only file that includes `mpi.h`; its MPI code is compiled only with `OPENMM_LBM_MPI`, and without it there is one domain and the files use the standard library |
 | `openmmapi/include/internal/D3Q19.h` | velocity set, weights, opposite velocities, ordering of the populations, equilibrium and its deviation from the rest equilibrium, Hermite polynomial $`H^{(2)}`$, regularized non-equilibrium part, Guo forcing, orthogonal basis of Lulli et al. and random part of the fluctuating fluid (host code) |
 | `openmmapi/include/internal/LBMBoundaries.h` | `LBMBoundaries`: finds the boundary nodes of regularized walls and open faces, with the bits of their unknown and solid directions, what each one imposes and the face that gives it, and the links of the bounce-back walls from the fluid nodes to the solid nodes (host code, used by every platform) |
+| `openmmapi/include/internal/LBMStencils.h` | `LBMStencils`: the kernels of the interpolation stencils and the weights of the nodes along an axis, with the indices stopped at open faces and the repeated nodes merged (host and Reference code; the GPU kernels follow the same formulas) |
 | `platforms/reference/` | `ReferenceCalcLBMForceKernel`: plain C++ in double precision, the correctness reference |
 | `platforms/common/` | `CommonCalcLBMForceKernel` and the device kernels (`src/kernels/*.cc`), written once in the OpenMM common compute dialect |
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform (on CUDA its subclass `CudaCalcLBMForceKernel`, which gives the MPI library the address of the device buffers of the exchange, `getDeviceAddress()`; on OpenCL its subclass `OpenCLCalcLBMForceKernel`, step 3 below; the CUDA and HIP factories also pass the platform property `DeterministicForces`), and the tests |
-| `serialization/` | XML proxy of `LBMForce` (parameters only; version 8, which reads versions 1 to 7) |
+| `serialization/` | XML proxy of `LBMForce` (parameters only; version 9, which reads versions 1 to 8) |
 | `python/` | SWIG wrapper `openmmlbm`, with the Python helpers `LBMTemperatureReporter`, `LBMVTKReporter`, `saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter`, and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
 | `examples/` | example scripts, ports of the examples of the DragOpenMM plugin (`examples/README.md`) |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
@@ -24,6 +25,7 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `tests/TestLBMCoupling.h` | tests of the particle-fluid coupling, `runCouplingTests()`, on every platform |
 | `tests/TestLBMCentered.h` | tests of the centred drag, `runCenteredTests()`, which also runs the coupling tests that do not depend on the drag with the centred one, on every platform |
 | `tests/TestLBMFluctuations.h` | tests of the fluctuating fluid, `runFluctuationTests()`, on every platform |
+| `tests/TestLBMStencils.h` | tests of the interpolation stencils, `runStencilTests()`, on every platform (a few on the Reference platform only) |
 | `devtools/`, `.github/workflows/CI.yml` | continuous integration and its conda environments; `devtools/check_user_guide.py` runs the Python blocks of `docs/user_guide/` and checks their output |
 
 ## Libraries
@@ -80,7 +82,9 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    no virtual sites. On the Reference platform, when its `execute()` runs, OpenMM's force array already holds the sum
    of the other forces; `ReferenceCalcLBMForceKernel::coupleParticlesCentered()` reads them, sorts the keys
    $`\mathrm{node}\cdot N_p + i`$, solves the drag of each node in closed form (`docs/theory.md` section 2, Solution
-   of the centred drag) and gives the node the reaction $`-\mathbf S`$. On the CUDA, OpenCL and HIP platforms
+   of the centred drag) and gives the node the reaction $`-\mathbf S`$; with an interpolation stencil
+   `coupleParticlesStencil()` and `coupleParticlesCenteredStencil()` interpolate and spread with the weights of the
+   stencils, the centred drag solved by conjugate gradients (`docs/theory.md` section 9). On the CUDA, OpenCL and HIP platforms
    `execute()` does nothing: `CommonCalcLBMForceKernel::initialize()` registers a `ForcePostComputation`
    (`CenteredDragPostComputation`), which OpenMM calls at the end of every force evaluation, when its force buffers
    hold all the other forces, and which does the work of `execute()` (step 3).
@@ -104,7 +108,7 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    | `clearCellReactions` | one per key | sorted keys | zero reaction at the nodes of the step |
    | `bounceBack` (with solid nodes and the `BounceBack` wall scheme) | one per fluid node next to a solid node | the populations that the node sent into its solid neighbours, except across an open face (`wallNodes`, `wallLinks`) | the same populations, as its own populations in the opposite directions |
    | `computeWallExchange` (with solid nodes and the `BounceBack` wall scheme) | one per solid node | populations that the fluid neighbours sent into the solid node, except across an open face (the links of `solidLinks`; with the domain decomposition only those to fluid nodes of the block) | its momentum exchange |
-   | `applyBoundaries` (with regularized walls or open faces) | one per boundary node | populations of the node and the solid slots it wrote in the streaming, its moments of the step, velocities and densities of the faces, body acceleration, relaxation rate; with a fluctuating fluid four float4 of OpenMM's random numbers per boundary node, after those of the nodes | its rebuilt unknown populations and, next to solid nodes, its momentum exchange |
+   | `applyBoundaries` (with regularized walls or open faces) | one per boundary node | populations of the node and the solid slots it wrote in the streaming, its moments of the step, velocities and densities of the faces, body acceleration, relaxation rate; with a fluctuating fluid four float4 of OpenMM's random numbers per boundary node, after those of the nodes, or five when the lattice has regularized walls or `DensityVelocity` faces, whose nodes also read the first two float4 of the random numbers of their own collision | its rebuilt unknown populations and, next to solid nodes, its momentum exchange |
    | `computeMaxFluidSpeed` (when the Mach check is due) | work groups of 64 | populations | one maximum per group, reduced on the host |
    | `applyCouplingForces` (with coupled particles, in every force evaluation that includes forces) | one per atom | coupling forces | OpenMM's fixed point force buffer |
 
@@ -118,6 +122,7 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    The moments are stored component by component, $`[k\cdot\mathrm{numNodes} + \mathrm{node}]`$, so that consecutive
    threads read consecutive addresses; the Reference platform stores them node by node. With the domain decomposition
    (`DOMAIN_DECOMPOSITION`, `docs/theory.md` section 8) the arrays hold the block of the rank and a layer of halo nodes
+   (two with the `Keys` stencil)
    along the divided axes (`PAD_X`, `PAD_Y`, `PAD_Z`; the extents `SX`, `SY` and `NUM_STORED` entries per component),
    and `STORAGE_INDEX` and `neighborIndex()` give the position of a node; the coupling kernels also get the size of the
    lattice (`GNX`, `GNY`, `GNZ`) and the first node of the block (`OX`, `OY`, `OZ`). There the node of a sort key is the
@@ -148,8 +153,7 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    initialized. The post-computation does nothing if `LBMForce`'s force group is not requested, or if OpenMM has marked
    the evaluation as invalid (neighbor list overflow): the repeated evaluation then does the step.
 
-   **With an interpolation stencil** (`setInterpolationStencil()`, `docs/theory.md` section 9, in development for
-   version 0.5.0) the coupling uses other kernels of `lbmCoupling.cc`, all under `#ifdef STENCIL_WIDTH` (2, 3 or 4 nodes
+   **With an interpolation stencil** (`setInterpolationStencil()`, `docs/theory.md` section 9) the coupling uses other kernels of `lbmCoupling.cc`, all under `#ifdef STENCIL_WIDTH` (2, 3 or 4 nodes
    per axis, `STENCIL_SIZE` per stencil), so that the programs of the nearest node do not change. Each slot $`e`$ of a
    stencil, $`e = i\cdot\mathrm{STENCIL\_SIZE} + \mathrm{slot}`$ for particle $`i`$, has its weight and the sort key
    $`\pi(\mathrm{node})\cdot\mathrm{KEY\_STRIDE} + e`$, where the node is its index in the lattice and $`\pi`$ the
@@ -161,10 +165,10 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    | Kernel | Threads | Reads | Writes |
    |---|---|---|---|
    | `coupleParticlesStencil` (explicit drag) | one per atom | positions, velocities, moments of the nodes of the stencil (with the decomposition, of the block and of the coupling halo), OpenMM's random numbers | force of the particle (zero on the ranks that do not own its nearest node), weights and keys of its slots, in a lattice step the reaction on its solid nodes as wall momentum |
-   | `prepareCenteredStencil` (centred drag) | one per atom | as `prepareCenteredDrag`, and the moments of the nodes of the stencil | right-hand side $`b_k/m_k`$ and diagonal of the linear system (zero on the ranks that do not own the particle), weight, $`\xi/\rho`$, node and key of every slot |
+   | `prepareCenteredStencil` (centred drag) | one per atom with the trilinear stencil; with the three-point and Keys stencils one per slot, in work groups of 64/`STENCIL_SIZE` atoms, then four threads per atom add the slots in order | as `prepareCenteredDrag`, and the moments of the nodes of the stencil | right-hand side $`b_k/m_k`$ and diagonal of the linear system (zero on the ranks that do not own the particle), weight, $`\xi/\rho`$, node and key of every slot |
    | `countKeySegments`, `scanKeySegments`, `listKeySegments` (after every sort) | work groups of 64 keys; one work group; work groups of 64 keys | sorted keys, weights of the slots | the first key of each segment (the keys of one node), the weight and particle of each sorted key, with the centred drag the segment of each slot; integer counts and a scan in a fixed order |
    | `gatherSegmentDensity`, `stencilInterpolationWeights` (centred drag with the domain decomposition) | one per segment; one per slot | sorted keys, densities of the block; weights, segments of the slots, densities of the segments | the density of the node of each segment (0 outside the block), which the host sums over the ranks (`exchangeSegmentDensity()`); $`\xi/\rho`$ of every slot of every stencil |
-   | `startStencilGradients`, `spreadStencilVector`, `multiplyStencilMatrix`, `dotStencilPartials`, `dotStencilFinish`, `advanceStencilGradients`, `updateStencilDirection` (centred drag, the conjugate gradients of `solveStencilDrag()`) | one per particle; work groups of 64 keys, one thread per segment that starts among them; one per particle; `DOT_GROUPS` work groups, then one | the vectors of the particles, the segments, $`\xi/\rho`$ | the forces of the particles, in `particleForce`; the dot products in `gradientScalars`, which the host reads at every iteration to decide when to stop |
+   | `startStencilGradients`, `spreadStencilVector`, `multiplyStencilMatrix`, `dotStencilPartials`, `dotStencilFinish`, `advanceStencilGradients`, `updateStencilDirection` (centred drag, the conjugate gradients of `solveStencilDrag()`) | one per particle; work groups of 64 keys, one thread per segment that starts among them; one per particle with the trilinear stencil, with the three-point and Keys stencils one per slot to read the values of the slots, then three per particle; `DOT_GROUPS` work groups, then one | the vectors of the particles, the segments, $`\xi/\rho`$ | the forces of the particles, in `particleForce`; the dot products in `gradientScalars`, which the host reads at every iteration to decide when to stop |
    | `sumStencilReactions` (in a lattice step) | one per segment | segments, weights and particles in key order, forces | the reaction of each node of the block, summed in particle order |
    | `addStencilWallMomentum` (centred drag with solid nodes, in a lattice step) | one per particle | nodes and weights of its slots, forces | the reaction on its solid nodes as wall momentum |
    | `unpackCouplingHalo` (with the domain decomposition, before every coupling) | one per position of the coupling halo | $`\rho - 1`$ and $`\mathbf j`$ received from the owners (`exchangeCouplingHalo()`, through the host) | the halo of the moments, one or two layers |
@@ -173,9 +177,10 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    the same order on every rank (`python/tests/mpi_decomposition.py`).
 4. **Checkpoints.** `LBMForce::createCheckpoint()` and `loadCheckpoint()` go through `LBMForceImpl`, which writes and
    checks a header (tag, version, platform, grid size, number of coupled particles, from version 2 the drag scheme, from
-   version 3 the switch of the fluid fluctuations, from version 4 the wall scheme and from version 5 the types of the
-   six faces; version 1 is read as the explicit drag, versions 1 and 2 as without fluctuations, versions 1 to 3 as with
-   bounce-back walls, versions 1 to 4 as with periodic faces), to the kernel, which writes its state as it is. The
+   version 3 the switch of the fluid fluctuations, from version 4 the wall scheme, from version 5 the types of the
+   six faces and from version 6 the interpolation stencil; version 1 is read as the explicit drag, versions 1 and 2 as
+   without fluctuations, versions 1 to 3 as with bounce-back walls, versions 1 to 4 as with periodic faces, versions 1
+   to 5 as with the nearest node), to the kernel, which writes its state as it is. The
    common kernel writes the size of its floating point type (a checkpoint is refused in another precision), whether the
    random numbers of the next step are already drawn and whether the fluid has advanced, then the populations, those
    random numbers and the wall momentum of the particles, of the solid nodes and of the nodes of regularized walls. The
@@ -245,8 +250,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    the option is `ON` for a platform that cannot be built. Add the platform to the summary at the end of the
    file.
 3. Add `platforms/<platform>/tests/Test<Platform>LBMForce.cpp`, which calls `runPlatformTests()`,
-   `runFluidTests()`, `runWallTests()`, `runCouplingTests()`, `runCenteredTests()` and
-   `runFluctuationTests()` and takes the
+   `runFluidTests()`, `runWallTests()`, `runCouplingTests()`, `runCenteredTests()`,
+   `runFluctuationTests()` and `runStencilTests()` and takes the
    precision as its argument, and register it in `platforms/<platform>/tests/CMakeLists.txt` in the three
    precision modes.
 4. Add the platform to the Python tests that compare the GPU platforms with the Reference platform.

@@ -417,8 +417,8 @@ void testFluctuationsParameters(Platform& platform) {
 
 /**
  * Density faces are refused with the fluid fluctuations, which they keep away from equilibrium next to the face
- * (docs/theory.md, section 7), on every axis, as XMin or XMax, also at zero temperature and next to faces of the other
- * types; without fluctuations, or with DensityVelocity faces instead, the same lattices are accepted.
+ * (docs/theory.md, section 7), on every axis, as XMin, YMax or ZMin, also at zero temperature and next to faces of
+ * the other types; without fluctuations, or with DensityVelocity faces instead, the same lattices are accepted.
  */
 void testDensityFaceWithFluctuations(Platform& platform) {
     for (int axis = 0; axis < 3; axis++)
@@ -478,6 +478,42 @@ void testFluctuationDragWarning(Platform& platform) {
                     ASSERT(captured.str().find("= 6.64") != string::npos);
                 delete system;
             }
+}
+
+/**
+ * With the fluid fluctuations a warning is printed when regularized walls or DensityVelocity faces cannot hold the
+ * fluid next to them exactly at equilibrium, for tau outside [0.586, 3.41] (docs/theory.md, section 7), and not with
+ * bounce-back walls, Velocity faces, tau inside the range or without fluctuations.
+ */
+void testBoundaryNoiseWarning(Platform& platform) {
+    for (double tau : {0.55, 1.0})
+        for (int boundary = 0; boundary < 5; boundary++) {
+            LBMForce* force;
+            System* system = createFluidSystem(force, 6, 5, 4, tau);
+            force->setTemperature(300.0);
+            force->setFluidFluctuations(boundary != 4);
+            if (boundary == 0 || boundary == 1 || boundary == 4) {
+                force->setSolidNodes(wallPlane(6, 5, 4));
+                force->setWallScheme(boundary == 1 ? LBMForce::BounceBack : LBMForce::Regularized);
+            }
+            else
+                for (LBMForce::Face face : {LBMForce::ZMin, LBMForce::ZMax})
+                    force->setFaceBoundary(face, boundary == 2 ? LBMForce::DensityVelocity : LBMForce::Velocity);
+            VerletIntegrator integrator(fluidDt);
+            stringstream captured;
+            streambuf* original = cerr.rdbuf(captured.rdbuf());
+            try {
+                Context context(*system, integrator, platform);
+            }
+            catch (...) {
+                cerr.rdbuf(original);
+                throw;
+            }
+            cerr.rdbuf(original);
+            bool warned = (captured.str().find("exactly at equilibrium only for 0.586 <= tau <= 3.41") != string::npos);
+            ASSERT(warned == (tau < 0.586 && (boundary == 0 || boundary == 2)));
+            delete system;
+        }
 }
 
 /**
@@ -583,4 +619,5 @@ void runFluctuationTests(Platform& platform) {
     testFluctuationsParameters(platform);
     testDensityFaceWithFluctuations(platform);
     testFluctuationDragWarning(platform);
+    testBoundaryNoiseWarning(platform);
 }

@@ -41,24 +41,25 @@ the plugin converts the parameters to lattice units.
 | `the checkpoint was written with a different precision`, or OpenMM's `Checkpoint was created with a different numeric precision` | The precision (single, mixed, double) differs from that of the checkpoint. Create the Context with the same `Precision` property. |
 | `Checkpoint was created with a different version of OpenMM` (from OpenMM) | The OpenMM part of the checkpoint was written by another version of OpenMM. Continue the run with the version of OpenMM that wrote it. |
 | `the checkpoint was written for a different grid size or number of coupled particles` | The System built for the restart is not the same as the one of the checkpoint. Build the System exactly as in the first run. |
-| `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by LBMForce.saveCheckpointFile() or openmmlbm.saveCheckpoint()` | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
+| `the data are not a checkpoint written by LBMForce::createCheckpoint()`, or `... is not a checkpoint written by LBMForce.saveCheckpointFile() or openmmlbm.saveCheckpoint()`, or `ValueError: ... is not a checkpoint written by openmmlbm.saveCheckpoint()` (from `openmmlbm.loadCheckpoint()`) | The file or the bytes are not a checkpoint of openmm-lbm (for example an OpenMM checkpoint alone). Save with `openmmlbm.saveCheckpoint()` and load with `openmmlbm.loadCheckpoint()`. |
 | `... was written in X precision, and this Context uses Y`, `... was written for a System with a different number of particles` | A checkpoint file is loaded into a Context with another precision, or a System with another number of particles. Create the Context with the `Precision` of the first run and build the same System. |
 | `... was written with one domain by openmmlbm.saveCheckpoint(), and only a Context with one domain can load it` | A file written with one domain can be loaded only with one domain. To continue a run with another decomposition, write its checkpoints with `saveCheckpointFile()` ([restart](restart.md)). |
 | `with the domain decomposition the checkpoints are written to a file, with saveCheckpointFile()` (or `read from a file, with loadCheckpointFile()`) | `createCheckpoint()` and `loadCheckpoint()` hold the state of one process; with more than one domain use `saveCheckpointFile()` and `loadCheckpointFile()`, or `openmmlbm.saveCheckpoint()` and `openmmlbm.loadCheckpoint()`. |
-| `cannot open ... to write it`, `cannot open ... to read it`, `cannot rename ... to ...`, `error writing ...`, `... is truncated or cannot be read` | A checkpoint or VTK file could not be written or read: check the path, the permissions and the free space (the checkpoint is written to `<file>.tmp` and then renamed). |
-| `unsupported checkpoint version`, `the checkpoint is damaged`, `the checkpoint is truncated`, `... is truncated or damaged` | The checkpoint was written by a newer version of the plugin, or the file was cut or changed (for example by a job that stopped while writing it). Use the version that wrote it, or an earlier checkpoint. |
+| `cannot open ... to write it`, `cannot open ... to read it`, `cannot rename ... to ...`, `cannot write ...`, `error writing ...`, `... is truncated or cannot be read` | A checkpoint or VTK file could not be written or read: check the path, the permissions and the free space (the checkpoint is written to `<file>.tmp` and then renamed). |
+| `unsupported checkpoint version`, `the checkpoint is damaged`, `the checkpoint is truncated`, `... is damaged`, `... is truncated`, `... is truncated or damaged` | The checkpoint was written by a newer version of the plugin, or the file was cut or changed (for example by a job that stopped while writing it). Use the version that wrote it, or an earlier checkpoint. |
 | `error writing the checkpoint` | In C++, the stream passed to `createCheckpoint()` could not be written. Check that it is open, in binary mode, and that the disk is not full. |
 | `the checkpoint must be bytes` | `LBMForce.loadCheckpoint(context, data)` takes the bytes returned by `createCheckpoint()`; to read a file, use `openmmlbm.loadCheckpoint(file, context, force)`. |
-| `Unsupported version number` (from `XmlSerializer.deserialize()`) | The XML was written by a newer version of the plugin: for example, version 0.3 cannot read the XML of this version (XML version 8). Use the newer version. |
+| `Unsupported version number` (from `XmlSerializer.deserialize()`) | The XML was written by a newer version of the plugin: for example, version 0.4 cannot read the XML of this version (XML version 9). Use the newer version. |
 | `the serialized force must have 6 faces` (from `XmlSerializer.deserialize()`) | The XML of the force was changed by hand or is damaged: its `Faces` element must hold one `Face` for each of the six faces. Serialize the force again. |
 | `unknown coupling scheme`, `unknown drag scheme` | `setCouplingScheme()` or `setDragScheme()` received a number that is not a scheme. Use `LBMForce.EulerMaruyama` or `LBMForce.NVE`, and `LBMForce.Explicit` or `LBMForce.Centered`. |
 | `with the Centered drag scheme LBMForce must be the last force of the System; add it after all the other forces` | The centred drag reads the other forces on the particles, which are complete only when `LBMForce` comes last. Call `system.addForce(force)` after adding every other force. |
 | `the Centered drag scheme does not support virtual sites` | OpenMM moves the forces of virtual sites to their particles after the forces are computed, so the centred drag would miss them. Use the explicit drag. |
+| `the interpolation stencil has more nodes than a work group of the platform` | Not expected with the CUDA, OpenCL and HIP platforms of OpenMM, whose work groups have 64 threads, as many as the nodes of the largest stencil (`Keys`). Use the Reference platform or a smaller stencil. |
 | `unknown interpolation stencil` | `setInterpolationStencil()` received a number that is not a stencil. Use `LBMForce.NearestNode`, `LBMForce.Trilinear`, `LBMForce.ThreePoint` or `LBMForce.Keys`. |
 | `the centred drag with the interpolation stencil did not converge in 1000 iterations of the conjugate gradients` | Not expected: the system is symmetric positive definite, and it converges in a few iterations. Report it with the System. |
 | `the checkpoint was written with a different interpolation stencil` | The stencil of the restarted run differs from that of the checkpoint (checkpoints of versions 0.1 to 0.4 have the nearest node). Use the same `setInterpolationStencil()` as in the first run. |
 | `the checkpoint was written with a different drag scheme` | The drag scheme of the restarted run differs from that of the checkpoint (a checkpoint of version 0.1.0 has the explicit drag). Use the same `setDragScheme()` as in the first run. |
-| `unknown wall scheme`, `unknown boundary type of a face`, `unknown face of the box` | `setWallScheme()`, `setFaceBoundary()` or a face method received a number that is not a scheme, a type or a face. Use `LBMForce.BounceBack` or `LBMForce.Regularized`; `LBMForce.Periodic`, `LBMForce.Velocity` or `LBMForce.Density`; `LBMForce.XMin` ... `LBMForce.ZMax`. |
+| `unknown wall scheme`, `unknown boundary type of a face`, `unknown face of the box` | `setWallScheme()`, `setFaceBoundary()` or a face method received a number that is not a scheme, a type or a face. Use `LBMForce.BounceBack` or `LBMForce.Regularized`; `LBMForce.Periodic`, `LBMForce.Velocity`, `LBMForce.Density` or `LBMForce.DensityVelocity`; `LBMForce.XMin` ... `LBMForce.ZMax`. |
 | `the two faces perpendicular to x must be both periodic or both open (Velocity, Density or DensityVelocity)` | An axis has one open face and one periodic face. Open both faces of the axis (`setFaceBoundary()` on `XMin` and `XMax`, for example), with any combination of `Velocity`, `Density` and `DensityVelocity`. See [open faces](api_reference.md#open-faces). |
 | `with open faces perpendicular to y the grid needs at least 3 nodes along y` | The nodes of the two faces are the first and the last node of the axis; there must be fluid between them. Use more nodes. |
 | `with open faces the fluid exchanges momentum with the outside, and its momentum cannot be removed: call setFluidMomentumRemovalFrequency(0)` | The default removes the momentum of the fluid at every step, which makes no sense with inlets and outlets. Call `force.setFluidMomentumRemovalFrequency(0)`. |
@@ -75,7 +76,7 @@ the plugin converts the parameters to lattice units.
 The warning `tau = ... > 1.7: with the explicit drag at the nearest node the hydrodynamic self-mobility of
 a coupled particle is small` is printed when particles are coupled with the explicit drag (the default)
 and the relaxation time is large: above $`\tau = 1.79`$ the hydrodynamic mobility of a particle is negative.
-With the centred drag it is not printed. Reduce the viscosity or the time
+With the centred drag, or with the three-point stencil, whose self-mobility stays positive, it is not printed. Reduce the viscosity or the time
 step, or use a coarser lattice; see [relaxation time](lattice.md#relaxation-time).
 
 The warning `friction*dt = ... > 1` is printed on stderr when the explicit drag overshoots: the velocity of a
@@ -93,6 +94,18 @@ cell (8/27, 1/8 and 0.540 for the trilinear, three-point and Keys stencils). Use
 The warning `the relaxation time tau = ... is outside the range [0.505, 2]` is printed on stderr and
 does not stop the simulation. See [relaxation time](lattice.md#relaxation-time) for how to bring $`\tau`$
 into the range.
+
+The warning `the fluctuations of the fluid, kT = ... in lattice units, are larger than those validated, kT = 1/3000`
+is printed when fluid fluctuations are switched on and $`k_BT`$ in lattice units, $`k_BT\,\Delta t^2/(m_c\,\Delta x^2)`$,
+is above 1/3000: the fluctuating fluid may become unstable. A larger lattice spacing or a smaller time step makes it
+smaller ([`setFluidFluctuations()`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)).
+
+The warning `with fluid fluctuations, regularized walls and DensityVelocity faces keep the fluid next to them exactly
+at equilibrium only for 0.586 <= tau <= 3.41` is printed when fluid fluctuations are switched on with regularized
+walls or `DensityVelocity` faces and $`\tau`$ is outside that range: the random part of the populations they rebuild
+cannot then be the exact one, and the fluid next to them is slightly away from equilibrium
+([theory](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), section 7). Bounce-back walls keep it at
+equilibrium for any $`\tau`$.
 
 ## Common pitfalls
 

@@ -68,8 +68,8 @@ accurate only when it is small: below 0.1; above 0.3 (the default limit) the plu
 together; each process is a rank, numbered from 0. `mpirun -n 4 python run.py` starts four ranks
 ([running on several GPUs](parallel.md)).
 
-**Open face.** A face of the box that is not periodic: the fluid beyond it has a velocity or a density that you
-choose, to build inlets, outlets and moving plates. Set with `setFaceBoundary()`
+**Open face.** A face of the box that is not periodic: the fluid beyond it has a velocity, a density, or both, that
+you choose, to build inlets, outlets and moving plates. Set with `setFaceBoundary()`
 ([API](api_reference.md#open-faces)).
 
 **Platform.** Where OpenMM computes: `Reference` (one processor core, slow, the reference for correctness),

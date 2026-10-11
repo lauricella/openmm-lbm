@@ -3,10 +3,11 @@
 Tests of openmm-lbm, what each one checks, its tolerance and the values measured. A value measured with an earlier
 version, which is then named, holds for the current one as long as the code that it tests has not changed: the tests
 of the suite check it at every change.
-- **C++ tests**, run with `ctest`: `TestSerializeLBMForce` (the XML of the force, written in version 8, and the
-  reading of versions 1 to 7); one executable per platform, `Test<Platform>LBMForce` in `platforms/*/tests`, which
+- **C++ tests**, run with `ctest`: `TestSerializeLBMForce` (the XML of the force, written in version 9, and the
+  reading of versions 3 to 8); one executable per platform, `Test<Platform>LBMForce` in `platforms/*/tests`, which
   runs the tests shared by all the platforms in `tests/*.h` in each precision; and, with the CMake option
-  `OPENMM_LBM_MPI`, `TestMPIReferenceLBMForce`, which `ctest` runs with two MPI ranks. The shared tests of
+  `OPENMM_LBM_MPI`, `TestMPIReferenceLBMForce`, which `ctest` runs with two MPI ranks. The HIP platform runs the
+  same tests, but it has only been compiled (continuous integration), not run on an AMD GPU. The shared tests of
   `tests/TestLBMForce.h` (`runPlatformTests()`) check the parameters and their accessors (`testParameters`), that the
   coupling force is zero before the first step and the energy always zero (`testZeroForce`), the initial fluid
   (`testInitialFluidFields`), reading, changing and writing back the state of the fluid (`testFluidStateRoundTrip`)
@@ -40,7 +41,7 @@ removal is off unless stated.
 | `testFluidMomentumRemoval` | 4x4x4 nodes, $`\tau = 1`$, initial uniform velocity, body force $`\mathbf F`$ per node, removal frequency 3 | total momentum $`((n-1) \bmod 3 + 1)\,\mathbf F`$ per node after $`n = 1,\dots,7`$ steps: removal on step indices 0, 3, 6, before the collision | 1e-13 |
 | `testShearWaveViscosity` | 2x64x2 nodes, $`u_x = 10^{-3}\sin(2\pi y/64)`$ in lattice units, $`\tau`$ = 0.6, 1, 1.5; amplitude at steps 200 and 1200 | decay rate $`\nu k^2`$ with $`\nu = (\tau - 1/2)/3`$ | 2e-3 (relative) |
 | `testMachNumberCheck` | 4x4x4 nodes, uniform flow at $`\mathrm{Ma} = 0.35`$, check every 10 steps | `getFluidMachNumber()` = 0.35; exception at step 10 with limit 0.3, none with the check off or with limit 0.5 | 1e-12 |
-| `testLatticeParameters` | 4x6x8 nodes, $`\tau = 0.9`$ | `getLatticeParametersInContext()` returns $`\Delta x`$, $`\Delta t`$ and $`\tau`$ | 1e-12 |
+| `testLatticeParameters` | 4x6x8 nodes, $`\tau = 0.9`$ | `getLatticeParametersInContext()` returns $`\Delta x`$, $`\Delta t`$ and $`\tau`$ | 1e-14 ($`\Delta x`$, $`\Delta t`$), 1e-12 ($`\tau`$) |
 | `testRelaxationTimeWarning` | $`\tau`$ = 0.503, 1, 2.2 | warning on stderr at Context creation only outside [0.505, 2] | exact |
 | `testSolidNodeChecks` | solid node index out of range, repeated, or all nodes solid | exception at Context creation | exact |
 | `testPoiseuille` | 2x12x2 nodes, solid plane $`j = 0`$, body force along x, $`\tau`$ = 0.7, 0.875, 1.2, $`4H^2/\nu`$ steps | steady profile equal to the exact solution of the scheme (`docs/theory.md`, solid nodes), zero density and velocity at the solid nodes | 1e-9 (relative to the maximum velocity) |
@@ -197,12 +198,13 @@ samples of the same system (seed 7) it gives 293.98 K, the same as the full-step
 forces between steps to be those of the next step, as for every force of OpenMM: with those of the step just done it
 read 359 K.
 
-## Interpolation stencils (`tests/TestLBMStencils.h`, Reference platform)
+## Interpolation stencils (`tests/TestLBMStencils.h`, all platforms)
 
-In development for version 0.5.0 (`docs/theory.md`, section 9). The tests run on every platform and precision, with
-the tolerances of the coupling tests in mixed and single precision, except `testStencilWeights` and
+`docs/theory.md`, section 9. The tests run on every platform and precision, with the tolerances of the coupling tests
+in mixed and single precision, except `testStencilWeights`, `testStencilOpenAxisWeights` and
 `testStencilCanonicalTemperature` (Reference platform); in single precision the conjugate gradients of the centred drag
-stop at 1e-5 instead of 1e-13. `test_coupling_agrees_with_reference` (Python, section GPU platforms against the Reference
+stop at 1e-5 instead of 1e-13, and `testCenteredStencilSolve` and the balance with the walls of
+`testStencilMomentumConservation` allow 2e-3 and 1e-5. `test_coupling_agrees_with_reference` (Python, section GPU platforms against the Reference
 platform: coupled particles) also runs the three stencils with both drags, without and with walls.
 - `testStencilWeights`: along an axis, at 1001 positions in a cell, the weights sum to one and have a zero first
   moment (1e-14); the second moment is 0 to 1/4 (trilinear), 1/4 to 1/3 (three-point) and 0 (Keys); the squares of the
@@ -441,8 +443,9 @@ measurements and those below, since version 0.5.0 `Density` faces are an error w
 (`docs/theory.md`, section 7).
 
 **The fluid alone next to walls and open faces** (no coupled particles; CUDA, mixed precision, one A100; regularized
-walls and `DensityVelocity` faces with the random part of their rebuilt populations before the change of version
-0.5.0: see Fluctuations next to walls and open faces, in the section on walls and open faces). $`16 \times 16
+walls and `DensityVelocity` faces with the random part of a collision in their rebuilt populations, as the walls had up
+to version 0.4.0; with the random part of version 0.5.0 see Fluctuations next to walls and open faces, in the section
+on walls and open faces). $`16 \times 16
 \times 24`$ nodes, the same fluid at 300 K, no removal of the momentum, periodic along $`x`$ and $`y`$, along $`z`$
 periodic, solid planes $`k = 0`$ and $`k = 23`$ (bounce-back or regularized walls), or open faces; $`2\cdot10^5`$
 steps after $`2\cdot10^4`$, `getFluidFields()` every 50 steps. The kinetic temperature of a plane per component,
@@ -470,7 +473,8 @@ are hotter (+5% to 8%, from their tangential velocities) than this excess of the
 faces the momentum of the fluid is not conserved, so that mean is a free motion of the whole plane. Its own
 temperature, the **collective temperature** $`\rho\Delta x^3 N\langle\bar u_a^2\rangle/k_B`$ ($`T`$ at equilibrium),
 same box and fluid, $`4\cdot10^5`$ steps, along / across the faces, in K, with `Velocity` at $`z_{\min}`$ and, at
-$`z_{\max}`$, `Velocity` (vv), `Density` (vd) or `DensityVelocity` at rest (vdv); plane 23 is the face at $`z_{\max}`$:
+$`z_{\max}`$, `Velocity` (vv), `Density` (vd) or `DensityVelocity` at rest (vdv, with the random part of a
+collision); plane 23 is the face at $`z_{\max}`$:
 
 | plane | periodic | vv | vd | vdv |
 |---|---|---|---|---|
@@ -481,8 +485,8 @@ $`z_{\max}`$, `Velocity` (vv), `Density` (vd) or `DensityVelocity` at rest (vdv)
 | 22 | 287 / 277 | 312 / 240 | 1092 ± 53 / 525 ± 29 | 312 / 219 |
 | 23 | 288 / 275 | 306 / 0 | 1440 ± 50 / 654 ± 27 | 306 / 159 |
 
-(errors 2 to 6 K where not given). With two `Density` faces the mean flow wanders (above), and its collective
-temperature grows without bound. In the periodic box the values are the canonical ones with the conserved
+(errors 2 to 6 K where not given). With two `Density` faces the mean flow wandered (above), and its collective
+temperature grew without bound. In the periodic box the values are the canonical ones with the conserved
 quantities of the lattice: $`T(1 - 1/n_z)`$ = 287.5 K along the planes (total momentum) and $`T(1 - 2/n_z)`$ = 275 K
 across them, since the bulk also conserves the staggered momentum $`\sum_z (-1)^{z+t} j_z`$ (theory, section 1). Next
 to a `Density` face the mean velocity of the planes is far from equilibrium, up to 4.8 $`T`$ along the face on its
@@ -494,7 +498,7 @@ along $`x`$ and $`y`$ a column of $`n_z`$ nodes, with the stationary covariance 
 it agrees with one step of the plugin to the nonlinear remainder in all the cases. For the mean of the planes (wave
 vector zero) it gives 1476, 1119 and 452 K along the `Density` face on planes 23, 22 and 12 (measured 1440 ± 50,
 1092 ± 53 and 443 ± 15 K) and 662, 535 and 444 K across it (654 ± 27, 525 ± 29, 433 ± 17 K); 0.534 $`T`$ across the
-`DensityVelocity` face (159 ± 3 K); the canonical values of the periodic box and of bounce-back walls exactly. Summed
+`DensityVelocity` face with the random part of a collision (159 ± 3 K); the canonical values of the periodic box and of bounce-back walls exactly. Summed
 over the 256 wave vectors of a plane of $`16 \times 16`$ nodes it gives the temperatures of a node, with the mean of
 the plane: 301.2 / 465.4 K on the plane of the `Density` face, 306.9 / 319.4 K on the next one, 295.4 / 283.8 K next
 to the `Velocity` face (measured 301.1 / 465.9, 307.2 / 318.9 and 295.1 / 284.0 K), and a variance of the density
@@ -506,9 +510,10 @@ the deterministic rebuilding of the `Density` face. The beads take up only part 
 319.0 K without the mean of the layer and 388 K in the mean of the layer (nearest node, $`4\cdot10^5`$ steps).
 
 With a `DensityVelocity` face at rest in place of the `Density` face the beads keep the set temperature at every
-height within 0.4% (nearest node, $`4\cdot10^5`$ steps: 299.9 ± 0.3 K at 15.25, 299.4 ± 0.4 K at 14.5), while the
-plane of that face is cooler (282 K along it, 187 K across it). With a fluctuating fluid keep coupled particles at
-least five nodes away from `Density` faces.
+height within 0.4% (nearest node, $`4\cdot10^5`$ steps: 299.9 ± 0.3 K at 15.25, 299.4 ± 0.4 K at 14.5); the plane of
+that face was cooler with the random part of a collision (282 K along it, 187 K across it), and has the set
+temperature with the random part of version 0.5.0 (Fluctuations next to walls and open faces). These measurements
+are why `Density` faces are refused with a fluctuating fluid.
 
 ## Fluctuating fluid (`tests/TestLBMFluctuations.h`, all platforms)
 
@@ -530,8 +535,9 @@ section 7); $`T`$ = 300 K, $`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 0.01 ps and the
 | Restart | with coupled particles at 300 K and seed 0, a run restarted from the checkpoints of OpenMM and of the force equals the uninterrupted run (fluid, velocities and force on the walls); also with a wall (regularized with the explicit and the centred drag, bounce-back with the centred drag), open faces along x (a `Velocity` inlet and a `DensityVelocity` outlet; a `Density` outlet before version 0.5.0) and a body force | bitwise |
 | NVE | with the NVE scheme, particles at rest are set in motion by a fluctuating fluid, and stay at rest without fluctuations | exact |
 | Parameters | `updateParametersInContext()` changes the temperature and refuses to switch the fluctuations; a checkpoint is refused by a Context with the fluctuations switched differently | exceptions |
-| `Density` faces (`testDensityFaceWithFluctuations`, version 0.5.0) | with fluid fluctuations a `Density` face is refused when the Context is created, on each axis, as `XMin`, `YMax` or `ZMin`, at 300 K and at zero temperature, next to a `Velocity` or a `DensityVelocity` face; the same lattices without fluctuations, or with a `DensityVelocity` face in its place, run | exceptions |
+| `Density` faces (`testDensityFaceWithFluctuations`, version 0.5.0) | with fluid fluctuations a `Density` face is refused when the Context is created, on each axis, as `XMin`, `YMax` or `ZMin`, at 300 K and at zero temperature, next to a `Velocity` or a `DensityVelocity` face; the same lattices without fluctuations, or with a `DensityVelocity` face in its place, run; in Python `test_density_face_with_fluctuations` | exceptions |
 | Warning | with fluid fluctuations a warning is printed only for the explicit drag with the EM scheme at $`T > 0`$, with the estimate $`\text{friction}\cdot\Delta t\,m/(2m_c)`$ of the heaviest coupled particle | exact |
+| Boundary warning (`testBoundaryNoiseWarning`, version 0.5.0) | with fluid fluctuations a warning is printed at $`\tau = 0.55`$ with regularized walls and with `DensityVelocity` faces, and not at $`\tau = 1`$, nor with bounce-back walls or `Velocity` faces, nor without fluctuations | exact |
 
 **Measured** (OpenMM 8.6.1 and 8.3.1; Reference, and CUDA and OpenCL on an NVIDIA A100 in the three precisions): all
 pass. OpenMM's buffer of random numbers is enlarged when the Context is created (`docs/theory.md`, section 7): enlarged
@@ -644,8 +650,8 @@ The same with $`k_BT`$ = 1.3e-5:
 
 ### Velocity spectra (CUDA, OpenCL and Reference)
 
-Release requirement: the spectrum of the velocity fluctuations, with the mean velocity of every sample subtracted even
-when it should be zero. The velocity and the density are read with `getFluidFields()` (the velocity a user sees,
+The spectrum of the velocity fluctuations, with the mean velocity of every sample subtracted even when it should be
+zero. The velocity and the density are read with `getFluidFields()` (the velocity a user sees,
 $`(\mathbf j + \mathbf F/2)/\rho`$), converted to lattice units, and the mean velocity of the sample is subtracted;
 then the normalized 3D FFT,
 $`\mathbf F(\mathbf k) = \sum_{\mathbf x}\mathbf u(\mathbf x)\exp(-i\mathbf k\cdot\mathbf x)/\sqrt N`$, shells of
@@ -856,8 +862,7 @@ with bounce-back walls). Beads near a `DensityVelocity` face at rest (Temperatur
 `Velocity` face at $`z_{\min}`$, $`4\cdot10^5`$ steps) are at 300 K at every height within 0.5%, with the nearest node and
 with Keys (300.05 ± 0.40 and 299.99 ± 0.36 K at $`z/\Delta x`$ = 15.25).
 
-**Velocity spectra next to the walls and the faces** (release requirement, script and protocol of the velocity spectra
-above; ER of the velocity of `getFluidFields()` minus the mean velocity of each sample, per plane and as a function of
+**Velocity spectra next to the walls and the faces** (script and protocol of the velocity spectra above; ER of the velocity of `getFluidFields()` minus the mean velocity of each sample, per plane and as a function of
 the wave number $`\lvert\mathbf k\rvert`$ along the plane, 2D FFT, $`k_BT = 1/3000`$, $`\tau = 0.8`$, 400 samples):
 - Bounce-back walls, 64 x 34 x 64 nodes on CUDA (mixed precision) and 16 x 18 x 16 on the Reference platform:
   every plane, the first fluid nodes included, within 1.003 ± 0.005 per node on CUDA ($`1 + 9k_BT`$, as in the bulk)
@@ -911,6 +916,7 @@ to 8 % at $`\tau = 0.6`$.
 |---|---|---|
 | `test_checkpoint_bytes` | `createCheckpoint()` returns bytes starting with the tag of the format, which `loadCheckpoint()` accepts; other data raise an exception | exact |
 | `test_restart_is_exact` | eight beads at 300 K; a `Simulation` restarted from the file of `LBMCheckpointReporter` at step 20 equals the uninterrupted run at step 35 (positions, fluid, force on the walls), also when a `StateDataReporter` at the same step has drawn the random numbers of the next step; with a bounce-back wall and the momentum removal, and with a fluctuating fluid, a regularized wall and open faces along x (a `Velocity` inlet and a `DensityVelocity` outlet; a `Density` outlet before version 0.5.0) | bitwise |
+| `test_checkpoint_file` | the same two runs, with the file of `saveCheckpointFile()` (the one that a run with any domain decomposition can load) written at step 20 and loaded with `loadCheckpointFile()` and with `openmmlbm.loadCheckpoint()`: the restarted run equals the uninterrupted one at step 35 | bitwise |
 | `test_save_and_load_functions` | `openmmlbm.saveCheckpoint()` and `loadCheckpoint()` restore time and force on the walls; a damaged file raises `ValueError` | exact |
 
 ## VTK output (`python/tests/TestVTKReporter.py`, Reference)
@@ -953,14 +959,16 @@ twice, with one domain and with the decomposition given on the command line, and
 nodes that the rank owns (`docs/theory.md`, section 8). Lattice $`8 \times 6 \times 6`$, $`\tau = 0.8`$, a body force,
 an initial velocity and populations perturbed by up to $`10^{-3}`$, 60 steps; cases: periodic; the solid plane $`j = 0`$
 and a block of 8 solid nodes with bounce-back walls, with regularized walls, and with regularized walls and open faces
-along x (a `Velocity` inlet and a `Density` outlet); periodic with the removal of the fluid momentum every third step.
+along x (a `Velocity` inlet and a `Density` outlet; `faces`); the same walls with `DensityVelocity` faces along x and z
+mixed with the other types, so that the edges take every rule (`dvfaces`, version 0.5.0); periodic with the removal of
+the fluid momentum every third step.
 Run with OpenMPI 4.1.6 on one node, plugin built with `-DOPENMM_LBM_MPI=ON`, OpenMM 8.6.1, decompositions
 $`2 \times 1 \times 1`$, $`1 \times 2 \times 1`$, $`1 \times 1 \times 2`$, $`2 \times 2 \times 1`$,
 $`4 \times 1 \times 1`$, $`1 \times 2 \times 2`$ and $`2 \times 2 \times 2`$:
 
 | Case | Fluid nodes of each rank | Force on the walls (relative) |
 |---|---|---|
-| periodic, bounce-back, regularized walls, open faces | identical bit for bit on every rank and decomposition (104 of 104) | at most $`3.3 \cdot 10^{-13}`$ |
+| periodic, bounce-back, regularized walls, open faces | identical bit for bit on every rank and decomposition | at most $`3.3 \cdot 10^{-13}`$ |
 | removal of the fluid momentum | at most $`1.1 \cdot 10^{-19}`$ | |
 
 The force on the walls and the removal differ by rounding because the ranks add their sums in another order. The
@@ -973,19 +981,20 @@ run every rank compares with one domain: the state of its domain (`getFluidState
 same block of the lattice; on rank 0 the state gathered from all the ranks (`gather=True`) with the whole lattice;
 the density and velocity of its domain with the halo (`getFluidFields()` with `halo=True` and the exchange of both
 fields on) with the fields of one domain extended periodically, NaN beyond the open faces; and on rank 0 the fields
-gathered from all the ranks. A sixth case, periodic, exchanges only the velocity, and the density of the halo must be
-NaN; a seventh exchanges only the density, and the velocity of the halo must be NaN. Over the decompositions
-$`2 \times 1 \times 1`$, $`1 \times 2 \times 1`$, $`1 \times 1 \times 2`$, $`2 \times 2 \times 1`$,
-$`1 \times 2 \times 2`$ and $`2 \times 2 \times 2`$ (22 ranks): identical bit for bit in the four cases without the
-removal of the fluid momentum and in the sixth (110 of 110); with the removal the state agrees to
-$`1.1 \cdot 10^{-19}`$ and the fields to $`3.1 \cdot 10^{-17}`$ (density relative to $`\rho_0`$, velocity in nm/ps).
-The seventh case is identical bit for bit on the Reference platform ($`2 \times 1 \times 1`$,
+gathered from all the ranks. The case `velocityhalo`, periodic, exchanges only the velocity, and the density of the
+halo must be NaN; `densityhalo` exchanges only the density, and the velocity of the halo must be NaN. Over the
+decompositions $`2 \times 1 \times 1`$, $`1 \times 2 \times 1`$, $`1 \times 1 \times 2`$, $`2 \times 2 \times 1`$,
+$`1 \times 2 \times 2`$ and $`2 \times 2 \times 2`$: identical bit for bit in the cases without the removal of the
+fluid momentum and in `velocityhalo`; with the removal the state agrees to $`1.1 \cdot 10^{-19}`$ and the fields to
+$`3.1 \cdot 10^{-17}`$ (density relative to $`\rho_0`$, velocity in nm/ps). The case `densityhalo` is identical bit
+for bit on the Reference platform ($`2 \times 1 \times 1`$,
 $`1 \times 2 \times 2`$), on OpenCL on the CPU and on CUDA and OpenCL with A100 GPUs (in double and single
 precision). With one domain `test_local_fields_halo_and_gather` checks the same rules (pytest, with and without open
 faces).
 
-**Interpolation stencils** (in development for version 0.5.0; `docs/theory.md`, section 9). The particle case with
-the walls, with the explicit and the centred drag and each of the three stencils (`Trilinear`, `ThreePoint`, `Keys`):
+**Interpolation stencils** (`docs/theory.md`, section 9). The particle case with the walls, with the explicit and the
+centred drag, and the same with regularized walls and open faces along x (`openfaces_*` with the explicit drag,
+`faces_*` with the centred one), each with the three stencils (`Trilinear`, `ThreePoint`, `Keys`):
 fluid and particles identical bit for bit to one domain on every rank, on the Reference platform with
 $`2 \times 1 \times 1`$, $`1 \times 2 \times 2`$, $`2 \times 2 \times 1`$ and $`2 \times 2 \times 2`$ domains, and on
 OpenCL on the CPU in double precision with $`2 \times 1 \times 1`$, $`2 \times 2 \times 1`$, $`1 \times 1 \times 4`$ and
@@ -1188,7 +1197,7 @@ earlier versions of UCX (`UCX_PROTO_ENABLE=n`) all four ports work. On $`512^3`$
 $`1 \times 4 \times 4`$ domains on four nodes, one port (`UCX_NET_DEVICES=mlx5_0:1`) took 5.62 to 5.69 ms, one port
 per rank, the one next to its GPU, 5.34 to 5.45 ms, two ports (`mlx5_0:1,mlx5_1:1`) 5.14 to 5.25 ms and the four
 ports with `UCX_PROTO_ENABLE=n` 5.09 ms; with $`1 \times 2 \times 4`$ on two nodes all of them took 9.3 to 9.6 ms.
-Earlier, two ports took 6.55 ms instead of 6.97 ms on four nodes and 3.96 ms instead of 4.25 ms on eight
+In another series of runs two ports took 6.55 ms instead of 6.97 ms on four nodes and 3.96 ms instead of 4.25 ms on eight
 ($`4 \times 2 \times 2`$ and $`4 \times 4 \times 2`$). The tables use one port. Sending from GPU to GPU between the
 nodes too (GPUDirect over one port) took 3.8 ms for $`256^3`$ on two nodes against 2.1 ms through the host: between
 nodes the default goes through the host.
@@ -1259,8 +1268,7 @@ buckets of equal width; the results are the same bit for bit (CUDA in the three 
 precision, nearest node and the three interpolation stencils, against the version before). On four GPUs the sum of
 the coupling forces over the ranks (`MPI_Allreduce` of $`3 N_p`$ numbers) took 0.26 to 0.29 ms of the step.
 
-With the interpolation stencils (in development for version 0.5.0) and the same 512 copies, milliseconds per step,
-explicit / centred drag:
+With the interpolation stencils and the same 512 copies, milliseconds per step, explicit / centred drag:
 
 | Stencil | 1 GPU, $`120^3`$ nodes | 4 GPUs, $`120^3`$ nodes | 4 GPUs, $`240^3`$ nodes |
 |---|---|---|---|
@@ -1268,33 +1276,34 @@ explicit / centred drag:
 | `ThreePoint` | 2.95 / 4.91 | 3.43 / 7.46 | 7.67 / 12.00 |
 | `Keys` | 5.49 / 10.56 | 6.86 / 14.76 | 13.69 / 21.34 |
 
-The beads are crowded (8 to 64 sort keys each, 3.6 million with `Keys`), so the coupling takes most of the step. The
-sums over the nodes of the stencils run one thread per node, from a list of the segments of the sorted keys made after
-each sort; before, one thread per key scanned the keys of its node when it was the first of them, and most threads of
-a warp were idle: with `Keys` and the centred drag on one GPU the spreading of the conjugate gradients took 14 of 28.6
-ms per step, then 2.7 of 12.9 (profile of the step). The threads of a work group now read the keys of the segments
-that start among 64 keys together, into local memory, before each adds those of its node in the same order: 2.6 to 2.2
-ms with `Keys`, 0.84 to 0.75 with the three-point stencil, the same with the trilinear one, and the same results bit for
-bit. The product of the conjugate gradients reads the values of the
-slots of a stencil scattered over the nodes: with the three-point kernel and Keys a work group reads those of a
-particle together and three threads add them in order (`Keys` 2.06 to 1.72 ms per step, three-point 0.82 to 0.57;
-the trilinear kernel keeps one thread per particle, which is faster with 8 slots), and the preparation of the system,
-`prepareCenteredStencil`, computes the slots of a particle the same way, one thread per slot (`Keys` 1.86 to 0.73 ms,
-three-point 0.80 to 0.40). On the CUDA platform this changes the rounding of the centred drag with these two
-stencils in some cases (by $`2\cdot10^{-18}`$ in one of the 64 arrays of the comparison in double precision), although
-the operations are the same; on OpenCL the results are the same bit for bit. With the domain decomposition the ranks sum once per force
-evaluation the densities of the nodes of the stencils, and every rank then solves the centred drag for all the
-particles; when instead the product of the conjugate gradients was summed over the ranks at every iteration, through
-the host, the centred drag on four GPUs took 9.63 ms per step with the trilinear stencil on $`120^3`$ nodes (11.6 ms
-under the profiler, of which the GPUs worked 2.7 and the 10 sums took 3.5), 10.41 with the three-point one and 18.09
-with Keys. The particles are replicated, so every rank sorts all the keys and solves for all the particles: with so
-many crowded beads four GPUs pay off only when the fluid takes most of the step. Tried and set aside: work groups of
-256 threads instead of 64 for the sums over the segments (no change), reading four keys at a time in the spreading
-(6% slower), and OpenMM's sort with buckets estimated from 64 samples, which skips its range pass of 1.9 ms with `Keys`
-but would leave 701 buckets above 256 keys (simulated with the keys of these beads; none with the buckets of equal
-width), and one sum over the ranks of the right-hand sides, the diagonal and the densities of the segments together
-instead of three (on four GPUs 4.95 instead of 4.40 ms with the trilinear stencil, 9.08 instead of 7.70 with the
-three-point one; not explained).
+The beads are crowded (8 to 64 sort keys each, 3.6 million with `Keys`), so the coupling takes most of the step: on
+one GPU with `Keys` and the centred drag (profile of a step of 10.5 ms) the spreading of the conjugate gradients takes
+2.2 ms, the range pass of OpenMM's sort 1.9 ms, the product of the conjugate gradients 1.7 ms and
+`prepareCenteredStencil` 0.7 ms. How the kernels work, and what other designs gave on this case:
+- The sums over the nodes of the stencils run one thread per node, from a list of the segments of the sorted keys made
+  after each sort; in the spreading of the conjugate gradients the threads of a work group first read the keys of the
+  segments that start among 64 keys together, into local memory, and each then adds those of its node in key order.
+  One thread per key, scanning the keys of its node when it was the first of them, left most threads of a warp idle:
+  the spreading took 14 of the 28.6 ms of the step. One thread per node reading its own keys took 2.6 ms (0.84 with
+  the three-point stencil; the same with the trilinear one), with the same results bit for bit.
+- The product of the conjugate gradients reads the values of the slots of a stencil scattered over the nodes: with the
+  three-point kernel and Keys a work group reads those of a particle together and three threads add them in order (one
+  thread per particle: 2.06 instead of 1.72 ms with `Keys`, 0.82 instead of 0.57 with the three-point stencil; the
+  trilinear kernel keeps one thread per particle, which is faster with 8 slots). `prepareCenteredStencil` computes the
+  slots of a particle the same way, one thread per slot (one thread per particle: 1.86 instead of 0.73 ms with `Keys`,
+  0.80 instead of 0.40 with the three-point stencil).
+- With the domain decomposition the ranks sum once per force evaluation the densities of the nodes of the stencils, and
+  every rank then solves the centred drag for all the particles. Summing the product of the conjugate gradients over
+  the ranks at every iteration, through the host, took 9.63 ms per step on four GPUs with the trilinear stencil on
+  $`120^3`$ nodes (11.6 ms under the profiler, of which the GPUs worked 2.7 and the 10 sums took 3.5), 10.41 with the
+  three-point one and 18.09 with Keys. The particles are replicated, so every rank sorts all the keys and solves for
+  all the particles: with so many crowded beads four GPUs pay off only when the fluid takes most of the step.
+- Tried and set aside: work groups of 256 threads instead of 64 for the sums over the segments (no change), reading
+  four keys at a time in the spreading (6% slower), OpenMM's sort with buckets estimated from 64 samples, which would
+  skip its range pass but would leave 701 buckets above 256 keys (simulated with the keys of these beads; none with the
+  buckets of equal width), and one sum over the ranks of the right-hand sides, the diagonal and the densities of the
+  segments together instead of three (on four GPUs 4.95 against 4.40 ms with the trilinear stencil and 9.08 against
+  7.70 with the three-point one, in the same series of runs; not explained).
 
 ### Fluctuating fluid and particles across the domains (CUDA, NVIDIA A100; Reference)
 
@@ -1406,10 +1415,10 @@ built in double precision.
 
 The Python test `test_fluid_agrees_with_reference` runs the same fluid on the Reference platform and on each available
 GPU platform: 6x5x4 nodes, $`\tau = 0.8`$, populations perturbed by up to 1e-3, a body force and the removal of the
-fluid momentum every third step, 40 steps, in four cases: without solid nodes; with the solid plane $`j = 0`$ and a
-block of 8 solid nodes, with bounce-back walls and with regularized walls; and with the same regularized walls and
+fluid momentum every third step, 40 steps, in five cases: without solid nodes; with the solid plane $`j = 0`$ and a
+block of 8 solid nodes, with bounce-back walls and with regularized walls; with the same regularized walls and
 open faces along x, a `Velocity` inlet at `XMin` and a `Density` outlet at `XMax`, without the removal of the fluid
-momentum. The largest difference of the fluid states, relative to the largest deviation $`\lvert f - w\rvert`$, must
+momentum; and with `DensityVelocity` faces (`dvfaces`, below). The largest difference of the fluid states, relative to the largest deviation $`\lvert f - w\rvert`$, must
 be below 1e-12 in `mixed` and `double` precision, and the forces on the walls must agree to 1e-10. Measured on an
 NVIDIA A100 with OpenMM 8.6.1, without solid nodes:
 
@@ -1428,8 +1437,8 @@ precision and 7e-8 in `single` precision, the forces on the walls by 3e-13 and 7
 and open faces along x (a `Velocity` inlet and a `Density` outlet, no removal) by 1e-17 and 7e-8, and 1e-14 and 3e-7
 relative (CUDA and OpenCL alike, OpenMM 8.6.1). With `DensityVelocity` faces (version 0.5.0; case `dvfaces`: the same
 walls, `DensityVelocity` at `XMin` and `ZMax`, `Velocity` at `XMax`, `Density` at `ZMin`, so that the edges take every
-rule; and, in a separate script, 6x7x5 nodes open along the three axes with every kind of face, corners included) the
-populations differ by 1e-18 to 2e-18 in `mixed` and `double` precision and 1e-9 in `single` precision (CUDA and
+rule; also checked once, with a script outside the test suite, on 6x7x5 nodes open along the three axes with every
+kind of face, corners included) the populations differ by 1e-18 to 2e-18 in `mixed` and `double` precision and 1e-9 in `single` precision (CUDA and
 OpenCL, NVIDIA A100, OpenMM 8.6.1).
 
 The two platforms are not identical bit for bit: the GPU compilers contract multiplications and additions

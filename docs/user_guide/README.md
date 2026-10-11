@@ -80,7 +80,7 @@ Know these before using the plugin for a study:
 | Solid nodes (`setSolidNodes()`) and the force of the fluid on the walls (`getWallForce()`) | yes | yes |
 | Regularized walls (`setWallScheme(LBMForce.Regularized)`) | yes | yes |
 | Open faces with an imposed velocity, density or both ([`setFaceBoundary()`](api_reference.md#open-faces); both in development for version 0.5.0) | yes | yes |
-| Particle-fluid coupling: friction and random force at the nearest node, reaction on the fluid, reflection at walls | yes | yes |
+| Particle-fluid coupling: friction and random force at the nearest node or with an interpolation stencil, reaction on the fluid, reflection at walls | yes | yes |
 | Interpolation stencils of the coupling ([`setInterpolationStencil()`](interpolation.md), in development for version 0.5.0) | yes | yes |
 | Centred drag (`setDragScheme(LBMForce.Centered)`) | yes | yes |
 | Thermal fluctuations of the fluid (`setFluidFluctuations(True)`) | yes | yes |

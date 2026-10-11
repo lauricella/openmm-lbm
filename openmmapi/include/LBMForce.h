@@ -322,8 +322,8 @@ public:
     /**
      * Set the interpolation stencil of the coupling: NearestNode (the default), Trilinear, ThreePoint or Keys
      * (docs/theory.md, section 9).  It is fixed when a Context is created: updateParametersInContext() cannot change
-     * it.  In development for version 0.5.0: the stencils other than NearestNode work on the Reference platform, with
-     * both drag schemes and the domain decomposition, and periodic faces.
+     * it.  Every stencil works on every platform, with both drag schemes, periodic and open faces, and the domain
+     * decomposition.
      */
     void setInterpolationStencil(InterpolationStencil stencil);
     /**

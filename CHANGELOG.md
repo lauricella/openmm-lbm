@@ -31,16 +31,16 @@ versions the API may still change.
   `setFaceDensity()` and the velocity of `setFaceVelocity()` (a reservoir), rebuilt as on a `Velocity` face with
   the density of the face instead of the mass balance; on edges and corners it counts as a `Velocity` face and also
   gives its density (`docs/theory.md`, section 1). On every platform, with one domain and with the domain
-  decomposition; the programs of the other faces are compiled from the same source as before.
+  decomposition.
 
 ### Changed
-- Fluctuating fluid: the rebuilt populations of regularized walls and `DensityVelocity` faces take the random part of a
-  node at equilibrium (density, momentum, stress and ghost modes), correlated with the random part of the collision of
-  their own node, instead of the random part of a collision; the fluid next to them is then exactly at equilibrium for
-  $`0.586 \le \tau \le 3.41`$ (`docs/theory.md`, section 7, derivation checked with an exact linear model of the
-  step). Before, the momentum along a regularized wall of the first fluid node was 4.6% cooler and the plane of a
-  `DensityVelocity` face 38% cooler across it. Runs without fluctuations, and fluctuating runs without these
-  boundaries, are unchanged bit for bit. A warning outside that range of $`\tau`$.
+- Fluctuating fluid: the rebuilt populations of regularized walls take the random part of a node at equilibrium
+  (density, momentum, stress and ghost modes), correlated with the random part of the collision of their own node,
+  instead of the random part of a collision, and so do those of the new `DensityVelocity` faces; the fluid next to
+  them is then exactly at equilibrium for $`0.586 \le \tau \le 3.41`$ (`docs/theory.md`, section 7, derivation
+  checked with an exact linear model of the step). Before, the momentum along a regularized wall of the first fluid
+  node was 4.6% cooler. Runs without fluctuations, and fluctuating runs without these boundaries, are unchanged bit
+  for bit. A warning outside that range of $`\tau`$.
 - Fluctuating fluid: `Density` faces are an error with fluid fluctuations (`setFluidFluctuations(True)`, at any
   temperature) when the Context is created. A `Density` face copies the velocity of its node, fluctuations included,
   into the populations it rebuilds, and an exact linear model of the step shows that then no random part keeps the
@@ -58,9 +58,8 @@ versions the API may still change.
   are now sorted by a permutation of their node, which spreads them over their range, with buckets of equal width
   (1.3 ms per step); the results are the same bit for bit (`docs/theory.md`, section 2, and `docs/validation.md`,
   Performance of the domain decomposition).
-- Tests: the coupling tests at 300 K ran with a random seed chosen by the platform, so `testMomentumConservation` and
-  `testStencilMomentumConservation`, which check that a particle has crossed the periodic boundary after 50 steps,
-  failed about once in 10^4 runs: the crossing is 4.1 standard deviations of the random displacement away with the
+- Tests: the coupling tests at 300 K ran with a random seed chosen by the platform, so `testMomentumConservation`,
+  which checks that a particle has crossed the periodic boundary after 50 steps, failed about once in 10^4 runs: the crossing is 4.1 standard deviations of the random displacement away with the
   explicit drag (measured with 2*10^4 to 4*10^4 repetitions of the test on each of the Reference, CUDA and OpenCL
   platforms, with the same distribution on all of them).  The Systems of the coupling tests now have a fixed seed.
 

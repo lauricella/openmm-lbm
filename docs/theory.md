@@ -1,12 +1,11 @@
 # Model, units and conventions
 
 This document describes the physics implemented by `LBMForce`, the conversion between OpenMM and
-lattice units, and the conventions every platform must follow. Each section says whether it is
-already implemented or still to be implemented. The fluid and the explicit drag reproduce the CUDA
+lattice units, and the conventions every platform must follow. Every section is implemented on all
+platforms. The fluid and the explicit drag reproduce the CUDA
 lattice Boltzmann library of the DragOpenMM project; the centred drag (section 2), the regularized walls and
-the open faces (section 1) and the fluctuating fluid (section 7) are
-extensions of this plugin. Section 9 describes the interpolation stencils of the coupling, in development for
-version 0.5.0.
+the open faces (section 1), the fluctuating fluid (section 7) and the interpolation stencils of the coupling
+(section 9) are extensions of this plugin.
 
 ## 1. Fluid model (implemented on all platforms)
 
@@ -150,7 +149,8 @@ rest placed on the solid node.
 
   with $`\Pi^{\mathrm{neq}}(\mathbf x)`$ the non-equilibrium stress of $`\mathbf x`$ in this step, $`S_q`$ the Guo
   term of the body force and, with a fluctuating fluid, $`\xi_q`$ the random part of a node with the density of
-  $`\mathbf x`$, drawn for $`\mathbf x`$ on its own before the mass balance below (section 7). The known populations
+  $`\mathbf x`$, drawn for $`\mathbf x`$ before the mass balance below, and with a fluctuating fluid correlated with the
+  random part of the collision of $`\mathbf x`$ (section 7). The known populations
   of $`\mathbf x`$, and its collision, are those of any fluid node.
 - This is the thread-safe boundary condition of Lauricella et al. [24] (appendix, eqs. A4 and A5; introduced in
   [25]): the non-equilibrium extrapolation of Guo, Zheng and Shi [26] written for the post-collision populations,
@@ -246,7 +246,8 @@ densities.
   f_q^{\mathrm{neq,reg}}\bigl(\Pi^{\mathrm{neq}}(\mathbf x)\bigr) + \tfrac12 S_q(\mathbf u_b, \rho_b\mathbf g) +
   \xi_q,`$
 
-  with, for a fluctuating fluid, a random part drawn for the node on its own. The known populations, and the
+  with, for a fluctuating fluid, a random part drawn for the node (on `DensityVelocity` faces correlated with the
+  random part of the collision of the node, section 7). The known populations, and the
   collision of the face node, are those of any fluid node.
 - The imposed velocity or density holds on the nodes beyond the face, one node outside the box (as the wall of the
   regularized walls lies on the solid nodes): a Couette flow between a face at rest and a face moving with $`U`$ is
@@ -502,7 +503,8 @@ $`\tau`$ and changes sign. Measured on the Reference platform ($`L`$ = 8 nm, $`\
 (The scan with both drags below gives 0.0443 at $`\tau = 1.1`$, a separate run with the same analysis.) $`y`$
 vanishes at $`\tau = 1.79`$ (1.79 also for $`m`$ = 100 Da, $`\gamma`$ = 10/ps), the value found with the reference
 library. Above it, particles move less than Langevin particles with the same friction. A warning is printed when a
-Context with coupled particles and the explicit drag has $`\tau > 1.7`$.
+Context with coupled particles and the explicit drag has $`\tau > 1.7`$, except with the three-point stencil
+(section 9), whose self-mobility stays positive.
 
 With the centred drag (Drag schemes, below) the drag sees the fluid velocity with half of the reaction of the
 particle in the same step, $`h\mathbf S/m_c`$, so $`y`$ grows by $`\Delta t/(2m_c)`$, that is by $`(\tau - 1/2)/6`$
@@ -893,7 +895,8 @@ range. The plugin checks both.
 **At Context creation.**
 - $`\tau > 1/2`$ holds by construction, since a viscosity that is not positive is an error.
 - A warning is printed on stderr if $`\tau`$ is outside [0.505, 2], the range used by the reference implementation.
-- With coupled particles and the explicit drag, warnings for $`\tau > 1.7`$ and $`\gamma\Delta t > 1`$ (section 2),
+- With coupled particles and the explicit drag, warnings for $`\tau > 1.7`$ (not with the three-point stencil) and
+  $`\gamma\Delta t > 1`$ (section 2),
   and, with fluid fluctuations and the EM scheme at $`T > 0`$, a warning that the particles will be too hot, with
   the estimate $`\gamma\Delta t\, m/(2m_c)`$ for the heaviest one (section 7), times the self weight of the
   interpolation stencil averaged over a cell (section 9); with the centred drag, an error if
@@ -1032,14 +1035,16 @@ random numbers of the Context, as they do for the particles: in every step, afte
 float4 per node (`IntegrationUtilities::prepareRandomNumbers(4*numNodes)` without boundary nodes, 16 normal numbers
 of which 15 are used, in single precision whatever the precision of the platform), with the coefficients
 $`w_q\, e_k(\mathbf c_q)/\sqrt{b_k}`$ in an array of the kernel; OpenMM's checkpoints contain the state of that
-generator. The buffer of the random numbers grows to 64 bytes per node (and per boundary node, below), already when
+generator. The buffer of the random numbers grows to 64 bytes per node (and 64 or 80 per boundary node, below), already when
 the Context is created: OpenMM's checkpoints write the buffer as it is but read it back with the size it has in the
 Context that loads them, so a Context created for a restart must have the full size before the first step (with
 OpenMM 8.3.1, a buffer grown only in the first step made the restart differ from the uninterrupted run; with 8.6.1
-it did not). The boundary nodes of regularized walls and open faces (section 1) draw fifteen normal numbers more
-each for the random part of their rebuilt populations: on the Reference platform after those of the collision, in
-the order of the boundary nodes; on the other platforms four float4 per boundary node after those of all the nodes,
-in the same buffer (`prepareRandomNumbers(4*(numNodes + numBoundaryNodes))`). At zero temperature no numbers are
+it did not). The boundary nodes of regularized walls and open faces (section 1) draw normal numbers more for the
+random part of their rebuilt populations: on the Reference platform after those of the collision, in the order of the
+boundary nodes, fifteen each, and nineteen for the nodes of regularized walls and `DensityVelocity` faces (below,
+Walls and faces with a fluctuating fluid); on the other platforms four float4 per boundary node, or five when the
+lattice has such nodes, after those of all the nodes, in the same buffer
+(`prepareRandomNumbers(4*numNodes + stride*numBoundaryNodes)`, stride 4 or 5). At zero temperature no numbers are
 drawn and nothing is added. Cost on an NVIDIA A100 (CUDA, mixed precision, fluid with one coupled particle): 60, 169
 and 1116 us per step without fluctuations and 77, 240 and 1590 us with them on lattices of $`32^3`$, $`64^3`$ and
 $`128^3`$ nodes, that is 28% to 43% more; most of it is the generation, writing and reading of the random numbers in
@@ -1179,10 +1184,10 @@ $`\eta`$ along $`w_U`$, and the condition still holds. $`\zeta`$ is real for $`c
 $`0.586 \le \tau \le 3.41`$; outside it the stress amplitude is set to zero, the fluid next to these boundaries is
 slightly away from equilibrium, and the force prints a warning. At $`\tau = 1`$, $`c = 0`$: independent random numbers
 of variance $`\mu\rho w_q`$ for each rebuilt population. The deterministic boundary conditions are unchanged, and so
-is every run without fluctuations. Up to version 0.4.0 (and in the first developments of 0.5.0) the rebuilt
-populations took the random part of a collision, $`[n]_U`$, without the density and momentum parts and without the
-correlation: the tangential velocity of the first fluid node next to a regularized wall was 4.6% cooler, and the
-plane of a `DensityVelocity` face 38% cooler across it.
+is every run without fluctuations. Up to version 0.4.0 the rebuilt populations took the random part of a collision,
+$`[n]_U`$, without the density and momentum parts and without the correlation: the tangential velocity of the first
+fluid node next to a regularized wall was 4.6% cooler (with that random part, the plane of a `DensityVelocity` face
+would be 38% cooler across it).
 
 The derivation was checked with an exact linear model of the step of the Reference platform (linearized about rest,
 one column of nodes for each wave vector along the boundary, stationary covariance from the discrete Lyapunov
@@ -1242,7 +1247,7 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
 - The arrays cover the whole lattice on every rank, and each rank advances only the nodes it owns: moments,
   collision and streaming, bounce-back, rebuilt boundary nodes. The Reference platform is the platform of
   correctness, so it keeps the global indices, the periodic wrap and the arithmetic of one domain; the GPU
-  platforms keep only their block and a layer of halo nodes (below).
+  platforms keep only their block and one or two layers of halo nodes (below).
 - Each rank sends to rank $`r`$ the populations it pushed into fluid nodes of $`r`$ and receives those that the
   other ranks pushed into its nodes, which is all the communication of a step. Both sides list the slots in the
   order of (node, $`q`$), built once when the Context is created. The communication overlaps the computation: the
@@ -1273,9 +1278,9 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
   statistical errors (`docs/validation.md`, Fluctuating fluid and particles across the domains).
 
 **CUDA, OpenCL and HIP platforms** (everything that the Reference platform decomposes).
-- Each rank stores only its block, plus one layer of halo nodes on each side along the divided axes: for a block of
-  $`n_x \times n_y \times n_z`$ nodes divided along the three axes the arrays hold $`(n_x + 2)(n_y + 2)(n_z + 2)`$
-  nodes, in the layout of one domain (`platforms/common/src/kernels/lbmFluid.cc`). Along an axis that is not divided
+- Each rank stores only its block, plus one layer of halo nodes on each side along the divided axes (two with the
+  `Keys` stencil, section 9): for a block of $`n_x \times n_y \times n_z`$ nodes divided along the three axes the
+  arrays hold $`(n_x + 2)(n_y + 2)(n_z + 2)`$ nodes, in the layout of one domain (`platforms/common/src/kernels/lbmFluid.cc`). Along an axis that is not divided
   the block is the whole axis and the streaming wraps around within it, as with one domain. The memory of the fluid
   is divided among the ranks, and each node is computed with the arithmetic of one domain.
 - The streaming pushes the populations that leave the block into the halo. After the collision of the frame of the
@@ -1427,10 +1432,10 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
   arrays of the density, the velocity and the solid nodes from every rank, so they are the same files, byte for byte, as
   with one domain.
 
-## 9. Interpolation stencils (in development for version 0.5.0)
+## 9. Interpolation stencils (implemented on all platforms)
 
-Version 0.5.0 will couple a particle to several nodes around it, as in Ahlrichs and Dünweg [5] and in the immersed
-boundary method [30]. This section gives the model and its derivation. Both drags with the three kernels are
+Since version 0.5.0 a particle can be coupled to several nodes around it, as in Ahlrichs and Dünweg [5] and in the
+immersed boundary method [30]. This section gives the model and its derivation. Both drags with the three kernels are
 implemented on every platform (Reference, CUDA, OpenCL, HIP), with one domain and with the domain decomposition, with
 periodic and open faces (`setInterpolationStencil()`). The coupling
 of sections 2 and 8 uses the nearest node, which remains the default. The properties stated below were checked
@@ -1616,9 +1621,9 @@ the last node near an open face or any node of a periodic axis shorter than the 
 weights in its first slot, and the other slots weight zero (`LBMStencils::axisWeights()`). The weights still sum to
 one and interpolation and spreading still use the same weights, so momentum is conserved and the
 fluctuation-dissipation argument below holds, with the weights of the distinct nodes; in particular the self weight
-$`\sum_j \xi_j^2`$ in the diagonal of the centred drag is that of the distinct nodes (without the merging, the
-diagonal of a repeated node missed the cross terms of its slots, which changed the preconditioner of the conjugate
-gradients but not the solution). What is lost near a face is the first moment: a linear field is no longer interpolated
+$`\sum_j \xi_j^2`$ in the diagonal of the centred drag is that of the distinct nodes (summed slot by slot, the
+diagonal of a repeated node would miss the cross terms of its slots, which would change the preconditioner of the
+conjugate gradients but not the solution). What is lost near a face is the first moment: a linear field is no longer interpolated
 exactly by a stencil that reaches beyond the face, and the spread reaction has a torque about the particle. With the
 trilinear kernel a particle at $`X/\Delta x = n - 1 + f`$ sees node $`n - 1`$ alone, an error of $`f`$ times the
 change of the velocity over one cell: in the Couette flow $`u_i = U(i + 1)/(n + 1)`$ between a face at rest and a

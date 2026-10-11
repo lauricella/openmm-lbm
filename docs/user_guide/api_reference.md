@@ -306,7 +306,7 @@ It is the momentum given to the walls, divided by the time step, by:
 
 It is zero before the first step and without solid nodes. With it, the total momentum of particles, fluid and walls
 is conserved. In a steady flow driven by a body acceleration $`\mathbf g`$ it equals $`\mathbf g`$ times the mass of
-the fluid. It is the total over all solid nodes: the force on each wall separately is not available yet. It does not
+the fluid. It is the total over all solid nodes: the force on each wall separately is not available. It does not
 advance the fluid.
 
 ```python
@@ -431,8 +431,9 @@ density of the fluid at rest. It can be changed in a Context with `updateParamet
 ## Coupled particles
 
 Each coupled particle feels a friction force $`-\gamma m(\mathbf v - \mathbf u)`$ relative to the fluid velocity
-$`\mathbf u`$ at the nearest lattice node, plus a random force at the given temperature, and the fluid at that node
-receives the opposite force (Euler-Maruyama random force, with the explicit or the centred drag of
+$`\mathbf u`$ at the nearest lattice node (or interpolated from the nodes around it, with an
+[interpolation stencil](#setinterpolationstencilstencil-getinterpolationstencil)), plus a random force at the given
+temperature, and the fluid at that node (or at those nodes, with the same weights) receives the opposite force (Euler-Maruyama random force, with the explicit or the centred drag of
 [`setDragScheme()`](#setdragschemescheme-getdragscheme);
 [theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)), on every platform.
 
@@ -527,7 +528,7 @@ the particles whose stencils share nodes are solved together by conjugate gradie
 created and saved with the force by `XmlSerializer`; a checkpoint can only be loaded in a Context with the same
 stencil. With the centred drag and fluid fluctuations the coupled particles have the set temperature with every
 stencil; with the explicit drag they are too hot, as with the nearest node, but less, by about the self weight of the
-stencil averaged over a cell (8/27, 1/8 and 0.540; [validation.md](../validation.md#interpolation-stencils-teststestlbmstencilsh-reference-platform)).
+stencil averaged over a cell (8/27, 1/8 and 0.540; [validation.md](../validation.md#interpolation-stencils-teststestlbmstencilsh-all-platforms)).
 
 ```python
 force.setInterpolationStencil(LBMForce.ThreePoint)
@@ -601,7 +602,7 @@ equilibrium fluctuations (ghost-mode filtered fluctuating lattice Boltzmann,
 schemes: with `NVE` the particles have no random force and are thermalized by the fluid only. The random numbers of
 the fluid come from the seed of [`setRandomNumberSeed()`](#setrandomnumberseedseed-getrandomnumberseed). It is
 fixed when the Context is created. On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's
-generator, which needs 64 bytes per lattice node and per boundary node (regularized walls and open faces); a step
+generator, which needs 64 bytes per lattice node and 64 or 80 per boundary node (regularized walls and open faces); a step
 costs about 30% to 40% more on an NVIDIA A100. The fluctuating lattice Boltzmann method holds only small fluctuations:
 when the Context is created the force prints $`k_BT`$ in lattice units, $`k_BT\,\Delta t^2/(m_c\,\Delta x^2)`$, and
 the thermal Mach number $`\sqrt{3k_BT}`$, and warns if $`k_BT`$ exceeds 1/3000, the largest value validated; it goes
@@ -874,8 +875,8 @@ It updates:
 - the check of the copies of the particles (`setParticleCopiesCheck()`).
 
 The grid size, the fluid density and viscosity, the solid nodes, the wall scheme, the types of the faces, the set of
-coupled particles, the drag scheme, the fluid fluctuations, the domain decomposition and the exchange of the halo
-cannot be changed this way: the method raises an error if they differ from those of the Context. The
+coupled particles, the drag scheme, the interpolation stencil, the fluid fluctuations, the domain decomposition and
+the exchange of the halo cannot be changed this way: the method raises an error if they differ from those of the Context. The
 initial velocity and the random seed are used only when the Context is created. To change any of
 these, create a new Context, and transfer the fluid with `getFluidState()` and `setFluidState()` if
 the grid is the same. `Context.reinitialize()` also restarts the fluid from its initial state.
@@ -924,7 +925,9 @@ Invalid settings raise a Python `Exception` with the messages listed in
 [troubleshooting](troubleshooting.md#error-messages), most of them when the Context is created (for example open
 faces with the removal of the fluid momentum, or a single open face on an axis). Some conditions only print a
 warning on stderr: a relaxation time outside [0.505, 2]; with coupled particles and the explicit drag,
-$`\tau > 1.7`$, $`\gamma\Delta t > 1`$, and fluid fluctuations (the particles are then too hot); and fluctuations
-of the fluid larger than those validated, $`k_BT`$ above 1/3000 in lattice units
-([`setFluidFluctuations()`](#setfluidfluctuationsfluctuations-getfluidfluctuations)). With the domain decomposition
+$`\tau > 1.7`$ (not with the three-point stencil), $`\gamma\Delta t > 1`$, and fluid fluctuations (the particles are
+then too hot); fluctuations of the fluid larger than those validated, $`k_BT`$ above 1/3000 in lattice units
+([`setFluidFluctuations()`](#setfluidfluctuationsfluctuations-getfluidfluctuations)); and, with fluid fluctuations,
+regularized walls or `DensityVelocity` faces with $`\tau`$ outside $`[0.586, 3.41]`$, where the fluid next to them is
+slightly away from equilibrium ([open faces](#open-faces)). With the domain decomposition
 only rank 0 prints them.

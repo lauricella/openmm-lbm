@@ -8,10 +8,10 @@
 /**
  * Tests of the interpolation stencils of the coupling (docs/theory.md, section 9): the weights of the kernels, a
  * linear velocity field interpolated exactly, the nearest node recovered at a node, the conservation of momentum with
- * overlapping stencils and walls, the invariance under a translation by one node, and the errors of what is not
- * available yet.  The tests with a Context run on every platform, except the statistical test of the temperature
- * (Reference platform; the domain decomposition with a stencil is in development on the GPU platforms).  Include
- * after TestLBMCoupling.h and call runStencilTests().
+ * overlapping stencils and walls, open faces, the invariance under a translation by one node, and the errors.  The
+ * tests with a Context run on every platform, except the statistical test of the temperature (Reference platform; the
+ * domain decomposition with a stencil is tested by python/tests/mpi_decomposition.py).  Include after
+ * TestLBMCoupling.h and call runStencilTests().
  */
 
 #include "internal/LBMStencils.h"
