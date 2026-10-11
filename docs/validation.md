@@ -438,7 +438,9 @@ the last node and the end of the box (the low value at 2.5 is in every column: t
 `Density` face the beads are hotter, from 4 nodes away (+1% at 12, +2% at 13.5, +3% to 5% at 14.5, +5% to 8% at 15.25),
 **with the nearest node as well**: the cause is next to the `Density` face, not in the stencils.
 
-**The fluid alone next to walls and open faces** (no coupled particles; CUDA, mixed precision, one A100). $`16 \times 16
+**The fluid alone next to walls and open faces** (no coupled particles; CUDA, mixed precision, one A100; regularized
+walls and `DensityVelocity` faces with the random part of their rebuilt populations before the change of version
+0.5.0: see Fluctuations next to walls and open faces, in the section on walls and open faces). $`16 \times 16
 \times 24`$ nodes, the same fluid at 300 K, no removal of the momentum, periodic along $`x`$ and $`y`$, along $`z`$
 periodic, solid planes $`k = 0`$ and $`k = 23`$ (bounce-back or regularized walls), or open faces; $`2\cdot10^5`$
 steps after $`2\cdot10^4`$, `getFluidFields()` every 50 steps. The kinetic temperature of a plane per component,
@@ -840,6 +842,16 @@ Every other plane agrees with the model as well, within about 3 standard errors 
 values 0.992 are those of equilibrium with the mass and the staggered momentum $`\sum_z (-1)^{z} j_z`$ conserved by the
 lattice (1 - 1/8 for the mean of each of the 8 planes, over 16 wave vectors). A `Velocity` face keeps the earlier
 random part and the exact model gives its earlier values.
+
+On an NVIDIA A100 (CUDA, mixed precision; `CUDA` and `OpenCL` in every precision give the same statistics, since they
+draw the same random numbers), $`16 \times 16 \times 24`$ nodes, $`\tau = 0.62`$, $`4\cdot10^5`$ steps, the temperature of
+the first fluid plane along / across the boundary is 299.7 / 300.1 K next to regularized walls (bounce-back walls:
+299.8 / 300.1 K; the earlier random part: 286 / 300 K) and 300.1 / 300.5 K on the plane of a `DensityVelocity` face
+(earlier: 282 / 187 K); with two walls or two `DensityVelocity` faces every other plane is within 1 K of 300 K, and the
+collective temperatures of the planes are those of equilibrium (along the walls 300 K, across them 300 (1 - 1/22) K with the mass and the staggered momentum conserved, as
+with bounce-back walls). Beads near a `DensityVelocity` face at rest (Temperature near open faces, layers of 16 beads,
+`Velocity` face at $`z_{\min}`$, $`4\cdot10^5`$ steps) are at 300 K at every height within 0.5%, with the nearest node and
+with Keys (300.05 ± 0.40 and 299.99 ± 0.36 K at $`z/\Delta x`$ = 15.25).
 
 **Velocity spectra next to the walls and the faces** (release requirement, script and protocol of the velocity spectra
 above; ER of the velocity of `getFluidFields()` minus the mean velocity of each sample, per plane and as a function of

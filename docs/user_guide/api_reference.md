@@ -275,7 +275,7 @@ give no-slip walls, accurate to second order in the lattice spacing, and conserv
 | where the wall is | halfway between the solid node and the first fluid node | on the solid nodes |
 | channel between the solid planes $`j = 0`$ and $`j = n_y - 1`$ | walls at $`y = \Delta x/2`$ and $`(n_y - 3/2)\Delta x`$ | walls at $`y = 0`$ and $`(n_y - 1)\Delta x`$ |
 | exact Poiseuille flow at | $`\tau = 7/8`$ | $`\tau = 1`$ |
-| with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | equilibrium from the second node on; on the first node the momentum along the wall is 3 to 4 % low |
+| with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | exact thermal equilibrium next to the wall for $`0.586 \le \tau \le 3.41`$ (version 0.5.0; before, the momentum along the wall of the first node was 3 to 5 % low) |
 | platforms | all | all |
 
 If you do not know which one to use, keep the default. The `Regularized` scheme is the thread-safe boundary
@@ -396,7 +396,8 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
   the set temperature; near a `Density` face they are up to 8% hotter within four nodes ([validation](../validation.md),
   Interpolation stencils, Temperature near open faces): the mean velocity of the planes next to a `Density` face is far
   above equilibrium. Keep coupled particles at least five nodes away from `Density` faces. Near a `DensityVelocity`
-  face at rest the particles keep the set temperature, and the plane of the face is cooler.
+  face at rest the particles keep the set temperature, and the fluid next to it is at equilibrium (version 0.5.0,
+  for $`0.586 \le \tau \le 3.41`$).
 - **Mass** is not conserved with open faces (fluid enters and leaves), and `getWallForce()` counts only the
   solid walls, not the open faces.
 - **Keep the flow slow and the density differences small**: a few percent at most, so that the fluid stays
