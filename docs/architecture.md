@@ -71,8 +71,10 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    ($`\mathbf v\cdot\mathbf n > 0`$). Every platform does all of this. With the domain decomposition `beginStep()` also
    compares the copies of the particles over the ranks when due (the first lattice step, then with the period of the
    Mach number check), the lattice step collides the frame of the block, starts the exchange of its populations,
-   collides the interior and then waits for the exchange, and the coupling forces are summed over the ranks after the
-   coupling (download, `MPI_Allreduce`, upload). The kernel's `initialize()` lists the boundary
+   collides the interior and then waits for the exchange. The coupling forces are downloaded after the coupling and
+   summed over the ranks (`MPI_Allreduce`) and uploaded: with the nearest node in a lattice step once the collision of
+   the interior is queued, so that the device collides while they travel (`startParticleForceSum()`,
+   `finishParticleForceSum()`), otherwise right away. The kernel's `initialize()` lists the boundary
    nodes once with `LBMBoundaries` (`internal/LBMBoundaries.h`, the same code on every platform): the fluid nodes next
    to solid nodes with regularized walls, and the nodes of the open faces, with the bits of their unknown directions
    and what each one imposes. `ReferenceCalcLBMForceKernel::applyBoundaries()`, and the kernel `applyBoundaries` on

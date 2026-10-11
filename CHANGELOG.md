@@ -3,6 +3,15 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Changed
+- Domain decomposition with coupled particles at the nearest node: in a lattice step the sum of the coupling forces
+  over the ranks runs on the host while the GPU collides the interior of the block, instead of right after the
+  coupling with the GPU waiting. The results are the same bit for bit. With $`10^5`$ particles on four NVIDIA A100
+  GPUs, $`256^3`$ nodes: 3.5 to 3.6 ms per step before, 3.0 to 3.1 after (`docs/validation.md`, Performance of the
+  domain decomposition).
+
 ## 0.5.0 (2026-10-11)
 
 Interpolation stencils of the particle-fluid coupling (trilinear, three-point and Keys) on every platform, with one

@@ -21,7 +21,7 @@ A100 GPUs in mixed precision ([validation](../validation.md#performance-of-the-d
 |---|---|---|
 | $`256^3`$ nodes, fluid only, from 1 GPU to the 4 GPUs of one node | 7.42 → 1.84 ms | 4.0 times faster |
 | the same with $`10^4`$ coupled particles | 8.08 → 2.21 ms | 3.7 times faster |
-| the same with $`10^5`$ coupled particles | 8.49 → 3.37 ms | 2.5 times faster |
+| the same with $`10^5`$ coupled particles | 8.49 → 3.0 ms | 2.8 times faster (2.5 up to version 0.5.0) |
 | $`128^3`$ nodes per GPU, from 1 GPU to 4 GPUs of one node (a lattice 4 times larger) | 0.87 → 0.91 ms | 96% efficiency |
 | $`512^3`$ nodes, from 1 node to 8 nodes (4 to 32 GPUs) | 15.5 → 4.04 ms | 3.8 times faster |
 | $`128^3`$ nodes per GPU, from 1 node to 8 nodes (a lattice 8 times larger) | 0.90 → 2.38 ms | 38% efficiency |

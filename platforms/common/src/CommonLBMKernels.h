@@ -108,6 +108,11 @@ private:
     /** With the domain decomposition: sum the coupling forces over the ranks, and check that the copies of the
         particles are the same on every rank (collective). */
     void sumParticleForces();
+    /** The same sum in two parts, in a lattice step with the nearest node: startParticleForceSum() downloads the forces
+        of the rank, and finishParticleForceSum() sums them over the ranks and uploads them once collideAndStream() has
+        queued the collision of the interior, so that the device collides while the forces travel (collective). */
+    void startParticleForceSum();
+    void finishParticleForceSum();
     void checkReplicas(OpenMM::ContextImpl& context);
     /** With the domain decomposition and the exchange of the halo: send the fields of the nodes of the block to the
         ranks whose halo contains them, and receive those of the halo of the rank (collective). */
@@ -172,6 +177,9 @@ private:
     /** Float4 of random numbers per boundary node and step with a fluctuating fluid: 5 with regularized walls or
         DensityVelocity faces (19 normal numbers, docs/theory.md, section 7), 4 otherwise. */
     int boundaryRandomStride = 4;
+    /** The coupling forces of the rank downloaded by startParticleForceSum(), not yet summed over the ranks. */
+    std::vector<double> pendingForces;
+    bool forceSumPending = false;
     /** Work group size and number of work groups of the reductions. */
     int blockSize, numGroups;
     /** Deviations of the populations from the rest equilibrium, f_q - w_q, at [q*numNodes + node]. */

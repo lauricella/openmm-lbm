@@ -1347,7 +1347,11 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
   the fluid is divided. The copies must stay identical on every rank. The rank that owns the nearest node of a
   coupled particle computes its coupling force (explicit or centred drag, section 2) and the reaction on that node;
   the other ranks set it to zero, and the forces are summed over the ranks (`MPI_Allreduce`). Each force has one
-  contribution different from zero, so the sum is exact and the same on every rank. The particles of a node all
+  contribution different from zero, so the sum is exact and the same on every rank. In a lattice step with the
+  nearest node the sum waits until the collision of the interior of the block is queued on the device: the reactions
+  on the nodes come from the forces of the rank, and the summed forces are needed only by the particles, so the device
+  collides while the sum runs on the host (version 0.5.1). With an interpolation stencil the reactions need the forces
+  of all the particles, and the sum comes right after the coupling. The particles of a node all
   belong to the rank of the node, so the centred drag, which couples them, needs nothing else; the other forces on a
   particle, which the centred drag reads, are the same on every rank. Every rank draws the random numbers of all the
   coupled particles from its own generator, and the force uses those of the owner. Every rank reflects its copy of

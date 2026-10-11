@@ -1232,10 +1232,21 @@ void CommonCalcLBMForceKernel::checkReplicas(ContextImpl& context) {
 void CommonCalcLBMForceKernel::sumParticleForces() {
     // With the domain decomposition each coupling force has been computed by the rank of the nearest node, and is zero
     // on the others: the sum is exact, and the same on every rank.
-    vector<double> forces;
-    downloadAsDouble(particleForce, forces);
-    decomposition.sum(forces.data(), forces.size());
-    particleForce.upload(forces, true);
+    startParticleForceSum();
+    finishParticleForceSum();
+}
+
+void CommonCalcLBMForceKernel::startParticleForceSum() {
+    downloadAsDouble(particleForce, pendingForces);
+    forceSumPending = true;
+}
+
+void CommonCalcLBMForceKernel::finishParticleForceSum() {
+    if (!forceSumPending)
+        return;
+    forceSumPending = false;
+    decomposition.sum(pendingForces.data(), pendingForces.size());
+    particleForce.upload(pendingForces, true);
 }
 
 double CommonCalcLBMForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
@@ -1284,6 +1295,7 @@ void CommonCalcLBMForceKernel::advanceFluid() {
             applyBoundariesKernel->setArg(17, randomIndex);
     }
     collideAndStream();
+    finishParticleForceSum();
     if (numCoupled > 0)
         clearReactionsKernel->execute(numCoupled*stencilSize);
     if (bounceBackKernel) {
@@ -1364,6 +1376,7 @@ void CommonCalcLBMForceKernel::collideAndStream() {
             packedEvent->wait();
         decomposition.startExchange(sendData, sendBytes, receiveData, receiveBytes);
     }
+    finishParticleForceSum();
     decomposition.finishExchange();
     if (hostReceives) {
         if (!deviceMPI)
@@ -1516,8 +1529,15 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
     }
     if (isStep)
         noiseDrawn = false;
-    if (decomposition.isDecomposed() && !stencilDecomposed)
-        sumParticleForces();
+    // With the nearest node the reactions on the nodes come from the forces of the rank, and the summed forces are
+    // needed only by the particles: in a lattice step the sum waits until the collision of the interior is queued
+    // (collideAndStream()), and runs on the host while the device collides.
+    if (decomposition.isDecomposed() && !stencilDecomposed) {
+        if (isStep)
+            startParticleForceSum();
+        else
+            sumParticleForces();
+    }
 }
 
 void CommonCalcLBMForceKernel::exchangeCouplingHalo() {

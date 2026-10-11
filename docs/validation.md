@@ -1231,11 +1231,19 @@ on eight nodes ($`4 \times 4 \times 2`$: 8.51 against 4.25 ms): the difference, 
 over the network. A profile of rank 0 (Nsight Systems, four GPUs of a node, mixed precision, $`10^5`$ particles against
 none) separates the cost of the particles into three parts:
 - the sum of the coupling forces over the ranks, while the GPU waits: 0.75 to 1.0 ms per step (download of 2.4 MB,
-  `MPI_Allreduce` 0.5 to 0.6 ms, upload);
+  `MPI_Allreduce` 0.5 to 0.6 ms, upload; up to version 0.5.0, below);
 - the kernels of the particles (OpenMM's forces, the coupling, the sort): 0.33 to 0.40 ms;
 - the collision, which with coupled particles reads the reaction of every node of the block, three more numbers per
   node: 0.06 ms more with $`256 \times 128 \times 128`$ nodes per GPU, 0.8 to 1.1 ms more with
   $`512 \times 256 \times 256`$ or $`256 \times 256 \times 512`$.
+
+Since version 0.5.1 the sum runs on the host while the GPU collides the interior of the block (with the nearest
+node, `docs/theory.md`, section 8), and only the download and the upload of the forces, about 0.3 ms, are left
+between the coupling and the collision. With $`10^5`$ particles on four GPUs (explicit drag unless noted, two runs
+each, version 0.5.0 against 0.5.1, ms per step): $`256^3`$ nodes, $`1 \times 2 \times 2`$, 3.62 and 3.52 against 2.96
+and 3.08 (centred drag 3.53 and 3.58 against 2.99 and 3.12); $`512^3`$, $`1 \times 2 \times 2`$, 18.05 and 18.01
+against 17.49 and 17.47; $`512^3`$, $`2 \times 2 \times 1`$, 25.42 and 25.47 against 24.74 and 24.83. The results are
+the same bit for bit.
 
 The last part grows with the nodes of the block, which is why the same particles cost more in the larger box: on
 $`512^3`$ nodes ($`1 \times 2 \times 2`$) $`10^5`$ particles add 2.5 ms per step (18.0 against 15.5 ms), on $`256^3`$
