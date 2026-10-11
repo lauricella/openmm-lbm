@@ -151,8 +151,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     stencilSize = stencilWidth*stencilWidth*stencilWidth;
     // The bricks of the lattice with an interpolation stencil (kernels/lbmCoupling.cc): brickSize nodes along each axis,
     // the last brick of an axis taking the rest, so that every brick has at least as many nodes as the stencil along an
-    // axis, or the whole axis.  The kernels of the bricks take up to 4 bricks per work group (BRICKS_PER_GROUP), with
-    // the threads of a work group of the platform for each.
+    // axis, or the whole axis.  Their kernels run work groups of up to 4 times the work group of the platform
+    // (BRICKS_PER_GROUP): the count takes that many bricks per group, the list one brick with that many threads per node.
     const int brickSize = 4;
     int bricksAlong[3] = {max(1, lattice.nx/brickSize), max(1, lattice.ny/brickSize), max(1, lattice.nz/brickSize)};
     numBricks = (stencilSize > 1 ? bricksAlong[0]*bricksAlong[1]*bricksAlong[2] : 0);
@@ -1605,7 +1605,7 @@ void CommonCalcLBMForceKernel::listKeySegments() {
     countBricksKernel->execute(brickThreads, groupSize);
     scanBrickChunksKernel->execute(numBrickChunks*blockSize, blockSize);
     scanBrickTotalsKernel->execute(blockSize, blockSize);
-    listBricksKernel->execute(brickThreads, groupSize);
+    listBricksKernel->execute(numBricks*groupSize, groupSize);
     findChunkSegmentsKernel->execute(chunkOffset.getSize());
 #ifdef LBM_DEBUG
     // Every slot of every stencil falls on one node, so the segments hold them all.
