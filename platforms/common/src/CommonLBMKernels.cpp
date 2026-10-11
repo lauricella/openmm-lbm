@@ -151,11 +151,11 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     stencilSize = stencilWidth*stencilWidth*stencilWidth;
     // The bricks of the lattice with an interpolation stencil (kernels/lbmCoupling.cc): brickSize nodes along each axis,
     // the last brick of an axis taking the rest, so that every brick has at least as many nodes as the stencil along an
-    // axis, or the whole axis.  The work groups of the kernels of the bricks loop over them.
+    // axis, or the whole axis.  The kernels of the bricks take up to 4 bricks per work group (BRICKS_PER_GROUP), with
+    // the threads of a work group of the platform for each.
     const int brickSize = 4;
     int bricksAlong[3] = {max(1, lattice.nx/brickSize), max(1, lattice.ny/brickSize), max(1, lattice.nz/brickSize)};
     numBricks = (stencilSize > 1 ? bricksAlong[0]*bricksAlong[1]*bricksAlong[2] : 0);
-    brickGroups = max(1, min(numBricks, 16*cc.getNumThreadBlocks()));
     int stencilReach = (lattice.interpolationStencil == LBMForce::Keys ? 2 : 1);
     // The work groups of the dot products of the conjugate gradients (dotStencilPartials()): a number that depends only
     // on the number of particles, about 16 particles per thread.
@@ -224,6 +224,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     useDouble = (cc.getUseDoublePrecision() || cc.getUseMixedPrecision());
     int elementSize = (useDouble ? sizeof(double) : sizeof(float));
     blockSize = ComputeContext::ThreadBlockSize;
+    bricksPerGroup = max(1, min(4, cc.getMaxThreadBlockSize()/blockSize));
     // The product of the conjugate gradients of a stencil (multiplyStencilMatrix()) puts its slots in one work group.
     if (stencilSize > blockSize)
         throw OpenMMException("LBMForce: the interpolation stencil has more nodes than a work group of the platform");
@@ -885,6 +886,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             defines["NBY"] = cc.intToString(bricksAlong[1]);
             defines["NBZ"] = cc.intToString(bricksAlong[2]);
             defines["NUM_BRICKS"] = cc.intToString(numBricks);
+            defines["BRICKS_PER_GROUP"] = cc.intToString(bricksPerGroup);
             defines["BRICK_SCRAMBLE"] = cc.intToString(scrambleFactor(numBricks));
             if (centered)
                 defines["CENTERED_DRAG"] = "1";
@@ -1599,10 +1601,11 @@ void CommonCalcLBMForceKernel::listKeySegments() {
     int numCoupled = lattice.particles.size(), numBrickChunks = (numBricks+blockSize-1)/blockSize;
     findBrickStartsKernel->execute(numBricks+1);
     listCandidatesKernel->execute(numCoupled);
-    countBricksKernel->execute(brickGroups*blockSize, blockSize);
-    scanBrickChunksKernel->execute(min(numBrickChunks, brickGroups)*blockSize, blockSize);
+    int groupSize = bricksPerGroup*blockSize, brickThreads = ((numBricks+bricksPerGroup-1)/bricksPerGroup)*groupSize;
+    countBricksKernel->execute(brickThreads, groupSize);
+    scanBrickChunksKernel->execute(numBrickChunks*blockSize, blockSize);
     scanBrickTotalsKernel->execute(blockSize, blockSize);
-    listBricksKernel->execute(brickGroups*blockSize, blockSize);
+    listBricksKernel->execute(brickThreads, groupSize);
     findChunkSegmentsKernel->execute(chunkOffset.getSize());
 #ifdef LBM_DEBUG
     // Every slot of every stencil falls on one node, so the segments hold them all.

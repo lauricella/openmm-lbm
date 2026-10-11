@@ -258,7 +258,7 @@ private:
     OpenMM::ComputeArray chunkOffset, segmentStart, segmentNode, sortedWeight, sortedParticle;
     OpenMM::ComputeArray stencilOrigin, candidateParticle, candidateFirst, brickStart, brickSegments, brickSlots;
     OpenMM::ComputeArray chunkSegments, chunkSlots;
-    int numBricks, brickGroups;
+    int numBricks, bricksPerGroup;
     /** With the domain decomposition and the centred drag with a stencil: the density of the node of each segment of
         the sorted keys, summed over the ranks (exchangeSegmentDensity()), resized when the segments outgrow it. */
     OpenMM::ComputeArray segmentDensity;
