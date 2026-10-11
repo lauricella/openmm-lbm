@@ -1572,9 +1572,10 @@ $`\mathbf u_j(t) = \tilde{\mathbf u}_j - h\sum_l \xi_{jl}\mathbf F_l/\rho_j`$, s
   iterations stop when the residual of each Cartesian component is 1e-13 of its right-hand side; an isolated particle
   needs none. The forces agree with a solution by Gaussian elimination to 1e-10 (`testCenteredStencilSolve`). On the
   CUDA, OpenCL and HIP platforms the same iterations run on the device: the spread vector is summed per node through
-  the sorted keys of the stencils (after each sort the segments of the keys, one per node, are listed by a scan in a
-  fixed order, with the weights and particles copied into the order of the keys, so that one thread sums each node
-  from contiguous entries; the reactions are summed the same way), the dot products are reduced in two stages in a
+  the segments of the stencils (after each sort of the keys of the particles, one segment per node that a stencil
+  reaches, built by scans in a fixed order with the weights and particles of its slots in particle order, so that one
+  thread sums each node from contiguous entries; the reactions are summed the same way;
+  `docs/architecture.md`), the dot products are reduced in two stages in a
   fixed order (partial sums of a number of work groups that depends only on the number of particles, then one work
   group), so that every rank and every device computes the same sums, and the host reads them to decide when to stop;
   in single precision the iterations stop at 1e-5.
@@ -1660,9 +1661,8 @@ same iterations. Without random numbers fluid and particles are identical, bit f
 `python/tests/mpi_decomposition.py`). On the GPU platforms the arrays of the block hold as many layers of halo as the
 stencil reaches, one, or two with Keys (the populations still stream into the first), and the coupling halo is written
 into the halo of the moments, through the host; a node may fill two positions of the halo of a small block. Every rank
-computes the weights and sort keys of all the stencils; the keys of a stencil then hold the index of the node in the
-lattice rather than its position in the arrays, so that the keys, and the segments of the sorted keys, are the same on
-every rank. Along an axis with open faces the owner of a particle is the rank
+computes the weights and sort keys of all the stencils; the keys and the segments hold the bricks and nodes of the
+lattice rather than positions in the arrays, so that they are the same on every rank. Along an axis with open faces the owner of a particle is the rank
 of the nearest node of the lattice (Open faces, above), whose block and halo hold the whole stencil.
 
 ## References

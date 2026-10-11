@@ -3,6 +3,14 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Changed
+- GPU platforms, interpolation stencils: the coupling sorts one key per particle, from the brick of $`4^3`$ nodes of
+  the lattice that holds the first node of its stencil, instead of one key per node of its stencil (64 per particle
+  with `Keys`), and builds from them the segments of the nodes, the slots that fall on each node in particle order
+  (`docs/architecture.md`). The sums run in the same order as before, so the results are the same bit for bit.
+
 ## 0.5.1 (2026-10-11)
 
 A faster domain decomposition with coupled particles; the results are those of version 0.5.0 bit for bit.

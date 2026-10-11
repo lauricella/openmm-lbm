@@ -17,10 +17,11 @@
  * Defines, besides those of lbmFluid.cc: NUM_ATOMS, PADDED_NUM_ATOMS, NUM_COUPLED, DX (lattice spacing, nm),
  * VELOCITY_SCALE (dx/dt) and FORCE_SCALE (m_c dx/dt^2, the force unit of the lattice in kJ/mol/nm); with the
  * Centered drag, HAS_FLOAT_FORCE_BUFFERS if the platform also accumulates forces in floating point buffers.
- * NUM_KEYS is the number of sort keys and KEY_STRIDE the factor of the node in a key: NUM_COUPLED for the nearest node;
- * with an interpolation stencil (docs/theory.md, section 9) STENCIL_WIDTH is its number of nodes along an axis,
- * STENCIL_SIZE = STENCIL_WIDTH^3, and every particle has a key per node of its stencil, so that both are
- * NUM_COUPLED*STENCIL_SIZE.
+ * NUM_KEYS is the number of sort keys and KEY_STRIDE the factor of the node in a key, both NUM_COUPLED for the nearest
+ * node; with an interpolation stencil (docs/theory.md, section 9) STENCIL_WIDTH is its number of nodes along an axis,
+ * STENCIL_SIZE = STENCIL_WIDTH^3, NUM_KEYS = NUM_COUPLED*STENCIL_SIZE the number of slots of the stencils, and every
+ * particle has a sort key of its own, from its brick (BRICK_SIZE, NBX, NBY, NBZ, NUM_BRICKS, BRICK_SCRAMBLE; see the
+ * segments of the stencils below).
  *
  * With the domain decomposition (DOMAIN_DECOMPOSITION, kernels/lbmFluid.cc) GNX, GNY and GNZ are the sizes of the
  * lattice and OX, OY, OZ the first node of the block of the rank; the moments and reactions are stored at the storage
@@ -31,7 +32,7 @@
  * ranks other than 0, which reflect their copies of the particles but do not count the momentum of the wall.  With an
  * interpolation stencil the owner of the nearest node reads the moments of the nodes of the stencil in the block and in
  * its halo, where the host writes those of the other ranks (the coupling halo); every rank writes the weights and the
- * keys of all the stencils (stencilKey()) and adds the reactions on the nodes of its block.
+ * keys of all the stencils (particleKey()) and adds the reactions on the nodes of its block.
  */
 
 #ifndef DOMAIN_DECOMPOSITION
@@ -364,27 +365,82 @@ DEVICE void stencilAxisStored(mixed s, int size, int origin, int pad, int open, 
 #endif
 
 /**
- * The sort key of slot e of a stencil on a node of the lattice, pi(node)*KEY_STRIDE + e.  The node is its index in the
- * lattice, which without the decomposition is its storage index; with the decomposition the keys, and so the segments
- * of the sorted keys, are the same on every rank.  pi(n) = n*STENCIL_SCRAMBLE mod GNX*GNY*GNZ, a permutation that spreads
- * the keys uniformly over their range wherever the particles are, so that the buckets of equal width of OpenMM's sort
- * stay small (CouplingSortTrait in CommonLBMKernels.cpp, where the keys of the nearest node are permuted only for the
- * sort, so that their kernels stay those of version 0.4.0); stencilKeyNode() inverts it with STENCIL_UNSCRAMBLE.
+ * The segments of the stencils, one per node that a stencil reaches: the reactions of a node, and the vector of the
+ * conjugate gradients spread on it, are sums over the slots e = i*STENCIL_SIZE + n of the stencils on that node, in
+ * particle order and, for a particle, in slot order.  segmentStart[s] is the first entry of segment s, segmentNode[s] its
+ * node (index in the lattice), and sortedWeight[k] and sortedParticle[k] the weight and particle of entry k, so that the
+ * sums read their entries contiguously; with the centred drag keySegment[e] is the segment of slot e, where the
+ * conjugate gradients keep the vector spread on its node.  chunkOffset[c] is the first segment that starts in chunk c of
+ * LBM_BLOCK_SIZE entries, and chunkOffset[NUM_KEY_CHUNKS] the number of segments.
+ *
+ * The segments are built from one sort key per particle.  Along each axis the cell of a particle is the first node of
+ * its stencil, wrapped into [0, size) or, along an axis with open faces, moved into [0, size - 1]; the cells are grouped
+ * into bricks of BRICK_SIZE^3 nodes, the last brick along an axis taking the rest of the axis (NBX, NBY, NBZ bricks), so
+ * that every brick has at least BRICK_SIZE >= STENCIL_WIDTH nodes, or the whole axis.  The particles whose stencils reach
+ * a node then have their cells in at most two bricks along each axis.  A brick per node would need an array as large
+ * as the lattice on every rank.  The key of particle i is pi(b)*NUM_COUPLED + i, b its brick and pi(b) = b*BRICK_SCRAMBLE
+ * mod NUM_BRICKS a permutation that spreads the keys uniformly over their range wherever the particles are, so that the
+ * buckets of equal width of OpenMM's sort stay small (CouplingSortTrait in CommonLBMKernels.cpp).  After the sort:
+ * findBrickStarts() finds where each brick starts in the sorted keys, and listCandidates() writes the particle and the
+ * first nodes of the stencil of each sorted key; countBrickSegments() counts, for every brick of nodes (one work group
+ * each), the nodes that the stencils reach and their slots, testing the particles of the at most 8 bricks of cells that
+ * can reach it; scanBrickChunks() and scanBrickTotals() turn the counts into offsets; listBrickSegments() writes the
+ * segments of every brick, merging the particles of its bricks of cells in particle order; findChunkSegments() writes
+ * chunkOffset.  Every write has one writer, and the results are the same as those of sorting a key per slot.
  */
-DEVICE mm_long stencilKey(int ix, int iy, int iz, int e) {
-    const mm_long numNodes = (mm_long) GNX*GNY*GNZ;
-    mm_long node = ((ix + GNX*(iy + (mm_long) GNY*iz))*STENCIL_SCRAMBLE)%numNodes;
-    return node*KEY_STRIDE + e;
+#define NUM_KEY_CHUNKS ((NUM_KEYS+LBM_BLOCK_SIZE-1)/LBM_BLOCK_SIZE)
+#define NUM_BRICK_CHUNKS ((NUM_BRICKS+LBM_BLOCK_SIZE-1)/LBM_BLOCK_SIZE)
+#define MAX_SOURCE_BRICKS 8
+
+/**
+ * The node of the lattice of slot a of a stencil whose first node along an axis is first, as stencilAxis().
+ */
+DEVICE int stencilIndex(int first, int a, int size, int open) {
+    return (open ? min(max(first + a, 0), size - 1) : ((first + a)%size + size)%size);
 }
 
 /**
- * The node of the arrays of the block that receives the reaction of a stencil key, or NUM_STORED for the nodes outside
- * the block (only with the decomposition).
+ * The number of slots of a stencil whose first node along an axis is first that fall on node j of that axis.
  */
-DEVICE int stencilReactionNode(mm_long key) {
-    const mm_long numNodes = (mm_long) GNX*GNY*GNZ;
-    mm_long scrambled = key/KEY_STRIDE;
-    int node = (int) ((scrambled*STENCIL_UNSCRAMBLE)%numNodes);
+DEVICE int axisMatches(int first, int j, int size, int open) {
+    int n = 0;
+    for (int a = 0; a < STENCIL_WIDTH; a++)
+        n += (stencilIndex(first, a, size, open) == j ? 1 : 0);
+    return n;
+}
+
+/**
+ * The brick along an axis of a cell c.
+ */
+DEVICE int brickOfCell(int c, int numBricks) {
+    return min(c/BRICK_SIZE, numBricks - 1);
+}
+
+DEVICE int cellOfStencil(int first, int size, int open) {
+    return (open ? min(max(first, 0), size - 1) : (first%size + size)%size);
+}
+
+/**
+ * The position of brick b in the sorted keys, pi(b).
+ */
+DEVICE int sortedBrick(int b) {
+    return (int) ((((mm_long) b)*BRICK_SCRAMBLE)%NUM_BRICKS);
+}
+
+/**
+ * The sort key of particle i whose stencil starts at the nodes first.x, first.y, first.z of the lattice.
+ */
+DEVICE mm_long particleKey(int4 first, int i) {
+    int b = brickOfCell(cellOfStencil(first.x, GNX, OPEN_X), NBX) + NBX*(brickOfCell(cellOfStencil(first.y, GNY, OPEN_Y), NBY) +
+            NBY*brickOfCell(cellOfStencil(first.z, GNZ, OPEN_Z), NBZ));
+    return ((mm_long) sortedBrick(b))*NUM_COUPLED + i;
+}
+
+/**
+ * The node of the arrays of the block that receives the reaction of the node of a segment, or NUM_STORED for the nodes
+ * outside the block (only with the decomposition).
+ */
+DEVICE int segmentReactionNode(int node) {
 #ifdef DOMAIN_DECOMPOSITION
     return storedNode(node);
 #else
@@ -393,94 +449,319 @@ DEVICE int stencilReactionNode(mm_long key) {
 }
 
 /**
- * The segments of the sorted stencil keys, one per node, listed after every sort so that the sums over a segment run one
- * thread per segment, in sorted order, instead of one thread per key of which only the first of each segment works.  In
- * three passes over chunks of LBM_BLOCK_SIZE sorted keys: countKeySegments() counts the segments that start in each chunk,
- * scanKeySegments() (one work group) turns the counts into offsets, with the number of segments in
- * chunkOffset[NUM_KEY_CHUNKS], and listKeySegments() writes the first key of each segment s to segmentStart[s]
- * (segmentStart[number of segments] = NUM_KEYS), and the weight and particle of each sorted key m to sortedWeight[m] and
- * sortedParticle[m], which the sums then read contiguously; with the centred drag also the segment of each slot e,
- * keySegment[e], where the conjugate gradients keep the vector spread on its node.
+ * The nodes [lo, hi) of brick b along an axis, and the bricks of the cells of the stencils that can reach them: brick b
+ * and the brick of cell lo - (STENCIL_WIDTH - 1), wrapped or, along an axis with open faces, moved to 0.  Returns their
+ * number, 1 or 2.
  */
-#define NUM_KEY_CHUNKS ((NUM_KEYS+LBM_BLOCK_SIZE-1)/LBM_BLOCK_SIZE)
-
-DEVICE bool startsKeySegment(GLOBAL const mm_long* RESTRICT sortKeys, int k) {
-    return (k == 0 || sortKeys[k-1]/KEY_STRIDE != sortKeys[k]/KEY_STRIDE);
+DEVICE int sourceBricks(int b, int size, int numBricks, int open, int* lo, int* hi, int* source) {
+    *lo = b*BRICK_SIZE;
+    *hi = (b == numBricks - 1 ? size : *lo + BRICK_SIZE);
+    int c = *lo - (STENCIL_WIDTH - 1);
+    int previous = brickOfCell(open ? max(c, 0) : (c%size + size)%size, numBricks);
+    source[0] = b;
+    if (previous == b)
+        return 1;
+    source[1] = previous;
+    return 2;
 }
 
-KERNEL void countKeySegments(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL int* RESTRICT chunkCount) {
-    LOCAL int counts[LBM_BLOCK_SIZE];
-    for (int c = GROUP_ID; c < NUM_KEY_CHUNKS; c += NUM_GROUPS) {
-        int k = c*LBM_BLOCK_SIZE + LOCAL_ID;
-        counts[LOCAL_ID] = (k < NUM_KEYS && startsKeySegment(sortKeys, k) ? 1 : 0);
+/**
+ * The ranges in the sorted keys of the bricks of cells that can reach brick tb of nodes, and the nodes of tb.  Returns
+ * the number of ranges.
+ */
+DEVICE int brickSources(int tb, GLOBAL const int* RESTRICT brickStart, int* lo, int* hi, int* first, int* end) {
+    int bx = tb%NBX, by = (tb/NBX)%NBY, bz = tb/(NBX*NBY);
+    int sx[2], sy[2], sz[2];
+    int nx = sourceBricks(bx, GNX, NBX, OPEN_X, &lo[0], &hi[0], sx);
+    int ny = sourceBricks(by, GNY, NBY, OPEN_Y, &lo[1], &hi[1], sy);
+    int nz = sourceBricks(bz, GNZ, NBZ, OPEN_Z, &lo[2], &hi[2], sz);
+    int n = 0;
+    for (int c = 0; c < nz; c++)
+        for (int b = 0; b < ny; b++)
+            for (int a = 0; a < nx; a++) {
+                int s = sortedBrick(sx[a] + NBX*(sy[b] + NBY*sz[c]));
+                first[n] = brickStart[s];
+                end[n] = brickStart[s+1];
+                n++;
+            }
+    return n;
+}
+
+/**
+ * brickStart[s], for s from 0 to NUM_BRICKS, is the first sorted key of the brick at position s of the sorted keys.
+ */
+KERNEL void findBrickStarts(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL int* RESTRICT brickStart) {
+    for (int s = GLOBAL_ID; s <= NUM_BRICKS; s += GLOBAL_SIZE) {
+        mm_long key = ((mm_long) s)*NUM_COUPLED;
+        int lo = 0, hi = NUM_COUPLED;
+        while (lo < hi) {
+            int mid = (lo + hi)/2;
+            if (sortKeys[mid] < key)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        brickStart[s] = lo;
+    }
+}
+
+/**
+ * The particle and the first nodes of the stencil of each sorted key, read contiguously by the bricks.
+ */
+KERNEL void listCandidates(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const int4* RESTRICT stencilOrigin,
+        GLOBAL int* RESTRICT candidateParticle, GLOBAL int4* RESTRICT candidateFirst) {
+    for (int k = GLOBAL_ID; k < NUM_COUPLED; k += GLOBAL_SIZE) {
+        mm_long key = sortKeys[k];
+        int i = (int) (key - (key/NUM_COUPLED)*NUM_COUPLED);
+        candidateParticle[k] = i;
+        candidateFirst[k] = stencilOrigin[i];
+    }
+}
+
+/**
+ * The number of slots of the stencil of a candidate that fall on node (jx, jy, jz).
+ */
+DEVICE int coveredSlots(int4 first, int jx, int jy, int jz) {
+    int n = axisMatches(first.x, jx, GNX, OPEN_X);
+    if (n == 0)
+        return 0;
+    n *= axisMatches(first.y, jy, GNY, OPEN_Y);
+    if (n == 0)
+        return 0;
+    return n*axisMatches(first.z, jz, GNZ, OPEN_Z);
+}
+
+/**
+ * The slots that fall on node (jx, jy, jz) of the candidates in the ranges [first[r], end[r]).
+ */
+DEVICE int countNodeSlots(GLOBAL const int4* RESTRICT candidateFirst, int numRanges, const int* first, const int* end,
+        int jx, int jy, int jz) {
+    int count = 0;
+    for (int r = 0; r < numRanges; r++)
+        for (int m = first[r]; m < end[r]; m++)
+            count += coveredSlots(candidateFirst[m], jx, jy, jz);
+    return count;
+}
+
+/**
+ * For every brick of nodes, one work group: the number of its nodes that the stencils reach (segments) and of the slots
+ * that fall on them, in brickSegments[tb] and brickSlots[tb].
+ */
+KERNEL void countBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL const int4* RESTRICT candidateFirst,
+        GLOBAL int* RESTRICT brickSegments, GLOBAL int* RESTRICT brickSlots) {
+    LOCAL int sums[2*LBM_BLOCK_SIZE];
+    for (int tb = GROUP_ID; tb < NUM_BRICKS; tb += NUM_GROUPS) {
+        int lo[3], hi[3], first[MAX_SOURCE_BRICKS], end[MAX_SOURCE_BRICKS];
+        int numRanges = brickSources(tb, brickStart, lo, hi, first, end);
+        bool any = false;
+        for (int r = 0; r < numRanges; r++)
+            any = any || (end[r] > first[r]);
+        int segments = 0, slots = 0;
+        if (any) {
+            int wx = hi[0]-lo[0], wy = hi[1]-lo[1], numNodes = wx*wy*(hi[2]-lo[2]);
+            for (int l = LOCAL_ID; l < numNodes; l += LBM_BLOCK_SIZE) {
+                int count = countNodeSlots(candidateFirst, numRanges, first, end, lo[0] + l%wx, lo[1] + (l/wx)%wy, lo[2] + l/(wx*wy));
+                segments += (count > 0 ? 1 : 0);
+                slots += count;
+            }
+        }
+        sums[LOCAL_ID] = segments;
+        sums[LBM_BLOCK_SIZE+LOCAL_ID] = slots;
         for (int step = LBM_BLOCK_SIZE/2; step > 0; step /= 2) {
             SYNC_THREADS;
-            if (LOCAL_ID < step)
-                counts[LOCAL_ID] += counts[LOCAL_ID+step];
+            if (LOCAL_ID < step) {
+                sums[LOCAL_ID] += sums[LOCAL_ID+step];
+                sums[LBM_BLOCK_SIZE+LOCAL_ID] += sums[LBM_BLOCK_SIZE+LOCAL_ID+step];
+            }
         }
-        if (LOCAL_ID == 0)
-            chunkCount[c] = counts[0];
+        if (LOCAL_ID == 0) {
+            brickSegments[tb] = sums[0];
+            brickSlots[tb] = sums[LBM_BLOCK_SIZE];
+        }
         SYNC_THREADS;
     }
 }
 
-KERNEL void scanKeySegments(GLOBAL const int* RESTRICT chunkCount, GLOBAL int* RESTRICT chunkOffset,
+/**
+ * For each chunk of LBM_BLOCK_SIZE bricks, one work group: the counts of its bricks become their offsets within the
+ * chunk, in place, and the totals of the chunk go to chunkSegments[c] and chunkSlots[c].
+ */
+KERNEL void scanBrickChunks(GLOBAL int* RESTRICT brickSegments, GLOBAL int* RESTRICT brickSlots,
+        GLOBAL int* RESTRICT chunkSegments, GLOBAL int* RESTRICT chunkSlots) {
+    LOCAL int sums[2*LBM_BLOCK_SIZE];
+    for (int c = GROUP_ID; c < NUM_BRICK_CHUNKS; c += NUM_GROUPS) {
+        int tb = c*LBM_BLOCK_SIZE + LOCAL_ID;
+        int segments = (tb < NUM_BRICKS ? brickSegments[tb] : 0), slots = (tb < NUM_BRICKS ? brickSlots[tb] : 0);
+        sums[LOCAL_ID] = segments;
+        sums[LBM_BLOCK_SIZE+LOCAL_ID] = slots;
+        for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
+            SYNC_THREADS;
+            int addSegments = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
+            int addSlots = (LOCAL_ID >= step ? sums[LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
+            SYNC_THREADS;
+            sums[LOCAL_ID] += addSegments;
+            sums[LBM_BLOCK_SIZE+LOCAL_ID] += addSlots;
+        }
+        if (tb < NUM_BRICKS) {
+            brickSegments[tb] = sums[LOCAL_ID] - segments;
+            brickSlots[tb] = sums[LBM_BLOCK_SIZE+LOCAL_ID] - slots;
+        }
+        if (LOCAL_ID == LBM_BLOCK_SIZE-1) {
+            chunkSegments[c] = sums[LOCAL_ID];
+            chunkSlots[c] = sums[LBM_BLOCK_SIZE+LOCAL_ID];
+        }
+        SYNC_THREADS;
+    }
+}
+
+/**
+ * One work group: the totals of the chunks of bricks become their offsets, in place, followed by the number of
+ * segments and of entries in chunkSegments[NUM_BRICK_CHUNKS] and chunkSlots[NUM_BRICK_CHUNKS]; segmentStart of the
+ * end of the last segment.
+ */
+KERNEL void scanBrickTotals(GLOBAL int* RESTRICT chunkSegments, GLOBAL int* RESTRICT chunkSlots,
         GLOBAL int* RESTRICT segmentStart) {
-    LOCAL int sums[LBM_BLOCK_SIZE];
-    const int chunksPerThread = (NUM_KEY_CHUNKS+LBM_BLOCK_SIZE-1)/LBM_BLOCK_SIZE;
-    int first = LOCAL_ID*chunksPerThread, last = min(first+chunksPerThread, NUM_KEY_CHUNKS);
-    int total = 0;
-    for (int c = first; c < last; c++)
-        total += chunkCount[c];
-    sums[LOCAL_ID] = total;
+    LOCAL int sums[2*LBM_BLOCK_SIZE];
+    const int chunksPerThread = (NUM_BRICK_CHUNKS+LBM_BLOCK_SIZE-1)/LBM_BLOCK_SIZE;
+    int firstChunk = LOCAL_ID*chunksPerThread, lastChunk = min(firstChunk+chunksPerThread, NUM_BRICK_CHUNKS);
+    int segments = 0, slots = 0;
+    for (int c = firstChunk; c < lastChunk; c++) {
+        segments += chunkSegments[c];
+        slots += chunkSlots[c];
+    }
+    sums[LOCAL_ID] = segments;
+    sums[LBM_BLOCK_SIZE+LOCAL_ID] = slots;
     for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
         SYNC_THREADS;
-        int add = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
+        int addSegments = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
+        int addSlots = (LOCAL_ID >= step ? sums[LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
         SYNC_THREADS;
-        sums[LOCAL_ID] += add;
+        sums[LOCAL_ID] += addSegments;
+        sums[LBM_BLOCK_SIZE+LOCAL_ID] += addSlots;
     }
-    int offset = sums[LOCAL_ID]-total;
-    for (int c = first; c < last; c++) {
-        chunkOffset[c] = offset;
-        offset += chunkCount[c];
+    int segmentOffset = sums[LOCAL_ID] - segments, slotOffset = sums[LBM_BLOCK_SIZE+LOCAL_ID] - slots;
+    for (int c = firstChunk; c < lastChunk; c++) {
+        int chunkSegmentCount = chunkSegments[c], chunkSlotCount = chunkSlots[c];
+        chunkSegments[c] = segmentOffset;
+        chunkSlots[c] = slotOffset;
+        segmentOffset += chunkSegmentCount;
+        slotOffset += chunkSlotCount;
     }
     if (LOCAL_ID == LBM_BLOCK_SIZE-1) {
-        chunkOffset[NUM_KEY_CHUNKS] = sums[LOCAL_ID];
+        chunkSegments[NUM_BRICK_CHUNKS] = sums[LOCAL_ID];
+        chunkSlots[NUM_BRICK_CHUNKS] = sums[LBM_BLOCK_SIZE+LOCAL_ID];
         segmentStart[sums[LOCAL_ID]] = NUM_KEYS;
     }
 }
 
-KERNEL void listKeySegments(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const int* RESTRICT chunkOffset,
-        GLOBAL const mixed* RESTRICT stencilWeight, GLOBAL int* RESTRICT segmentStart, GLOBAL mixed* RESTRICT sortedWeight,
-        GLOBAL int* RESTRICT sortedParticle
+/**
+ * For every brick of nodes, one work group: the segments of the nodes that the stencils reach, in the order of the
+ * nodes in the brick (x fastest), from the offsets of the brick.  The thread of a node merges the candidates of the
+ * bricks of cells in particle order and writes, for each slot of each particle that falls on its node in slot order,
+ * the weight and particle of the entry and, with the centred drag, the segment of the slot.  The nodes are taken
+ * LBM_BLOCK_SIZE at a time: each counts its slots, a scan of the group gives its segment and first entry.
+ */
+KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL const int* RESTRICT candidateParticle,
+        GLOBAL const int4* RESTRICT candidateFirst, GLOBAL const int* RESTRICT brickSegments,
+        GLOBAL const int* RESTRICT brickSlots, GLOBAL const int* RESTRICT chunkSegments, GLOBAL const int* RESTRICT chunkSlots,
+        GLOBAL const mixed* RESTRICT stencilWeight, GLOBAL int* RESTRICT segmentStart, GLOBAL int* RESTRICT segmentNode,
+        GLOBAL mixed* RESTRICT sortedWeight, GLOBAL int* RESTRICT sortedParticle
 #ifdef CENTERED_DRAG
         , GLOBAL int* RESTRICT keySegment
 #endif
         ) {
-    LOCAL int sums[LBM_BLOCK_SIZE];
-    for (int c = GROUP_ID; c < NUM_KEY_CHUNKS; c += NUM_GROUPS) {
-        int k = c*LBM_BLOCK_SIZE + LOCAL_ID;
-        bool start = (k < NUM_KEYS && startsKeySegment(sortKeys, k));
-        sums[LOCAL_ID] = (start ? 1 : 0);
-        for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
+    LOCAL int sums[2*LBM_BLOCK_SIZE];
+    for (int tb = GROUP_ID; tb < NUM_BRICKS; tb += NUM_GROUPS) {
+        int lo[3], hi[3], first[MAX_SOURCE_BRICKS], end[MAX_SOURCE_BRICKS];
+        int numRanges = brickSources(tb, brickStart, lo, hi, first, end);
+        bool any = false;
+        for (int r = 0; r < numRanges; r++)
+            any = any || (end[r] > first[r]);
+        if (!any)
+            continue;
+        int c = tb/LBM_BLOCK_SIZE;
+        int segmentBase = chunkSegments[c] + brickSegments[tb], slotBase = chunkSlots[c] + brickSlots[tb];
+        int wx = hi[0]-lo[0], wy = hi[1]-lo[1], numNodes = wx*wy*(hi[2]-lo[2]);
+        for (int base = 0; base < numNodes; base += LBM_BLOCK_SIZE) {
+            int l = base + LOCAL_ID;
+            int jx = lo[0] + l%wx, jy = lo[1] + (l/wx)%wy, jz = lo[2] + l/(wx*wy);
+            int count = (l < numNodes ? countNodeSlots(candidateFirst, numRanges, first, end, jx, jy, jz) : 0);
+            sums[LOCAL_ID] = (count > 0 ? 1 : 0);
+            sums[LBM_BLOCK_SIZE+LOCAL_ID] = count;
+            for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
+                SYNC_THREADS;
+                int addSegments = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
+                int addSlots = (LOCAL_ID >= step ? sums[LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
+                SYNC_THREADS;
+                sums[LOCAL_ID] += addSegments;
+                sums[LBM_BLOCK_SIZE+LOCAL_ID] += addSlots;
+            }
             SYNC_THREADS;
-            int add = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
-            SYNC_THREADS;
-            sums[LOCAL_ID] += add;
-        }
-        if (k < NUM_KEYS) {
-            int s = chunkOffset[c] + sums[LOCAL_ID] - 1;
-            if (start)
+            if (count > 0) {
+                int s = segmentBase + sums[LOCAL_ID] - 1;
+                int k = slotBase + sums[LBM_BLOCK_SIZE+LOCAL_ID] - count;
                 segmentStart[s] = k;
-            mm_long key = sortKeys[k];
-            int e = (int) (key - (key/KEY_STRIDE)*KEY_STRIDE);
-            sortedWeight[k] = stencilWeight[e];
-            sortedParticle[k] = e/STENCIL_SIZE;
+                segmentNode[s] = jx + GNX*(jy + GNY*jz);
+                int position[MAX_SOURCE_BRICKS];
+                for (int r = 0; r < numRanges; r++)
+                    position[r] = first[r];
+                while (true) {
+                    int best = -1, i = NUM_COUPLED;
+                    for (int r = 0; r < numRanges; r++)
+                        if (position[r] < end[r] && candidateParticle[position[r]] < i) {
+                            i = candidateParticle[position[r]];
+                            best = r;
+                        }
+                    if (best < 0)
+                        break;
+                    int4 f = candidateFirst[position[best]++];
+                    if (coveredSlots(f, jx, jy, jz) == 0)
+                        continue;
+                    for (int cz = 0; cz < STENCIL_WIDTH; cz++) {
+                        if (stencilIndex(f.z, cz, GNZ, OPEN_Z) != jz)
+                            continue;
+                        for (int cy = 0; cy < STENCIL_WIDTH; cy++) {
+                            if (stencilIndex(f.y, cy, GNY, OPEN_Y) != jy)
+                                continue;
+                            for (int cx = 0; cx < STENCIL_WIDTH; cx++) {
+                                if (stencilIndex(f.x, cx, GNX, OPEN_X) != jx)
+                                    continue;
+                                int e = i*STENCIL_SIZE + cx + STENCIL_WIDTH*(cy + STENCIL_WIDTH*cz);
+                                sortedWeight[k] = stencilWeight[e];
+                                sortedParticle[k] = i;
 #ifdef CENTERED_DRAG
-            keySegment[e] = s;
+                                keySegment[e] = s;
 #endif
+                                k++;
+                            }
+                        }
+                    }
+                }
+            }
+            segmentBase += sums[LBM_BLOCK_SIZE-1];
+            slotBase += sums[2*LBM_BLOCK_SIZE-1];
+            SYNC_THREADS;
         }
-        SYNC_THREADS;
+    }
+}
+
+/**
+ * chunkOffset[c], for c from 0 to NUM_KEY_CHUNKS: the first segment that starts at entry c*LBM_BLOCK_SIZE or later.
+ */
+KERNEL void findChunkSegments(GLOBAL const int* RESTRICT segmentStart, GLOBAL const int* RESTRICT chunkSegments,
+        GLOBAL int* RESTRICT chunkOffset) {
+    const int numSegments = chunkSegments[NUM_BRICK_CHUNKS];
+    for (int c = GLOBAL_ID; c <= NUM_KEY_CHUNKS; c += GLOBAL_SIZE) {
+        int entry = c*LBM_BLOCK_SIZE;
+        int lo = 0, hi = numSegments;
+        while (lo < hi) {
+            int mid = (lo + hi)/2;
+            if (segmentStart[mid] < entry)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        chunkOffset[c] = lo;
     }
 }
 
@@ -488,19 +769,21 @@ KERNEL void listKeySegments(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL cons
  * Explicit drag with an interpolation stencil (docs/theory.md, section 9), as on the Reference platform: the
  * particle sees u = sum_j xi_j j_j/rho_j over the STENCIL_SIZE nodes of its stencil, x fastest, a solid node being a wall
  * at rest (rho = 0), and F = -gamma m (v - u) + sqrt(2 gamma m kT) xi.  The weight of slot n of particle i is stored in
- * stencilWeight[i*STENCIL_SIZE + n] and its key node*KEY_STRIDE + i*STENCIL_SIZE + n in sortKeys, sorted next to sum the
+ * stencilWeight[i*STENCIL_SIZE + n], the first nodes of the stencil along the three axes in stencilOrigin[i] and the
+ * sort key of the particle in sortKeys[i] (particleKey()), from which the segments of the nodes are built to sum the
  * reactions -xi_j F of each node in particle order and, for a particle, in slot order.  In a lattice step the reaction
  * on the solid nodes of the stencil is added to wallMomentum.  The arguments are those of coupleParticles(), and then
- * stencilWeight.  With the domain decomposition the rank that owns the nearest node computes the force, from the
- * moments of the block and of its coupling halo; the other ranks set it to zero, and every rank writes the weights and
- * keys of all the stencils (stencilKey()), for the reactions on its own nodes once the forces are summed.
+ * stencilWeight and stencilOrigin.  With the domain decomposition the rank that owns the nearest node computes the
+ * force, from the moments of the block and of its coupling halo; the other ranks set it to zero, and every rank writes
+ * the weights, first nodes and keys of all the stencils, for the reactions on its own nodes once the forces are summed.
  */
 KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL const real4* RESTRICT posqCorrection,
         GLOBAL const mixed4* RESTRICT velm, GLOBAL const int* RESTRICT atomIndex, GLOBAL const int* RESTRICT couplingIndex,
         GLOBAL const mixed* RESTRICT particleMass, GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum,
         GLOBAL mixed* RESTRICT particleForce, GLOBAL mm_long* RESTRICT sortKeys, GLOBAL mixed* RESTRICT wallMomentum,
         GLOBAL const float4* RESTRICT random, GLOBAL float4* RESTRICT noise, int randomIndex, int drawNoise, int isStep,
-        mixed gamma, mixed kT, GLOBAL const int* RESTRICT isFluid, GLOBAL mixed* RESTRICT stencilWeight) {
+        mixed gamma, mixed kT, GLOBAL const int* RESTRICT isFluid, GLOBAL mixed* RESTRICT stencilWeight,
+        GLOBAL int4* RESTRICT stencilOrigin) {
     for (int j = GLOBAL_ID; j < NUM_ATOMS; j += GLOBAL_SIZE) {
         int i = couplingIndex[atomIndex[j]];
         if (i < 0)
@@ -512,6 +795,13 @@ KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         stencilAxis(sx, GNX, OPEN_X, ix, wx);
         stencilAxis(sy, GNY, OPEN_Y, iy, wy);
         stencilAxis(sz, GNZ, OPEN_Z, iz, wz);
+        int4 firstNodes;
+        firstNodes.x = stencilFirst(sx);
+        firstNodes.y = stencilFirst(sy);
+        firstNodes.z = stencilFirst(sz);
+        firstNodes.w = 0;
+        stencilOrigin[i] = firstNodes;
+        sortKeys[i] = particleKey(firstNodes, i);
 #ifdef DOMAIN_DECOMPOSITION
         // Positions of the nodes of the stencil in the arrays of the block, if the rank owns the nearest node.
         bool owned = (storedNode(stencilOwnerNode(pos)) != NUM_STORED);
@@ -534,7 +824,6 @@ KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
                     int slot = a + STENCIL_WIDTH*(b + STENCIL_WIDTH*c);
                     mixed w = wx[a]*wy[b]*wz[c];
                     stencilWeight[i*STENCIL_SIZE+slot] = w;
-                    sortKeys[i*STENCIL_SIZE+slot] = stencilKey(ix[a], iy[b], iz[c], i*STENCIL_SIZE + slot);
                     if (!owned)
                         continue;
                     int node = jx[a] + SX*(jy[b] + SY*jz[c]);
@@ -592,17 +881,17 @@ KERNEL void coupleParticlesStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
 }
 
 /**
- * After sorting the keys of the stencils and listing their segments, each segment sums the reactions -xi_j F of the
- * particles whose stencils contain its node, in particle order, and writes the sum to cellReaction: one writer per node.
- * With the domain decomposition only the nodes of the block receive the reactions.
+ * After listing the segments of the stencils, each segment sums the reactions -xi_j F of the particles whose stencils
+ * contain its node, in particle order, and writes the sum to cellReaction: one writer per node.  With the domain
+ * decomposition only the nodes of the block receive the reactions.
  */
-KERNEL void sumStencilReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const mixed* RESTRICT particleForce,
+KERNEL void sumStencilReactions(GLOBAL const int* RESTRICT segmentNode, GLOBAL const mixed* RESTRICT particleForce,
         GLOBAL mixed* RESTRICT cellReaction, GLOBAL const int* RESTRICT segmentStart, GLOBAL const int* RESTRICT chunkOffset,
         GLOBAL const mixed* RESTRICT sortedWeight, GLOBAL const int* RESTRICT sortedParticle) {
     const int numSegments = chunkOffset[NUM_KEY_CHUNKS];
     for (int s = GLOBAL_ID; s < numSegments; s += GLOBAL_SIZE) {
         int first = segmentStart[s], end = segmentStart[s+1];
-        int node = stencilReactionNode(sortKeys[first]);
+        int node = segmentReactionNode(segmentNode[s]);
         if (node == NUM_STORED)
             continue;
         mixed fx = 0, fy = 0, fz = 0;
@@ -625,13 +914,14 @@ KERNEL void sumStencilReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL 
  *   (1 + a) F_k + a m_k sum_l K_kl F_l = b_k,   K_kl = sum_j xi_jk xi_jl/rho_j,
  *   b_k = -gamma m_k (v~_k - sum_j xi_jk u~_j) + sqrt(2 gamma m_k kT) xi_k,
  * divided by m_k, with v~_k = v_k(t - h) + h Fc_k/m_k and u~_j = (j_j + h rho_j g)/rho_j; a solid node is a wall at rest
- * (u = 0, no 1/rho term).  Writes the right-hand side b_k/m_k (rhs), the diagonal (1 + a)/m_k + a K_kk, and for each slot
- * e = i*STENCIL_SIZE + n of the stencil its weight, xi/rho (0 at a solid node), its node and its sort key.  The other
- * forces Fc and the random numbers are handled as in prepareCenteredDrag().  With the domain decomposition the rank that
- * owns the nearest node writes the right-hand side, the diagonal and the nodes of a particle, which the host sums over
- * the ranks, and the others write zero and NUM_STORED as the nodes; every rank writes the weights and keys of all the
- * stencils (stencilKey()), and xi/rho of all of them comes later, from the densities of the nodes summed over the
- * ranks (gatherSegmentDensity(), stencilInterpolationWeights()).
+ * (u = 0, no 1/rho term).  Writes the right-hand side b_k/m_k (rhs), the diagonal (1 + a)/m_k + a K_kk, for each slot
+ * e = i*STENCIL_SIZE + n of the stencil its weight, xi/rho (0 at a solid node) and its node, and for each particle the
+ * first nodes of its stencil (stencilOrigin) and its sort key (particleKey()).  The other forces Fc and the random
+ * numbers are handled as in prepareCenteredDrag().  With the domain decomposition the rank that owns the nearest node
+ * writes the right-hand side, the diagonal and the nodes of a particle, which the host sums over the ranks, and the
+ * others write zero and NUM_STORED as the nodes; every rank writes the weights, first nodes and keys of all the
+ * stencils, and xi/rho of all of them comes later, from the densities of the nodes summed over the ranks
+ * (gatherSegmentDensity(), stencilInterpolationWeights()).
  */
 #if STENCIL_SIZE >= 27
 /*
@@ -649,7 +939,8 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum, GLOBAL mm_long* RESTRICT sortKeys,
         GLOBAL const float4* RESTRICT random, GLOBAL float4* RESTRICT noise, int randomIndex, int drawNoise, mixed gamma,
         mixed kT, mixed gx, mixed gy, mixed gz, GLOBAL mixed* RESTRICT stencilWeight, GLOBAL mixed* RESTRICT interpWeight,
-        GLOBAL int* RESTRICT stencilNode, GLOBAL mixed* RESTRICT rhs, GLOBAL mixed* RESTRICT diagonal
+        GLOBAL int* RESTRICT stencilNode, GLOBAL mixed* RESTRICT rhs, GLOBAL mixed* RESTRICT diagonal,
+        GLOBAL int4* RESTRICT stencilOrigin
 #ifdef HAS_FLOAT_FORCE_BUFFERS
         , GLOBAL const real4* RESTRICT floatForces, int numFloatForces
 #endif
@@ -692,7 +983,15 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
             int e = i*STENCIL_SIZE + slot;
             mixed w = wx[a2]*wy[b]*wz[c];
             stencilWeight[e] = w;
-            sortKeys[e] = stencilKey(ix[a2], iy[b], iz[c], e);
+            if (slot == 0) {
+                int4 firstNodes;
+                firstNodes.x = stencilFirst(sx);
+                firstNodes.y = stencilFirst(sy);
+                firstNodes.z = stencilFirst(sz);
+                firstNodes.w = 0;
+                stencilOrigin[i] = firstNodes;
+                sortKeys[i] = particleKey(firstNodes, i);
+            }
             interpWeight[e] = 0;
             stencilNode[e] = NUM_STORED;
             if (owned) {
@@ -793,7 +1092,8 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         GLOBAL const mixed* RESTRICT densityDeviation, GLOBAL const mixed* RESTRICT momentum, GLOBAL mm_long* RESTRICT sortKeys,
         GLOBAL const float4* RESTRICT random, GLOBAL float4* RESTRICT noise, int randomIndex, int drawNoise, mixed gamma,
         mixed kT, mixed gx, mixed gy, mixed gz, GLOBAL mixed* RESTRICT stencilWeight, GLOBAL mixed* RESTRICT interpWeight,
-        GLOBAL int* RESTRICT stencilNode, GLOBAL mixed* RESTRICT rhs, GLOBAL mixed* RESTRICT diagonal
+        GLOBAL int* RESTRICT stencilNode, GLOBAL mixed* RESTRICT rhs, GLOBAL mixed* RESTRICT diagonal,
+        GLOBAL int4* RESTRICT stencilOrigin
 #ifdef HAS_FLOAT_FORCE_BUFFERS
         , GLOBAL const real4* RESTRICT floatForces, int numFloatForces
 #endif
@@ -829,6 +1129,13 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
         stencilAxis(sx, GNX, OPEN_X, ix, wx);
         stencilAxis(sy, GNY, OPEN_Y, iy, wy);
         stencilAxis(sz, GNZ, OPEN_Z, iz, wz);
+        int4 firstNodes;
+        firstNodes.x = stencilFirst(sx);
+        firstNodes.y = stencilFirst(sy);
+        firstNodes.z = stencilFirst(sz);
+        firstNodes.w = 0;
+        stencilOrigin[i] = firstNodes;
+        sortKeys[i] = particleKey(firstNodes, i);
 #ifdef DOMAIN_DECOMPOSITION
         bool owned = (storedNode(stencilOwnerNode(pos)) != NUM_STORED);
         int jx[STENCIL_WIDTH], jy[STENCIL_WIDTH], jz[STENCIL_WIDTH];
@@ -850,7 +1157,6 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
                     int e = i*STENCIL_SIZE + a2 + STENCIL_WIDTH*(b + STENCIL_WIDTH*c);
                     mixed w = wx[a2]*wy[b]*wz[c];
                     stencilWeight[e] = w;
-                    sortKeys[e] = stencilKey(ix[a2], iy[b], iz[c], e);
                     interpWeight[e] = 0;
                     stencilNode[e] = NUM_STORED;
                     if (!owned)
@@ -902,9 +1208,9 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
  * particle order, written for the node of segment s at spreadValue[3*s ... 3*s+2], the three components together for
  * the scattered reads of multiplyStencilMatrix().  With the domain decomposition every rank runs the conjugate
  * gradients for all the particles, and spreads p on all the nodes of the stencils.  A work group of LBM_BLOCK_SIZE
- * threads takes the segments that start in a chunk of LBM_BLOCK_SIZE keys, one thread per segment: the threads read the
- * weights and the values of p of the keys of these segments together, LBM_BLOCK_SIZE keys at a time, into local memory,
- * and the thread of each segment adds those of its segment in key order.
+ * threads takes the segments that start in a chunk of LBM_BLOCK_SIZE entries, one thread per segment: the threads read
+ * the weights and the values of p of the entries of these segments together, LBM_BLOCK_SIZE entries at a time, into
+ * local memory, and the thread of each segment adds those of its segment in order.
  */
 KERNEL void spreadStencilVector(GLOBAL const int* RESTRICT segmentStart, GLOBAL const int* RESTRICT chunkOffset,
         GLOBAL const mixed* RESTRICT sortedWeight, GLOBAL const int* RESTRICT sortedParticle, GLOBAL const mixed* RESTRICT p,
@@ -1150,17 +1456,17 @@ KERNEL void unpackCouplingHalo(GLOBAL mixed* RESTRICT densityDeviation, GLOBAL m
 
 #ifdef CENTERED_DRAG
 /**
- * With the domain decomposition and the centred drag: the density of the node of each segment of the sorted keys (the
+ * With the domain decomposition and the centred drag: the density of the node of each segment (the segments are the
  * same on every rank), from the rank whose block holds the node and 0 on the others, which the host sums over the
  * ranks; then xi/rho of every slot of every stencil, as prepareCenteredStencil() computes it for the particles of the
  * rank (0 at a solid node).  So every rank runs the conjugate gradients for all the particles, with the same numbers.
  */
-KERNEL void gatherSegmentDensity(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL const int* RESTRICT segmentStart,
+KERNEL void gatherSegmentDensity(GLOBAL const int* RESTRICT segmentNode, GLOBAL const int* RESTRICT segmentStart,
         GLOBAL const int* RESTRICT chunkOffset, GLOBAL const mixed* RESTRICT densityDeviation,
         GLOBAL mixed* RESTRICT segmentDensity) {
     const int numSegments = chunkOffset[NUM_KEY_CHUNKS];
     for (int s = GLOBAL_ID; s < numSegments; s += GLOBAL_SIZE) {
-        int node = stencilReactionNode(sortKeys[segmentStart[s]]);
+        int node = segmentReactionNode(segmentNode[s]);
         segmentDensity[s] = (node == NUM_STORED ? 0 : 1 + densityDeviation[node]);
     }
 }
@@ -1177,15 +1483,26 @@ KERNEL void stencilInterpolationWeights(GLOBAL const mixed* RESTRICT stencilWeig
 #endif
 
 /**
- * After the collision, set the reactions of the nodes that received any back to zero, for the next step.
+ * After the collision, set the reactions of the nodes that received any back to zero, for the next step: the nodes of
+ * the keys, or with an interpolation stencil those of the segments.
  */
+#ifdef STENCIL_WIDTH
+KERNEL void clearCellReactions(GLOBAL const int* RESTRICT segmentNode, GLOBAL const int* RESTRICT chunkOffset,
+        GLOBAL mixed* RESTRICT cellReaction) {
+    const int numSegments = chunkOffset[NUM_KEY_CHUNKS];
+    for (int s = GLOBAL_ID; s < numSegments; s += GLOBAL_SIZE) {
+        int node = segmentReactionNode(segmentNode[s]);
+        if (node == NUM_STORED)
+            continue;
+        cellReaction[node] = 0;
+        cellReaction[NUM_STORED+node] = 0;
+        cellReaction[2*NUM_STORED+node] = 0;
+    }
+}
+#else
 KERNEL void clearCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL mixed* RESTRICT cellReaction) {
     for (int k = GLOBAL_ID; k < NUM_KEYS; k += GLOBAL_SIZE) {
-#ifdef STENCIL_WIDTH
-        int node = stencilReactionNode(sortKeys[k]);
-#else
         int node = keyNode(sortKeys[k]);
-#endif
 #ifdef DOMAIN_DECOMPOSITION
         if (node == NUM_STORED)
             continue;
@@ -1195,6 +1512,7 @@ KERNEL void clearCellReactions(GLOBAL const mm_long* RESTRICT sortKeys, GLOBAL m
         cellReaction[2*NUM_STORED+node] = 0;
     }
 }
+#endif
 
 /**
  * Centred drag, first part, one thread per atom (docs/theory.md, section 2; lattice units, h = 1/2): the velocity

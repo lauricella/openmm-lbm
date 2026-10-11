@@ -93,7 +93,8 @@ private:
     void advanceFluid();
     void computeNextStepForces(long long nextStep);
     void computeCouplingForces(bool isStep);
-    /** An interpolation stencil, after the sort: list the segments of the sorted keys (kernels/lbmCoupling.cc). */
+    /** An interpolation stencil, after the sort of the keys of the particles: list the segments of the nodes
+        (kernels/lbmCoupling.cc). */
     void listKeySegments();
     /** The centred drag with an interpolation stencil: the conjugate gradients, after prepareCenteredStencil(). */
     void solveStencilDrag();
@@ -248,10 +249,16 @@ private:
         at [i*stencilSize + slot]. */
     int stencilSize;
     OpenMM::ComputeArray stencilWeight;
-    /** The segments of the sorted keys of the stencils, one per node (listKeySegments()): the number of segments that
-        start in each chunk of blockSize keys and their offsets, followed by the number of segments; the first key of each
-        segment; the weight and particle of each sorted key. */
-    OpenMM::ComputeArray chunkCount, chunkOffset, segmentStart, sortedWeight, sortedParticle;
+    /** The segments of the stencils, one per node that a stencil reaches (listKeySegments(), kernels/lbmCoupling.cc):
+        the first segment that starts in each chunk of blockSize entries, followed by the number of segments; the first
+        entry and the node of each segment; the weight and particle of each entry.  They are built from one sort key per
+        particle, from its brick: the first nodes of the stencil of each particle, the particle and first nodes of each
+        sorted key, where each brick starts in the sorted keys, the segments and entries of each brick and of each chunk of
+        blockSize bricks (counts, then offsets). */
+    OpenMM::ComputeArray chunkOffset, segmentStart, segmentNode, sortedWeight, sortedParticle;
+    OpenMM::ComputeArray stencilOrigin, candidateParticle, candidateFirst, brickStart, brickSegments, brickSlots;
+    OpenMM::ComputeArray chunkSegments, chunkSlots;
+    int numBricks, brickGroups;
     /** With the domain decomposition and the centred drag with a stencil: the density of the node of each segment of
         the sorted keys, summed over the ranks (exchangeSegmentDensity()), resized when the segments outgrow it. */
     OpenMM::ComputeArray segmentDensity;
@@ -275,7 +282,8 @@ private:
     OpenMM::ComputeKernel collideKernel, bounceBackKernel, wallExchangeKernel, applyBoundariesKernel, maxSpeedKernel;
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel, packFieldsKernel;
-    OpenMM::ComputeKernel countSegmentsKernel, scanSegmentsKernel, listSegmentsKernel, spreadKernel, multiplyKernel;
+    OpenMM::ComputeKernel findBrickStartsKernel, listCandidatesKernel, countBricksKernel, scanBrickChunksKernel;
+    OpenMM::ComputeKernel scanBrickTotalsKernel, listBricksKernel, findChunkSegmentsKernel, spreadKernel, multiplyKernel;
     OpenMM::ComputeKernel dotKernel, startGradientsKernel, advanceGradientsKernel, directionKernel, stencilWallKernel;
     OpenMM::ComputeKernel packCouplingHaloKernel, unpackCouplingHaloKernel, dotFinishKernel, gatherDensityKernel;
     OpenMM::ComputeKernel interpWeightsKernel;

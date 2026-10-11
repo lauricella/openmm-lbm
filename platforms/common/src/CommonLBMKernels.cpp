@@ -44,21 +44,6 @@ static long long scrambleFactor(long long size) {
 }
 
 /**
- * The inverse of factor modulo size, for factor coprime with size.
- */
-static long long scrambleInverse(long long factor, long long size) {
-    long long r0 = size, r1 = factor%size, t0 = 0, t1 = 1;
-    while (r1 != 0) {
-        long long q = r0/r1;
-        swap(r0, r1);
-        r1 -= q*r0;
-        swap(t0, t1);
-        t1 -= q*t0;
-    }
-    return (t0%size + size)%size;
-}
-
-/**
  * The sort keys of the coupled particles, 64-bit integers node*stride + e (kernels/lbmCoupling.cc): stride is the number
  * of keys, e the particle (or with an interpolation stencil the slot i*stencilSize + n of particle i), node the storage
  * index of the node, from 0 to numStored - 1, and with the domain decomposition numStored plus the index of a node of
@@ -75,9 +60,8 @@ static long long scrambleInverse(long long factor, long long size) {
  * which is in particle order, failed with the particles of many copies of a protein in order: all the samples came
  * from the copies of one layer of the box, and 97% of the keys of 5.6e4 particles went into one bucket (7.4 ms of a
  * step of 8.7 ms on an A100).  The permutation spreads the sort keys uniformly over their range wherever the particles
- * are.  The kernels of the interpolation stencils write keys already permuted (stencilKey()), and with permute false
- * the sort key is the key itself: the expression above, evaluated for every key by OpenMM's range of the keys in a
- * single work group, took 3 ms per step with the 3.6e6 keys of 5.6e4 particles and Keys.
+ * are.  With an interpolation stencil every particle has a key of its own, from its brick, which the kernels write
+ * already permuted (particleKey()), and with permute false the sort key is the key itself.
  */
 class CouplingSortTrait : public ComputeSortImpl::SortTrait {
 public:
@@ -165,6 +149,13 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     bool decomposed = decomposition.isDecomposed();
     int stencilWidth = LBMStencils::width(lattice.interpolationStencil);
     stencilSize = stencilWidth*stencilWidth*stencilWidth;
+    // The bricks of the lattice with an interpolation stencil (kernels/lbmCoupling.cc): brickSize nodes along each axis,
+    // the last brick of an axis taking the rest, so that every brick has at least as many nodes as the stencil along an
+    // axis, or the whole axis.  The work groups of the kernels of the bricks loop over them.
+    const int brickSize = 4;
+    int bricksAlong[3] = {max(1, lattice.nx/brickSize), max(1, lattice.ny/brickSize), max(1, lattice.nz/brickSize)};
+    numBricks = (stencilSize > 1 ? bricksAlong[0]*bricksAlong[1]*bricksAlong[2] : 0);
+    brickGroups = max(1, min(numBricks, 16*cc.getNumThreadBlocks()));
     int stencilReach = (lattice.interpolationStencil == LBMForce::Keys ? 2 : 1);
     // The work groups of the dot products of the conjugate gradients (dotStencilPartials()): a number that depends only
     // on the number of particles, about 16 particles per thread.
@@ -654,16 +645,26 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         particleForce.upload(vector<double>(3*numCoupled, 0.0), true);
         particleWallMomentum.initialize(cc, 3*numCoupled, elementSize, "lbmParticleWallMomentum");
         particleWallMomentum.upload(vector<double>(3*numCoupled, 0.0), true);
-        // One key per particle, or with an interpolation stencil one per node of its stencil.
-        sortKeys.initialize(cc, numCoupled*stencilSize, sizeof(long long), "lbmSortKeys");
+        // One key per particle.  With an interpolation stencil the segments of the nodes are built from them through the
+        // bricks of the lattice (kernels/lbmCoupling.cc), whose arrays have one entry per brick or per chunk of bricks.
+        sortKeys.initialize(cc, numCoupled, sizeof(long long), "lbmSortKeys");
         if (stencilSize > 1) {
             int numKeys = numCoupled*stencilSize, numChunks = (numKeys+blockSize-1)/blockSize;
+            int numBrickChunks = (numBricks+blockSize-1)/blockSize;
             stencilWeight.initialize(cc, numKeys, elementSize, "lbmStencilWeight");
-            chunkCount.initialize<int>(cc, numChunks, "lbmChunkCount");
             chunkOffset.initialize<int>(cc, numChunks+1, "lbmChunkOffset");
             segmentStart.initialize<int>(cc, numKeys+1, "lbmSegmentStart");
+            segmentNode.initialize<int>(cc, numKeys, "lbmSegmentNode");
             sortedWeight.initialize(cc, numKeys, elementSize, "lbmSortedWeight");
             sortedParticle.initialize<int>(cc, numKeys, "lbmSortedParticle");
+            stencilOrigin.initialize<mm_int4>(cc, numCoupled, "lbmStencilOrigin");
+            candidateParticle.initialize<int>(cc, numCoupled, "lbmCandidateParticle");
+            candidateFirst.initialize<mm_int4>(cc, numCoupled, "lbmCandidateFirst");
+            brickStart.initialize<int>(cc, numBricks+1, "lbmBrickStart");
+            brickSegments.initialize<int>(cc, numBricks, "lbmBrickSegments");
+            brickSlots.initialize<int>(cc, numBricks, "lbmBrickSlots");
+            chunkSegments.initialize<int>(cc, numBrickChunks+1, "lbmChunkSegments");
+            chunkSlots.initialize<int>(cc, numBrickChunks+1, "lbmChunkSlots");
         }
         if (centered && stencilSize == 1) {
             knownVelocity.initialize(cc, 3*numCoupled, elementSize, "lbmKnownVelocity");
@@ -688,9 +689,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         noise.initialize<mm_float4>(cc, numCoupled, "lbmNoise");
         noise.upload(vector<mm_float4>(numCoupled, mm_float4(0, 0, 0, 0)));
         // The sort keys are spread uniformly over their range, so the sort uses buckets of equal width: those of the nearest
-        // node are permuted by the sort (CouplingSortTrait), those of a stencil by the kernels (stencilKey()).
-        int numKeys = numCoupled*stencilSize;
-        sort = cc.createSort(new CouplingSortTrait(numKeys, numStored, numNodes, stencilSize == 1), numKeys, true);
+        // node are permuted by the sort (CouplingSortTrait), those of a stencil by the kernels (particleKey()).
+        sort = cc.createSort(new CouplingSortTrait(numCoupled, numStored, numNodes, stencilSize == 1), numCoupled, true);
         cc.getIntegrationUtilities().initRandomNumberGenerator(seed);
         if (decomposed && numSolidNodes > 0) {
             globalIsFluid.initialize<int>(cc, numNodes, "lbmGlobalIsFluid");
@@ -875,14 +875,17 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         defines["PADDED_NUM_ATOMS"] = cc.intToString(cc.getPaddedNumAtoms());
         defines["NUM_COUPLED"] = cc.intToString(numCoupled);
         defines["NUM_KEYS"] = cc.intToString(numCoupled*stencilSize);
-        defines["KEY_STRIDE"] = cc.intToString(numCoupled*stencilSize);
+        defines["KEY_STRIDE"] = cc.intToString(numCoupled);
         if (stencilSize > 1) {
             defines["STENCIL_WIDTH"] = cc.intToString(LBMStencils::width(lattice.interpolationStencil));
             defines["STENCIL_SIZE"] = cc.intToString(stencilSize);
             defines["DOT_GROUPS"] = cc.intToString(dotGroups);
-            long long scramble = scrambleFactor(numNodes);
-            defines["STENCIL_SCRAMBLE"] = cc.intToString(scramble);
-            defines["STENCIL_UNSCRAMBLE"] = cc.intToString(scrambleInverse(scramble, numNodes));
+            defines["BRICK_SIZE"] = cc.intToString(brickSize);
+            defines["NBX"] = cc.intToString(bricksAlong[0]);
+            defines["NBY"] = cc.intToString(bricksAlong[1]);
+            defines["NBZ"] = cc.intToString(bricksAlong[2]);
+            defines["NUM_BRICKS"] = cc.intToString(numBricks);
+            defines["BRICK_SCRAMBLE"] = cc.intToString(scrambleFactor(numBricks));
             if (centered)
                 defines["CENTERED_DRAG"] = "1";
             defines["OPEN_X"] = (lattice.isOpenAxis(0) ? "1" : "0");
@@ -933,30 +936,47 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         for (int i = 0; i < 5; i++)
             coupleKernel->addArg();     // index of the random numbers, drawNoise, isStep, gamma and kT, set later
         coupleKernel->addArg(isFluid);
-        if (stencilSize > 1)
+        if (stencilSize > 1) {
             coupleKernel->addArg(stencilWeight);
+            coupleKernel->addArg(stencilOrigin);
+        }
         sumReactionsKernel = coupling->createKernel(stencilSize > 1 ? "sumStencilReactions" : "sumCellReactions");
-        sumReactionsKernel->addArg(sortKeys);
+        sumReactionsKernel->addArg(stencilSize > 1 ? segmentNode : sortKeys);
         sumReactionsKernel->addArg(particleForce);
         sumReactionsKernel->addArg(cellReaction);
+        clearReactionsKernel = coupling->createKernel("clearCellReactions");
         if (stencilSize > 1) {
             for (ComputeArray* array : {&segmentStart, &chunkOffset, &sortedWeight, &sortedParticle})
                 sumReactionsKernel->addArg(*array);
-            countSegmentsKernel = coupling->createKernel("countKeySegments");
-            countSegmentsKernel->addArg(sortKeys);
-            countSegmentsKernel->addArg(chunkCount);
-            scanSegmentsKernel = coupling->createKernel("scanKeySegments");
-            scanSegmentsKernel->addArg(chunkCount);
-            scanSegmentsKernel->addArg(chunkOffset);
-            scanSegmentsKernel->addArg(segmentStart);
-            listSegmentsKernel = coupling->createKernel("listKeySegments");
-            for (ComputeArray* array : {&sortKeys, &chunkOffset, &stencilWeight, &segmentStart, &sortedWeight, &sortedParticle})
-                listSegmentsKernel->addArg(*array);
+            findBrickStartsKernel = coupling->createKernel("findBrickStarts");
+            findBrickStartsKernel->addArg(sortKeys);
+            findBrickStartsKernel->addArg(brickStart);
+            listCandidatesKernel = coupling->createKernel("listCandidates");
+            for (ComputeArray* array : {&sortKeys, &stencilOrigin, &candidateParticle, &candidateFirst})
+                listCandidatesKernel->addArg(*array);
+            countBricksKernel = coupling->createKernel("countBrickSegments");
+            for (ComputeArray* array : {&brickStart, &candidateFirst, &brickSegments, &brickSlots})
+                countBricksKernel->addArg(*array);
+            scanBrickChunksKernel = coupling->createKernel("scanBrickChunks");
+            for (ComputeArray* array : {&brickSegments, &brickSlots, &chunkSegments, &chunkSlots})
+                scanBrickChunksKernel->addArg(*array);
+            scanBrickTotalsKernel = coupling->createKernel("scanBrickTotals");
+            for (ComputeArray* array : {&chunkSegments, &chunkSlots, &segmentStart})
+                scanBrickTotalsKernel->addArg(*array);
+            listBricksKernel = coupling->createKernel("listBrickSegments");
+            for (ComputeArray* array : {&brickStart, &candidateParticle, &candidateFirst, &brickSegments, &brickSlots,
+                    &chunkSegments, &chunkSlots, &stencilWeight, &segmentStart, &segmentNode, &sortedWeight, &sortedParticle})
+                listBricksKernel->addArg(*array);
             if (centered)
-                listSegmentsKernel->addArg(keySegment);
+                listBricksKernel->addArg(keySegment);
+            findChunkSegmentsKernel = coupling->createKernel("findChunkSegments");
+            for (ComputeArray* array : {&segmentStart, &chunkSegments, &chunkOffset})
+                findChunkSegmentsKernel->addArg(*array);
+            clearReactionsKernel->addArg(segmentNode);
+            clearReactionsKernel->addArg(chunkOffset);
         }
-        clearReactionsKernel = coupling->createKernel("clearCellReactions");
-        clearReactionsKernel->addArg(sortKeys);
+        else
+            clearReactionsKernel->addArg(sortKeys);
         clearReactionsKernel->addArg(cellReaction);
         if (couplingHaloStorage.isInitialized()) {
             unpackCouplingHaloKernel = coupling->createKernel("unpackCouplingHalo");
@@ -993,6 +1013,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             prepareCenteredKernel->addArg(stencilNode);
             prepareCenteredKernel->addArg(gradientRhs);
             prepareCenteredKernel->addArg(gradientDiagonal);
+            prepareCenteredKernel->addArg(stencilOrigin);
             if (hasFloatForceBuffers())
                 for (int i = 0; i < 2; i++)
                     prepareCenteredKernel->addArg();    // floating point force buffers and their number, set on first use
@@ -1009,7 +1030,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             multiplyKernel->addArg();       // gamma, set later
             if (decomposed) {
                 gatherDensityKernel = coupling->createKernel("gatherSegmentDensity");
-                for (ComputeArray* array : {&sortKeys, &segmentStart, &chunkOffset, &densityDeviation, &segmentDensity})
+                for (ComputeArray* array : {&segmentNode, &segmentStart, &chunkOffset, &densityDeviation, &segmentDensity})
                     gatherDensityKernel->addArg(*array);
                 interpWeightsKernel = coupling->createKernel("stencilInterpolationWeights");
                 for (ComputeArray* array : {&stencilWeight, &keySegment, &segmentDensity, &interpWeight})
@@ -1474,7 +1495,7 @@ void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
             if (hasFloatForceBuffers()) {
                 ArrayInterface& buffers = cc.getForceBuffers();
                 numFloatForceBuffers = buffers.getSize()/cc.getPaddedNumAtoms();
-                int index = (stencilSize > 1 ? 24 : 16);
+                int index = (stencilSize > 1 ? 25 : 16);
                 prepareCenteredKernel->setArg(index, buffers);
                 prepareCenteredKernel->setArg(index+1, numFloatForceBuffers);
             }
@@ -1575,10 +1596,22 @@ void CommonCalcLBMForceKernel::sumOverRanks(ComputeArray& array) {
 }
 
 void CommonCalcLBMForceKernel::listKeySegments() {
-    int numChunks = chunkCount.getSize();
-    countSegmentsKernel->execute(numChunks*blockSize, blockSize);
-    scanSegmentsKernel->execute(blockSize, blockSize);
-    listSegmentsKernel->execute(numChunks*blockSize, blockSize);
+    int numCoupled = lattice.particles.size(), numBrickChunks = (numBricks+blockSize-1)/blockSize;
+    findBrickStartsKernel->execute(numBricks+1);
+    listCandidatesKernel->execute(numCoupled);
+    countBricksKernel->execute(brickGroups*blockSize, blockSize);
+    scanBrickChunksKernel->execute(min(numBrickChunks, brickGroups)*blockSize, blockSize);
+    scanBrickTotalsKernel->execute(blockSize, blockSize);
+    listBricksKernel->execute(brickGroups*blockSize, blockSize);
+    findChunkSegmentsKernel->execute(chunkOffset.getSize());
+#ifdef LBM_DEBUG
+    // Every slot of every stencil falls on one node, so the segments hold them all.
+    vector<int> totals;
+    chunkSlots.download(totals);
+    if (totals.back() != numCoupled*stencilSize)
+        throw OpenMMException("LBMForce: the segments of the stencils hold " + to_string(totals.back()) + " slots instead of " +
+                to_string(numCoupled*stencilSize));
+#endif
 }
 
 void CommonCalcLBMForceKernel::exchangeSegmentDensity() {
@@ -1605,7 +1638,7 @@ void CommonCalcLBMForceKernel::solveStencilDrag() {
     // forces are written into particleForce.  The dot products are three per vector, in gradientScalars: r.z (at 0 and 12,
     // alternately the old and the new value), the right-hand side squared (3), r.r (6) and p.Ap (9); the host reads them
     // to decide when to stop.
-    int numCoupled = lattice.particles.size(), numChunks = chunkCount.getSize();
+    int numCoupled = lattice.particles.size(), numChunks = chunkOffset.getSize()-1;
     auto multiply = [&](ComputeArray& p) {
         spreadKernel->setArg(4, p);
         spreadKernel->execute(numChunks*blockSize, blockSize);
