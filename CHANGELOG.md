@@ -3,6 +3,16 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Documentation
+- `docs/theory.md`, section 1: the regularized collision is now derived from the BGK update with Guo forcing, with the
+  non-equilibrium part $`f^{\mathrm{neq}} = f - f^{\mathrm{eq}} + S/2`$ of accLB and LBFAST. Half of the forcing sits
+  in the second-order non-equilibrium Hermite coefficient, so the forcing enters the second moment with weight
+  $`1 - \omega/2`$, as in the BGK form; the text said only that the prefactor 1/2 gives the right momentum. The section
+  also says how the plugin computes $`\Pi^{\mathrm{neq}}`$, with the equilibrium at $`\mathbf j/\rho`$: this holds
+  the half forcing, up to a term $`\mathbf F\mathbf F/(4\rho)`$ quadratic in the force. The code is unchanged.
+
 ## 0.6.0 (2026-10-12)
 
 A faster coupling through the three-point and `Keys` stencils on the GPU platforms. The results are those of version

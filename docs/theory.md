@@ -22,7 +22,17 @@ The fluid is a D3Q19 lattice Boltzmann model, weakly compressible:
   Here $`c_s`$ is the speed of sound of the lattice: $`c_s^2 = 1/3`$ in lattice units, everywhere in this document.
 
 **Collision: regularized, with Guo forcing [1, 2].** With the force density $`\mathbf F`$ acting on a node
-during the step, the post-collision populations are
+during the step, the scheme is the BGK update with Guo forcing,
+
+```math
+f_i(\mathbf x + \mathbf c_i, t + 1) = f_i + \omega\bigl(f_i^{\mathrm{eq}}(\rho, \mathbf u^{*}) - f_i\bigr) +
+\Bigl(1 - \frac{\omega}{2}\Bigr) S_i,
+```
+
+written in the regularized form of accLB and LBFAST [3, 4]. With the non-equilibrium part defined as
+$`f_i^{\mathrm{neq}} = f_i - f_i^{\mathrm{eq}}(\rho, \mathbf u^{*}) + \tfrac12 S_i`$, the update reads
+$`f_i^{\mathrm{eq}} + (1 - \omega)\, f_i^{\mathrm{neq}} + \tfrac12 S_i`$, and the regularized collision keeps only the
+second-order Hermite part of $`f^{\mathrm{neq}}`$. The post-collision populations are
 
 ```math
 f_i^{*} = f_i^{\mathrm{eq}}(\rho, \mathbf u^{*}) + (1 - \omega)\, f_i^{\mathrm{neq,reg}} + \tfrac12 S_i,
@@ -30,25 +40,45 @@ f_i^{*} = f_i^{\mathrm{eq}}(\rho, \mathbf u^{*}) + (1 - \omega)\, f_i^{\mathrm{n
 
 where:
 
-- $`\mathbf u^{*} = (\mathbf j + \mathbf F/2)/\rho`$ is the velocity shifted by half a force;
-- $`f_i^{\mathrm{neq,reg}} = \frac{w_i}{2c_s^4}\, H^{(2)}(\mathbf c_i) : \Pi^{\mathrm{neq}}`$ is rebuilt from the
-  non-equilibrium stress
-  $`\Pi^{\mathrm{neq}} = \sum_i H^{(2)}(\mathbf c_i)\,\bigl(f_i - f_i^{\mathrm{eq}}(\rho, \mathbf j/\rho)\bigr)`$,
-  with the second-order Hermite polynomial $`H^{(2)}(\mathbf c) = \mathbf c\,\mathbf c - c_s^2 I`$. In
-  $`\Pi^{\mathrm{neq}}`$ the $`-c_s^2 I`$ part of $`H^{(2)}`$ does not contribute, because the equilibrium has the
-  same density as the populations and $`\sum_i (f_i - f_i^{\mathrm{eq}}) = 0`$: $`\Pi^{\mathrm{neq}}`$ is also the
-  plain second moment of $`f - f^{\mathrm{eq}}`$, which is how the reference library computes it. In
-  $`f^{\mathrm{neq,reg}}`$ the $`-c_s^2 I`$ part gives the term $`-c_s^2\,\mathrm{tr}(\Pi^{\mathrm{neq}})`$, without
-  which $`f^{\mathrm{neq,reg}}`$ would carry mass;
-- $`S_i = w_i\left[(\mathbf c_i - \mathbf u^{*})/c_s^2 +
-  (\mathbf c_i\cdot\mathbf u^{*})\,\mathbf c_i/c_s^4\right]\cdot\mathbf F`$ is the Guo source.
-
-The prefactor of $`S_i`$ is 1/2, not the $`(1 - \omega/2)`$ of the BGK form. The equilibrium is already shifted by
-$`\mathbf F/2`$ and the regularized $`f^{\mathrm{neq}}`$ has no first-order part, so with 1/2 the momentum increases
-by exactly $`\mathbf F`$ per step, at every relaxation time [3, 4].
-
 - $`\mathbf F = \rho\mathbf g`$ for a body acceleration $`\mathbf g`$ (lattice units); the coupling forces are added
-  to it.
+  to it;
+- $`\mathbf u^{*} = (\mathbf j + \mathbf F/2)/\rho`$ is the velocity shifted by half a force;
+- $`S_i = w_i\left[(\mathbf c_i - \mathbf u^{*})/c_s^2 +
+  (\mathbf c_i\cdot\mathbf u^{*})\,\mathbf c_i/c_s^4\right]\cdot\mathbf F`$ is the Guo source;
+- $`f_i^{\mathrm{neq,reg}} = \frac{w_i}{2c_s^4}\, H^{(2)}(\mathbf c_i) : \Pi^{\mathrm{neq}}`$ is rebuilt from the
+  second-order non-equilibrium Hermite coefficient $`\Pi^{\mathrm{neq}} = \sum_i H^{(2)}(\mathbf c_i)\, f_i^{\mathrm{neq}}`$
+  (the non-equilibrium stress), with the second-order Hermite polynomial
+  $`H^{(2)}(\mathbf c) = \mathbf c\,\mathbf c - c_s^2 I`$. In $`f^{\mathrm{neq,reg}}`$ the $`-c_s^2 I`$ part gives the
+  term $`-c_s^2\,\mathrm{tr}(\Pi^{\mathrm{neq}})`$, without which $`f^{\mathrm{neq,reg}}`$ would carry mass.
+
+**Half of the forcing is in the non-equilibrium stress.** Because $`f^{\mathrm{neq}}`$ contains $`\tfrac12 S_i`$,
+$`\Pi^{\mathrm{neq}}`$ holds half of the second moment of the forcing,
+$`\sum_i H^{(2)}(\mathbf c_i)\, S_i = \mathbf u^{*}\mathbf F + \mathbf F\mathbf u^{*}`$. In the second moment of the
+update the forcing then enters with $`(1 - \omega)/2 + 1/2 = 1 - \omega/2`$, the weight of the BGK form [2], and the
+regularized update has the same density, momentum and second moment as the BGK update. Without the half forcing in
+$`\Pi^{\mathrm{neq}}`$, the second moment would receive the forcing with weight 1/2 instead of $`1 - \omega/2`$. In
+the first moment $`f^{\mathrm{neq,reg}}`$ has no part, $`f^{\mathrm{eq}}(\rho, \mathbf u^{*})`$ gives
+$`\mathbf j + \mathbf F/2`$ and $`\tfrac12 S_i`$ gives $`\mathbf F/2`$: the momentum increases by exactly
+$`\mathbf F`$ per step, at every relaxation time [3, 4].
+
+**How the plugin computes $`\Pi^{\mathrm{neq}}`$.** As in the reference library, the moments of a node are
+computed before the coupling forces of the step are known (the coupling comes after them, section 2), with the
+equilibrium at the unshifted velocity:
+
+```math
+\Pi^{\mathrm{neq}} = \sum_i H^{(2)}(\mathbf c_i)\,\bigl(f_i - f_i^{\mathrm{eq}}(\rho, \mathbf j/\rho)\bigr).
+```
+
+This already holds the half forcing: since
+$`\sum_i H^{(2)}(\mathbf c_i)\, f_i^{\mathrm{eq}}(\rho, \mathbf j/\rho) =
+\sum_i H^{(2)}(\mathbf c_i)\bigl(f_i^{\mathrm{eq}}(\rho, \mathbf u^{*}) - \tfrac12 S_i\bigr) + \mathbf F\mathbf F/(4\rho)`$,
+this $`\Pi^{\mathrm{neq}}`$ is the coefficient defined above minus $`\mathbf F\mathbf F/(4\rho)`$. The difference is
+quadratic in the force: it changes the post-collision second moment by $`-(1 - \omega)\,\mathbf F\mathbf F/(4\rho)`$
+and leaves density and momentum unchanged. These identities were checked in exact rational arithmetic on the D3Q19
+lattice, with random populations off equilibrium and random forces. In $`\Pi^{\mathrm{neq}}`$ the $`-c_s^2 I`$ part
+of $`H^{(2)}`$ does not contribute, because the equilibrium has the same density as the populations and
+$`\sum_i (f_i - f_i^{\mathrm{eq}}) = 0`$: $`\Pi^{\mathrm{neq}}`$ is also the plain second moment of
+$`f - f^{\mathrm{eq}}`$, which is how the reference library computes it.
 
 **Relaxation and streaming.** The relaxation frequency is $`\omega = 1/\tau`$, with
 $`\tau = 3\nu\,\Delta t/\Delta x^2 + 1/2`$.
@@ -1670,8 +1700,10 @@ of the nearest node of the lattice (Open faces, above), whose block and halo hol
 1. J. Latt and B. Chopard, Math. Comput. Simul. 72, 165 (2006): regularized collision.
 2. Z. Guo, C. Zheng and B. Shi, Phys. Rev. E 65, 046308 (2002): forcing scheme.
 3. accLB, Procedia Comput. Sci. 267, 40-51 (2025), doi:10.1016/j.procs.2025.08.231, eq. 6:
-   $`f = f^{\mathrm{eq}} + (1 - \omega)\, f^{\mathrm{neq}} + S/2`$.
-4. LBFAST, Procedia Comput. Sci. 286, 34-47 (2026), doi:10.1016/j.procs.2026.08.017, eq. 3.
+   $`f = f^{\mathrm{eq}} + (1 - \omega)\, f^{\mathrm{neq}} + S/2`$, with $`f^{\mathrm{neq}} = f - f^{\mathrm{eq}} + S/2`$
+   and its second-order Hermite coefficient in eq. 7.
+4. LBFAST, Procedia Comput. Sci. 286, 34-47 (2026), doi:10.1016/j.procs.2026.08.017, eq. 3, with
+   $`f^{\mathrm{neq}} = f - f^{\mathrm{eq}} + S/2`$.
 5. P. Ahlrichs and B. Dünweg, J. Chem. Phys. 111, 8225 (1999): frictional particle-fluid coupling.
 6. B. Dünweg and A. J. C. Ladd, Adv. Polym. Sci. 221, 89 (2009): review of lattice Boltzmann for soft matter.
 7. J. Latt, Choice of units in lattice Boltzmann simulations, LBMethod.org (2008).
