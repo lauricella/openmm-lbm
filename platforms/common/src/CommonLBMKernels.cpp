@@ -335,6 +335,13 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
     for (int face = 0; face < 6; face++)
         densityVelocityFaces = densityVelocityFaces || (lattice.faceBoundary[face] == LBMForce::DensityVelocity);
     int kindStride = (densityVelocityFaces ? 8 : 4);
+    // With a fluctuating fluid the boundary nodes of regularized walls and DensityVelocity faces draw 19 normal
+    // numbers (five float4) instead of 15 (four float4), docs/theory.md, section 7.
+    bool equilibriumBoundaryNoise = false;
+    if (lattice.fluidFluctuations)
+        for (int kind : boundaries.kind)
+            equilibriumBoundaryNoise = equilibriumBoundaryNoise || LBMBoundaries::hasEquilibriumNoise(kind);
+    boundaryRandomStride = (equilibriumBoundaryNoise ? 5 : 4);
     staticBoundaryMomentum = Vec3();
     for (int b = 0; b < (int) boundaries.nodes.size(); b++) {
         if (!decomposition.owns(boundaries.nodes[b]))
@@ -707,8 +714,8 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         // The buffer of the random numbers grows to the numbers of a step now, rather than in the first step.  The
         // checkpoints of OpenMM write the buffer as it is but read it back with the size it has in the Context that
         // loads them (OpenMM 8.3), so a Context created to load a checkpoint must already have the same size.  The
-        // boundary nodes draw four float4 more each, after those of all the nodes.
-        cc.getIntegrationUtilities().prepareRandomNumbers(4*(numLocal+numBoundaryNodes));
+        // boundary nodes draw four or five float4 more each, after those of all the nodes.
+        cc.getIntegrationUtilities().prepareRandomNumbers(4*numLocal+boundaryRandomStride*numBoundaryNodes);
     }
 
     // Compile the kernels.
@@ -749,6 +756,11 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         defines["NUM_BOUNDARY_NODES"] = cc.intToString(numBoundaryNodes);
         if (densityVelocityFaces)
             defines["DENSITY_VELOCITY_FACES"] = "1";
+        defines["BOUNDARY_RANDOM_STRIDE"] = cc.intToString(boundaryRandomStride);
+        if (boundaryRandomStride == 5) {
+            defines["EQUILIBRIUM_BOUNDARY_NOISE"] = "1";
+            defines["SQRT3"] = cc.doubleToString(sqrt(3.0), true);
+        }
     }
     const char* openAxis[3] = {"OPEN_X", "OPEN_Y", "OPEN_Z"};
     for (int a = 0; a < 3; a++)
@@ -1266,7 +1278,7 @@ void CommonCalcLBMForceKernel::advanceFluid() {
     // may already have drawn: the sequence is the same in both cases.
     if (lattice.fluidFluctuations && lattice.fluidKT > 0) {
         int numBoundaryNodes = (boundaryNodes.isInitialized() ? boundaryNodes.getSize() : 0);
-        int randomIndex = cc.getIntegrationUtilities().prepareRandomNumbers(4*(numLocal+numBoundaryNodes));
+        int randomIndex = cc.getIntegrationUtilities().prepareRandomNumbers(4*numLocal+boundaryRandomStride*numBoundaryNodes);
         collideKernel->setArg(13, randomIndex);
         if (applyBoundariesKernel)
             applyBoundariesKernel->setArg(17, randomIndex);

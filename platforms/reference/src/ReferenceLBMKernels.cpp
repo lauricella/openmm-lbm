@@ -261,6 +261,21 @@ void ReferenceCalcLBMForceKernel::initialize(const System& system, const LBMForc
         }
     }
 
+    // With a fluctuating fluid the boundary nodes of regularized walls and DensityVelocity faces keep the stress part
+    // of the random part of their own collision, which their rebuilt populations use (applyBoundaries()).
+
+    boundaryOfNode.clear();
+    boundaryCollisionStress.clear();
+    bool equilibriumNoise = false;
+    for (int kind : boundaryKind)
+        equilibriumNoise = equilibriumNoise || LBMBoundaries::hasEquilibriumNoise(kind);
+    if (lattice.fluidFluctuations && equilibriumNoise) {
+        boundaryOfNode.assign(numNodes, -1);
+        for (int b = 0; b < (int) boundaryNodes.size(); b++)
+            boundaryOfNode[boundaryNodes[b]] = b;
+        boundaryCollisionStress.assign(D3Q19::numVelocities*boundaryNodes.size(), 0.0);
+    }
+
     // Coupled particles: masses in units of the mass of a cell, m_c = rho0 dx^3.  The coupling force is zero
     // before the first step.
 
@@ -1087,8 +1102,12 @@ void ReferenceCalcLBMForceKernel::collideNode(int node, double mu, const double*
     D3Q19::equilibriumDeviation(densityDeviation[node], ux, uy, uz, dfeq);
     D3Q19::regularizedNonEquilibrium(&piNeq[6*node], fneq);
     D3Q19::guoForcing(ux, uy, uz, F[0], F[1], F[2], s);
-    if (normal != NULL)
+    if (normal != NULL) {
         D3Q19::fluctuation(normal, sqrt(mu*r*omega*(2.0-omega)), sqrt(mu*r), xi);
+        if (!boundaryOfNode.empty() && boundaryOfNode[node] >= 0)
+            D3Q19::fluctuation(normal, sqrt(mu*r*omega*(2.0-omega)), 0.0,
+                    &boundaryCollisionStress[D3Q19::numVelocities*boundaryOfNode[node]]);
+    }
     for (int q = 0; q < D3Q19::numVelocities; q++) {
         int di = (i + D3Q19::cx[q] + nx)%nx;
         int dj = (j + D3Q19::cy[q] + ny)%ny;
@@ -1202,6 +1221,13 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
     //    memory, that damps the staggered mode and does not change steady flows.
     //  - Nodes shared by several Density faces (and no Velocity face): rho_b of the first face and u_b = 0.
     //  - DensityVelocity face: rho_b and u_b those of the face, without the mass balance and the filter.
+    // With a fluctuating fluid the rebuilt populations of regularized walls and DensityVelocity faces take the random
+    // part of a node at equilibrium, with 19 normal numbers of their own (density, momentum and ghost modes with the
+    // amplitude sqrt(mu rho_b), stress modes with sqrt(mu rho_b (1 - c))), minus c times the stress part of the random
+    // part of the collision of x, c = (1 - omega)^2/(omega (2 - omega)): their populations then have the covariance
+    // of a node at equilibrium and no correlation with those that x keeps or sends into the fluid, so the state of
+    // the fluid at equilibrium is unchanged (docs/theory.md, section 7).  The other faces take the random part of a
+    // collision, with 15 normal numbers.
     // On walls the solid nodes receive the momentum of the populations that x sent into them and give that of the
     // rebuilt populations.  Each node reads only its own populations and moments and the solid slots that it wrote
     // itself.
@@ -1213,7 +1239,8 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     double mu = 3.0*lattice.fluidKT*lattice.dt*lattice.dt/(cellMass*lattice.dx*lattice.dx);
     double dfeq[D3Q19::numVelocities], fneq[D3Q19::numVelocities], s[D3Q19::numVelocities];
-    double xi[D3Q19::numVelocities], normal[15];
+    double xi[D3Q19::numVelocities], normal[D3Q19::numVelocities];
+    double c = D3Q19::boundaryStressWeight(omega);
     Vec3 exchanged;
     for (int b = 0; b < (int) boundaryNodes.size(); b++) {
         int node = boundaryNodes[b], unknown = unknownDirections[b], solid = solidDirections[b];
@@ -1248,7 +1275,14 @@ void ReferenceCalcLBMForceKernel::applyBoundaries() {
         D3Q19::equilibriumDeviation(dr, ub[0], ub[1], ub[2], dfeq);
         D3Q19::regularizedNonEquilibrium(&piNeq[6*node], fneq);
         D3Q19::guoForcing(ub[0], ub[1], ub[2], Fb[0], Fb[1], Fb[2], s);
-        if (fluctuate) {
+        if (fluctuate && LBMBoundaries::hasEquilibriumNoise(kind)) {
+            for (int m = 0; m < D3Q19::numVelocities; m++)
+                normal[m] = getGaussianRandom();
+            D3Q19::equilibriumFluctuation(normal, sqrt(mu*rb), sqrt(mu*rb*max(0.0, 1.0-c)), sqrt(mu*rb), xi);
+            for (int q = 0; q < D3Q19::numVelocities; q++)
+                xi[q] -= c*boundaryCollisionStress[D3Q19::numVelocities*b+q];
+        }
+        else if (fluctuate) {
             for (int m = 0; m < 15; m++)
                 normal[m] = getGaussianRandom();
             D3Q19::fluctuation(normal, sqrt(mu*rb*omega*(2.0-omega)), sqrt(mu*rb), xi);

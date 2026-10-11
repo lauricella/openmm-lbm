@@ -169,6 +169,9 @@ private:
     OpenMM::Vec3 staticWallMomentum;
     /** The same for the nodes of regularized walls: the part w of the populations that they receive and send. */
     OpenMM::Vec3 staticBoundaryMomentum;
+    /** Float4 of random numbers per boundary node and step with a fluctuating fluid: 5 with regularized walls or
+        DensityVelocity faces (19 normal numbers, docs/theory.md, section 7), 4 otherwise. */
+    int boundaryRandomStride = 4;
     /** Work group size and number of work groups of the reductions. */
     int blockSize, numGroups;
     /** Deviations of the populations from the rest equilibrium, f_q - w_q, at [q*numNodes + node]. */

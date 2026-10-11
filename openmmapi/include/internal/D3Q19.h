@@ -184,6 +184,28 @@ public:
             xi[q] = w[q]*sum;
         }
     }
+    /**
+     * Random part of the populations of a node at equilibrium, with every mode (docs/theory.md, section 7, Walls and
+     * faces with a fluctuating fluid): fluctuation() of r[0...14] with the given stress and ghost amplitudes, plus the
+     * density and the momentum, w_q conservedAmplitude (r[15] + sqrt(3) c_q.(r[16], r[17], r[18])), that is
+     * phi_k = conservedAmplitude*sqrt(b_k) for k = 0...3.  With the three amplitudes sqrt(mu rho) its covariance is
+     * mu rho w_q delta_pq, that of the populations of a node at equilibrium.
+     */
+    static void equilibriumFluctuation(const double r[19], double conservedAmplitude, double stressAmplitude,
+            double ghostAmplitude, double xi[19]) {
+        fluctuation(r, stressAmplitude, ghostAmplitude, xi);
+        for (int q = 0; q < 19; q++)
+            xi[q] += w[q]*conservedAmplitude*(r[15] + std::sqrt(3.0)*(cx[q]*r[16] + cy[q]*r[17] + cz[q]*r[18]));
+    }
+    /**
+     * The weight c = (1 - omega)^2/(omega (2 - omega)) of the stress part of the random part of its own collision that
+     * a boundary node subtracts from the random part of its rebuilt populations (docs/theory.md, section 7, Walls and
+     * faces with a fluctuating fluid).  The stress modes of the rebuilt populations then have the amplitude
+     * sqrt(mu rho (1 - c)), real for 0.586 <= tau <= 3.41.
+     */
+    static double boundaryStressWeight(double omega) {
+        return (1.0-omega)*(1.0-omega)/(omega*(2.0-omega));
+    }
 };
 
 } // namespace LBMPlugin

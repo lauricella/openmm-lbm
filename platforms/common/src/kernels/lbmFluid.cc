@@ -411,8 +411,10 @@ KERNEL void computeWallExchange(GLOBAL const mixed* RESTRICT f, GLOBAL const int
  * (bits unknown).  Each of them is rebuilt as the population that a node at x - c_q would send, a node with the
  * moments of x except the imposed one:
  *   feq_q(rho_b, u_b) + (1 - omega) fneq_q(Pi_neq of x) + S_q(u_b, rho_b g)/2,
- * plus, with a fluctuating fluid, a random part of its own, from the four float4 of OpenMM's random numbers of the
- * node after those of all the nodes.  The known populations of x are not changed.  kindAndFace = kind + 4*(face + 1),
+ * plus, with a fluctuating fluid, a random part of its own, from the BOUNDARY_RANDOM_STRIDE float4 of OpenMM's random
+ * numbers of the node after those of all the nodes: with EQUILIBRIUM_BOUNDARY_NOISE the random part of a node at
+ * equilibrium correlated with the collision of the node for walls and DensityVelocity faces (docs/theory.md, section
+ * 7), the random part of a collision otherwise.  The known populations of x are not changed.  kindAndFace = kind + 4*(face + 1),
  * or kind + 8*(face + 1) with DENSITY_VELOCITY_FACES; faceParameters holds the velocity and rho - 1 of each face (4
  * per face).
  *  - Walls (kind 0, next to solid nodes) and Velocity faces (kind 1): u_b = 0 or the velocity of the face; rho_b
@@ -488,10 +490,45 @@ KERNEL void applyBoundaries(GLOBAL mixed* RESTRICT f, GLOBAL const int* RESTRICT
             rest[q] = (1-omega)*(4.5f*w*(hxx*pxx + hyy*pyy + hzz*pzz + 2.0f*((cx[q]*cy[q])*pxy + (cx[q]*cz[q])*pxz + (cy[q]*cz[q])*pyz)));
         }
 #ifdef FLUID_FLUCTUATIONS
+#ifdef EQUILIBRIUM_BOUNDARY_NOISE
+        if (mu > 0 && (kind == 0 || kind == 4)) {
+            // Regularized walls and DensityVelocity faces: the random part of a node at equilibrium, from 19 normal
+            // numbers of the node (density, momentum and ghost modes with the amplitude sqrt(mu rho_b), stress modes
+            // with sqrt(mu rho_b (1 - c))), minus c times the stress part of the random part of the collision of the
+            // node, which reads the same numbers as collideAndStream, c = (1 - omega)^2/(omega (2 - omega)).
+            mixed c = (1-omega)*(1-omega)/(omega*(2-omega));
+            mixed conservedAmplitude = sqrt(mu*rho), ghostAmplitude = conservedAmplitude;
+            mixed stressAmplitude = sqrt(mu*rho*(c < 1 ? 1-c : 0));
+            for (int b4 = 0; b4 < 5; b4++) {
+                float4 r4 = random[randomIndex + 4*NUM_NODES + BOUNDARY_RANDOM_STRIDE*b + b4];
+                float r[4] = {r4.x, r4.y, r4.z, r4.w};
+                for (int c4 = 0; c4 < 4; c4++) {
+                    int m = 4*b4 + c4;
+                    if (m < 15) {
+                        mixed a = (m < 6 ? stressAmplitude : ghostAmplitude)*r[c4];
+                        for (int q = 0; q < 19; q++)
+                            rest[q] += fluctuationBasis[q*15+m]*a;
+                    }
+                    else if (m < 19) {
+                        mixed a = conservedAmplitude*r[c4];
+                        for (int q = 0; q < 19; q++)
+                            rest[q] += latticeWeight(q)*a*(m == 15 ? 1 : SQRT3*(m == 16 ? cx[q] : m == 17 ? cy[q] : cz[q]));
+                    }
+                }
+            }
+            mixed collisionStress = c*sqrt(mu*(1+densityDeviation[s])*omega*(2-omega));
+            float4 c0 = random[randomIndex + 4*node], c1 = random[randomIndex + 4*node + 1];
+            float rc[6] = {c0.x, c0.y, c0.z, c0.w, c1.x, c1.y};
+            for (int m = 0; m < 6; m++)
+                for (int q = 0; q < 19; q++)
+                    rest[q] -= fluctuationBasis[q*15+m]*collisionStress*rc[m];
+        }
+        else
+#endif
         if (mu > 0) {
             mixed stressAmplitude = sqrt(mu*rho*omega*(2-omega)), ghostAmplitude = sqrt(mu*rho);
             for (int b4 = 0; b4 < 4; b4++) {
-                float4 r4 = random[randomIndex + 4*NUM_NODES + 4*b + b4];
+                float4 r4 = random[randomIndex + 4*NUM_NODES + BOUNDARY_RANDOM_STRIDE*b + b4];
                 float r[4] = {r4.x, r4.y, r4.z, r4.w};
                 for (int c = 0; c < 4; c++) {
                     int m = 4*b4 + c;

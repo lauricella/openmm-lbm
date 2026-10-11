@@ -7,6 +7,7 @@
  * SPDX-License-Identifier: MIT                                               *
  * -------------------------------------------------------------------------- */
 
+#include "internal/D3Q19.h"
 #include "internal/LBMDecomposition.h"
 #include "internal/LBMForceImpl.h"
 #include "LBMKernels.h"
@@ -327,6 +328,20 @@ void LBMForceImpl::initialize(ContextImpl& context) {
                     << "(kT in lattice units goes as dt^2/dx^5)." << endl;
         cerr << message.str();
     }
+
+    // With a fluctuating fluid the rebuilt populations of regularized walls and DensityVelocity faces hold exactly the
+    // equilibrium of the fluid when the stress amplitude sqrt(1 - c) of their random part is real,
+    // c = (1 - omega)^2/(omega (2 - omega)) <= 1, that is for 0.586 <= tau <= 3.41 (docs/theory.md, section 7); outside
+    // it the amplitude is set to zero and the nodes next to them are slightly away from equilibrium.
+
+    bool equilibriumNoise = (!lattice.solidNodes.empty() && lattice.wallScheme == LBMForce::Regularized);
+    for (int face = 0; face < 6; face++)
+        equilibriumNoise = equilibriumNoise || (lattice.faceBoundary[face] == LBMForce::DensityVelocity);
+    if (warn && lattice.fluidFluctuations && lattice.fluidKT > 0 && equilibriumNoise &&
+            D3Q19::boundaryStressWeight(lattice.omega) > 1.0)
+        cerr << "Warning: LBMForce: with fluid fluctuations, regularized walls and DensityVelocity faces keep the "
+             << "fluid next to them exactly at equilibrium only for 0.586 <= tau <= 3.41; tau = " << lattice.tau
+             << " is outside, and the fluid next to them is slightly away from equilibrium." << endl;
 #ifdef LBM_DEBUG
     double cellMass = lattice.density*lattice.dx*lattice.dx*lattice.dx;
     cerr << "LBMForce lattice: dx = " << lattice.dx << " nm, dt = " << lattice.dt << " ps, m_c = " << cellMass

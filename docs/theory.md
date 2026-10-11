@@ -210,10 +210,10 @@ nodes. The validation tests check the profile to 1e-9.
   $`\tau = 7/8`$), on the solid nodes with regularized walls (exact at $`\tau = 1`$).
 - With fluid fluctuations bounce-back walls are in exact thermal equilibrium with the fluid: bounce-back
   permutes the populations and keeps the Gaussian equilibrium state, so the fluctuations of all modes keep
-  their equilibrium variance next to the walls. Next to regularized walls the fluctuations are at
-  equilibrium within the statistics from the second node on; on the boundary node the density and the
-  momentum normal to the wall are at equilibrium, the momentum along the wall is 3 to 4 % low and some
-  stress and ghost modes up to 9 % low ($`\tau = 0.8`$, `docs/validation.md`).
+  their equilibrium variance next to the walls. Regularized walls are in exact thermal equilibrium too, with
+  the random part of their rebuilt populations of section 7 (version 0.5.0), for $`0.586 \le \tau \le 3.41`$; up to
+  version 0.4.0 the momentum along the wall of the boundary node was 3 to 4 % low and some stress and ghost modes
+  up to 9 % low ($`\tau = 0.8`$, `docs/validation.md`).
 - With Density faces (below) bounce-back walls let a spurious staggered mode survive, which the Density
   faces damp.
 
@@ -1148,10 +1148,60 @@ populations over the step from the fluid node to the wall and back, since the gh
 collision, and it would matter only for walls at a temperature different from that of the fluid, which the force
 does not have. The plugin therefore has no accommodation parameter: its bounce-back walls are those with
 $`\alpha = 0`$. The regularized walls of section 1, and the open faces, rebuild the populations that come from the
-solid nodes (or from beyond the face) with a random part drawn on purpose and with the stress of $`\mathbf x`$,
-returning only the mass that arrives: for the fluctuations of the stress and ghost modes they behave as a wall with
-$`\alpha = 1`$; next to them the fluctuations are at equilibrium from the second node on (section 1, Which wall to
-choose).
+solid nodes (or from beyond the face) with a random part drawn on purpose and with the stress of $`\mathbf x`$
+(below).
+
+**Walls and faces with a fluctuating fluid** (version 0.5.0). The populations that a boundary node $`\mathbf x`$
+rebuilds (section 1) are those of a node beyond the boundary, so with a fluctuating fluid they take a random part
+too. For the state of the fluid at equilibrium (each population of each node independent, with the variance
+$`\mu\rho w_q`$) to stay unchanged by a step, the rebuilt populations $`f_U`$ ($`U`$ the unknown directions) must have
+that covariance themselves and no correlation with the populations that $`\mathbf x`$ keeps or sends into the fluid
+in its collision. Linearized about rest, with $`W = \mathrm{diag}(w_q)`$ and the projectors $`P_0`$, $`P_1`$, $`P_2`$,
+$`P_G`$ on the density, the momentum, the stress and the ghost modes (orthogonal with the weights $`w_q`$), a
+regularized wall or a `DensityVelocity` face rebuilds
+$`f_U = (1-\omega)\,[P_2 f(\mathbf x)]_U + \eta_U`$ (plus the parts that do not fluctuate), while $`\mathbf x`$ sends
+$`f^* = (P_0 + P_1 + (1-\omega)P_2)\,f(\mathbf x) + n_x`$, with the random part $`n_x`$ of its collision of covariance
+$`\mu\rho(\omega(2-\omega)P_2 + P_G)W`$. The two conditions give
+
+```math
+\eta_U = -c\,[P_2\,n_x]_U + \zeta_U ,\qquad c = \frac{(1-\omega)^2}{\omega(2-\omega)} ,\qquad
+\mathrm{Cov}(\zeta) = \mu\rho\,(I - c\,P_2)\,W :
+```
+
+the rebuilt populations subtract $`c`$ times the stress part of the random part of the collision of $`\mathbf x`$ (the
+stress of $`\mathbf x`$, which they copy with the factor $`1 - \omega`$, is also sent into the fluid), and add the random
+part $`\zeta`$ of a node at equilibrium, whose density, momentum and ghost modes have the amplitude $`\sqrt{\mu\rho}`$
+and whose stress modes have $`\sqrt{\mu\rho(1-c)}`$ (`D3Q19::equilibriumFluctuation()`, 19 normal numbers per boundary
+node and step, five float4 on the GPU platforms; the stress part of the collision of $`\mathbf x`$ is read again from
+its own normal numbers). For regularized walls the density of the wall from the mass balance takes back the part of
+$`\eta`$ along $`w_U`$, and the condition still holds. $`\zeta`$ is real for $`c \le 1`$, that is $`(1-\omega)^2 \le 1/2`$,
+$`0.586 \le \tau \le 3.41`$; outside it the stress amplitude is set to zero, the fluid next to these boundaries is
+slightly away from equilibrium, and the force prints a warning. At $`\tau = 1`$, $`c = 0`$: independent random numbers
+of variance $`\mu\rho w_q`$ for each rebuilt population. The deterministic boundary conditions are unchanged, and so
+is every run without fluctuations. Up to version 0.4.0 (and in the first developments of 0.5.0) the rebuilt
+populations took the random part of a collision, $`[n]_U`$, without the density and momentum parts and without the
+correlation: the tangential velocity of the first fluid node next to a regularized wall was 4.6% cooler, and the
+plane of a `DensityVelocity` face 38% cooler across it.
+
+The derivation was checked with an exact linear model of the step of the Reference platform (linearized about rest,
+one column of nodes for each wave vector along the boundary, stationary covariance from the discrete Lyapunov
+equation, the step itself checked against the plugin to the nonlinear remainder): with this random part the stationary
+state is the equilibrium one to $`10^{-14}`$ for every wave vector at $`\tau`$ = 0.62, 1 and 1.5, also on the plane of
+the face, with the conserved quantities of the lattice (mass and staggered momentum) next to walls as with the
+bounce-back. The fluctuating runs agree with it (`docs/validation.md`, Fluctuations next to walls and open faces).
+
+The other open faces keep the random part of a collision. A `Velocity` face cannot hold the equilibrium exactly with
+the face on its nodes: the mass balance makes the rebuilt populations carry the mass of the outgoing populations that
+arrived in the same step, so the density of the face node fluctuates more than at equilibrium (about 4/3 of it with
+the D3Q19 weights) whatever the random part; only the halfway placement of the bounce-back avoids this. A `Density`
+face copies the velocity of $`\mathbf x`$ into its rebuilt populations, and the exact model shows that no random part
+can then hold the equilibrium: any copy of the fluctuations of the normal velocity, and more than about half of those
+of the tangential velocity at $`\tau = 0.62`$, excites the slow modes next to the face (the mean velocity of the planes
+far above the temperature). Since a boundary that reads only the present state of its node cannot tell a slow
+deterministic change of the velocity from a thermal fluctuation, a `Density` face at equilibrium needs either a memory
+of the mean flow or a different rule for the populations that enter; this is open (the exponential mean of the
+velocity of the node, tried in the model, holds the equilibrium only when it is longer than the viscous time of the
+whole box).
 
 **Tests** (`tests/TestLBMFluctuations.h`, all platforms and precisions).
 - A lattice of a single node, which streams every population back to itself: mass and momentum stay those of the

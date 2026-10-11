@@ -33,6 +33,15 @@ versions the API may still change.
   gives its density (`docs/theory.md`, section 1). On every platform, with one domain and with the domain
   decomposition; the programs of the other faces are compiled from the same source as before.
 
+### Changed
+- Fluctuating fluid: the rebuilt populations of regularized walls and `DensityVelocity` faces take the random part of a
+  node at equilibrium (density, momentum, stress and ghost modes), correlated with the random part of the collision of
+  their own node, instead of the random part of a collision; the fluid next to them is then exactly at equilibrium for
+  $`0.586 \le \tau \le 3.41`$ (`docs/theory.md`, section 7, derivation checked with an exact linear model of the
+  step). Before, the momentum along a regularized wall of the first fluid node was 4.6% cooler and the plane of a
+  `DensityVelocity` face 38% cooler across it. Runs without fluctuations, and fluctuating runs without these
+  boundaries, are unchanged bit for bit. A warning outside that range of $`\tau`$.
+
 ### Fixed
 - Tests: a range-based `for` loop read the velocities of a temporary `State` already destroyed
   (`testRepeatedForceEvaluation`), which made its tolerance depend on undefined memory.

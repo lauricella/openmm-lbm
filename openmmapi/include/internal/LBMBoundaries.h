@@ -28,6 +28,12 @@ public:
         density of a face, the density of a face with zero velocity (nodes shared by several Density faces), or both
         the density and the velocity of a face. */
     enum Kind {Wall = 0, Velocity = 1, Density = 2, DensityAtRest = 3, DensityVelocity = 4};
+    /** Whether the rebuilt populations of a node of this kind take, with a fluctuating fluid, the random part of a
+        node at equilibrium correlated with that of its own collision (regularized walls and DensityVelocity faces,
+        docs/theory.md, section 7), rather than the random part of a collision. */
+    static bool hasEquilibriumNoise(int kind) {
+        return (kind == Wall || kind == DensityVelocity);
+    }
     /** The boundary nodes and, for each of them, the bits 1 << q of the directions q whose populations are unknown
         after the streaming (unknown) and of those among them whose source node x - c_q is solid (solid), its Kind
         and the face that gives its velocity or density (-1 on walls). */

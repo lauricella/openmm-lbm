@@ -150,6 +150,11 @@ private:
         those among them whose source node x - c_q is solid (solidDirections), its LBMBoundaries::Kind and the face
         that gives its velocity or density. */
     std::vector<int> boundaryNodes, unknownDirections, solidDirections, boundaryKind, boundaryFace;
+    /** With a fluctuating fluid and boundary nodes of regularized walls or DensityVelocity faces: the index in
+        boundaryNodes of each node (-1 for the others), and the stress part of the random part of the collision of each
+        boundary node in the current step (19 per node), which its rebuilt populations use. */
+    std::vector<int> boundaryOfNode;
+    std::vector<double> boundaryCollisionStress;
     /** True between beginStep() and the force evaluation of that integration step. */
     bool stepPending;
     /** True from the lattice step until the coupling forces are recomputed or the state is replaced: the forces

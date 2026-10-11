@@ -153,6 +153,66 @@ void testFluctuationsEquilibrium(Platform& platform, double tau) {
 }
 
 /**
+ * A fluctuating fluid at rest next to regularized walls (the solid planes k = 0 and k = 9) and between two
+ * DensityVelocity faces at rest along z, at tau = 0.62: with the random part of the rebuilt populations of
+ * docs/theory.md, section 7, the nodes next to the boundaries are at equilibrium.  The momentum along the walls of
+ * the first fluid planes has the variance rho kT (the random part of a collision gave 0.955 of it), and the momentum
+ * across the faces and the density of the face planes rho kT and mu rho (0.62 and 0.785 of them before).
+ */
+void testBoundaryFluctuations(Platform& platform) {
+    double temperature = 300.0;
+    int n = 8, nz = 10;
+    double kT = latticeKT(temperature), mu = 3.0*kT;
+    for (int walls = 1; walls >= 0; walls--) {
+        LBMForce* force;
+        System* system = createFluidSystem(force, n, n, nz, 0.62);
+        force->setFluidFluctuations(true);
+        force->setTemperature(temperature);
+        force->setRandomNumberSeed(23);
+        int planes[2] = {walls ? 1 : 0, walls ? nz-2 : nz-1};
+        if (walls) {
+            vector<int> solid;
+            for (int k : {0, nz-1})
+                for (int node = 0; node < n*n; node++)
+                    solid.push_back(node + n*n*k);
+            force->setSolidNodes(solid);
+            force->setWallScheme(LBMForce::Regularized);
+        }
+        else
+            for (LBMForce::Face face : {LBMForce::ZMin, LBMForce::ZMax})
+                force->setFaceBoundary(face, LBMForce::DensityVelocity);
+        VerletIntegrator integrator(fluidDt);
+        Context context(*system, integrator, platform);
+        context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+        int numSamples = (walls ? 1500 : 500), interval = 10;
+        integrator.step(500);
+        double along = 0, across = 0, density = 0;
+        vector<double> state;
+        for (int sample = 0; sample < numSamples; sample++) {
+            integrator.step(interval);
+            force->getFluidState(context, state);
+            for (int k : planes)
+                for (int node = n*n*k; node < n*n*(k+1); node++) {
+                    double modes[19];
+                    nodeModes(state, node, modes);
+                    along += 0.5*(modes[1]*modes[1] + modes[2]*modes[2]);
+                    across += modes[3]*modes[3];
+                    density += modes[0]*modes[0];
+                }
+        }
+        double count = 2.0*n*n*numSamples;
+        if (walls) {
+            ASSERT_EQUAL_TOL(1.0, along/(count*kT), 0.02);
+        }
+        else {
+            ASSERT_EQUAL_TOL(1.0, across/(count*kT), 0.05);
+            ASSERT_EQUAL_TOL(1.0, density/(count*mu), 0.05);
+        }
+        delete system;
+    }
+}
+
+/**
  * With the fluctuations switched on at zero temperature the run is identical, bit for bit, to the run without
  * them: walls, body force and coupled particles with the NVE scheme.
  */
@@ -473,6 +533,7 @@ void runFluctuationTests(Platform& platform) {
     testFluctuationsSingleNode(platform, 0.8);
     testFluctuationsEquilibrium(platform, 0.8);
     testFluctuationsEquilibrium(platform, 2.5);
+    testBoundaryFluctuations(platform);
     testVelocitySpectrum(platform, Vec3(), Vec3());
     testVelocitySpectrum(platform, Vec3(0.05, 0.02, -0.03), Vec3());
     testVelocitySpectrum(platform, Vec3(), Vec3(1e-5, 0.0, 0.0));
