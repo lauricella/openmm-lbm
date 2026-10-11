@@ -164,7 +164,9 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    is the permutation of `particleKey()` (`BRICK_SCRAMBLE`), so that OpenMM's sort with buckets of equal width gets
    keys spread over their range. The keys are the same on every rank. After the sort the **segments** of the nodes are
    built, one per node that a stencil reaches, with its entries, the slots that fall on the node, in particle order:
-   one work group per brick of nodes tests the particles of the at most 8 bricks whose stencils can reach it. Along
+   one work group per brick of nodes reads the particles of the at most 8 bricks whose stencils can reach it, merged in
+   particle order, counts the slots that fall on each node and writes the segments, and one thread per segment then
+   writes its entries. Along
    the axes with open faces (`OPEN_X`, `OPEN_Y`, `OPEN_Z`) the nodes of a stencil stop at the last nodes, and a node in
    several slots of an axis keeps the sum of their weights in its first slot (`stencilAxis()`, as
    `internal/LBMStencils.h` on the Reference platform); such slots are entries of the same node. Until version 0.5.1
@@ -175,7 +177,7 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    |---|---|---|---|
    | `coupleParticlesStencil` (explicit drag) | one per atom | positions, velocities, moments of the nodes of the stencil (with the decomposition, of the block and of the coupling halo), OpenMM's random numbers | force of the particle (zero on the ranks that do not own its nearest node), weights of its slots, first nodes of its stencil and its key, in a lattice step the reaction on its solid nodes as wall momentum |
    | `prepareCenteredStencil` (centred drag) | one per atom with the trilinear stencil; with the three-point and Keys stencils one per slot, in work groups of 64/`STENCIL_SIZE` atoms, then four threads per atom add the slots in order | as `prepareCenteredDrag`, and the moments of the nodes of the stencil | right-hand side $`b_k/m_k`$ and diagonal of the linear system (zero on the ranks that do not own the particle), weight, $`\xi/\rho`$ and node of every slot, first nodes of the stencil and key of the particle |
-   | `findBrickStarts`, `listCandidates`, `countBrickSegments`, `scanBrickChunks`, `scanBrickTotals`, `listBrickSegments`, `findChunkSegments` (after every sort, `listKeySegments()`) | one per brick; one per particle; one work group per brick of nodes; one work group per 64 bricks; one work group; one work group per brick of nodes; one per chunk of 64 entries | sorted keys, first nodes of the stencils, weights of the slots | where each brick starts in the sorted keys; the particle and first nodes of each sorted key; the nodes that the stencils reach and their slots, per brick, turned into offsets by integer scans in a fixed order; the first entry and node of each segment, the weight and particle of each entry (the particles of the bricks merged in particle order, the slots of a particle in slot order), with the centred drag the segment of each slot; the first segment of each chunk of 64 entries |
+   | `findBrickStarts`, `listCandidates`, `countBrickSegments`, `scanBrickChunks`, `scanBrickTotals`, `listBrickSegments`, `writeSegmentEntries`, `findChunkSegments` (after every sort, `listKeySegments()`) | one per brick; one per particle; work groups of 256 threads, four bricks of nodes each; one work group per 64 bricks; one work group; one work group of 256 threads per brick of nodes, four threads per node; one per segment; one per chunk of 64 entries | sorted keys, first nodes of the stencils, weights of the slots | where each brick starts in the sorted keys; the particle and first nodes of each sorted key; per brick the nodes that the stencils reach, their slots and the candidates, turned into offsets by integer scans in a fixed order; the first entry and node of each segment, and the candidates of the brick merged in particle order (binary searches between the sorted ranges) with how many of their slots fall on each node of the brick along each axis; the weight and particle of each entry (the slots of a particle in slot order), with the centred drag the segment of each slot; the first segment of each chunk of 64 entries |
    | `gatherSegmentDensity`, `stencilInterpolationWeights` (centred drag with the domain decomposition) | one per segment; one per slot | nodes of the segments, densities of the block; weights, segments of the slots, densities of the segments | the density of the node of each segment (0 outside the block), which the host sums over the ranks (`exchangeSegmentDensity()`); $`\xi/\rho`$ of every slot of every stencil |
    | `startStencilGradients`, `spreadStencilVector`, `multiplyStencilMatrix`, `dotStencilPartials`, `dotStencilFinish`, `advanceStencilGradients`, `updateStencilDirection` (centred drag, the conjugate gradients of `solveStencilDrag()`) | one per particle; work groups of 64 entries, one thread per segment that starts among them; one per particle with the trilinear stencil, with the three-point and Keys stencils one per slot to read the values of the slots, then three per particle; `DOT_GROUPS` work groups, then one | the vectors of the particles, the segments, $`\xi/\rho`$ | the forces of the particles, in `particleForce`; the dot products in `gradientScalars`, which the host reads at every iteration to decide when to stop |
    | `sumStencilReactions` (in a lattice step) | one per segment | segments, weights and particles of their entries, forces | the reaction of each node of the block, summed in particle order |
@@ -212,6 +214,83 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    the device (`computeFluidMoments`), then converts them to OpenMM units on the host. The kernels give the domain of
    the rank, with its halo on request; with more than one domain `LBMForceImpl` gathers the fields and the state on
    rank 0, or scatters the state from it, through `LBMDecomposition` (`MPI_Gatherv`, `MPI_Scatterv`).
+
+## The sort of the coupling and the segments of the stencils
+
+**Why there is a sort.** The reactions of the coupled particles on the nodes are summed without atomic operations and
+in a fixed order (Invariants, below): one thread writes each node, and adds the contributions of its particles in
+particle order. So the GPU platforms gather the contributions by node: they sort keys that hold the node, and the keys
+of a node become contiguous. The sort is OpenMM's `ComputeSort`, a bucket sort: it computes the range of the keys, puts
+them into buckets of equal width and sorts each bucket in a work group. Its cost has shaped the coupling three times.
+
+1. **Nearest node, since version 0.1.0.** One key per particle, $`\mathrm{node}\cdot N_p + i`$. Until version 0.4.0
+   the keys went to the sort as they were, and OpenMM chose its buckets from 64 keys taken at fixed intervals of the
+   array, which is in particle order. With the beads of copies of a protein in order, all the samples came from one
+   layer of copies, and 97% of the keys went into one bucket: 7.4 ms of a step of 8.7 ms on an A100. Since version
+   0.5.0 the sort uses a permutation of the node, $`\pi(n) = a\,n \bmod N`$ (`CouplingSortTrait`), and buckets of
+   equal width; the order of the keys of a node, and so the results, did not change (`docs/theory.md`, section 2).
+2. **Interpolation stencils, versions 0.5.0 and 0.5.1.** One key per slot of a stencil,
+   $`\pi(\mathrm{node})\cdot N_p S + e`$, that is $`N_p S`$ keys ($`3.6\cdot10^6`$ for 56320 beads with `Keys`), and
+   after the sort the segments of the keys (one per node) were listed by a count, a scan and a list in a fixed order.
+   OpenMM's sort always computes the range of the keys, in a single work group: with `Keys` on the crowded beads of
+   `docs/validation.md` this pass took 1.9 ms, the whole sort 2.8 ms and the list of the segments 0.5 to 0.8 ms of a
+   step of 5.5 ms (explicit drag) or 10.5 ms (centred drag) on an A100.
+3. **Since version 0.6.0.** One key per particle, so that the sort takes 0.13 ms, and the segments are built from it
+   by the kernels of the plugin, as below. The sums run in the same order as before.
+
+**Bricks.** The cell of a particle along an axis is the first node of its stencil, wrapped into the lattice or, along
+an axis with open faces, moved into it. The cells are grouped into bricks of $`4^3`$ nodes (`BRICK_SIZE`), the last
+brick of an axis taking the rest of it, so that every brick has at least as many nodes as a stencil along an axis, or
+the whole axis. A stencil that reaches a node then has its cell in the brick of the node or in the one before, along
+each axis: at most 8 bricks of cells can reach a brick of nodes. An array with an entry per cell would be as large as
+the lattice on every rank, since with the domain decomposition every rank builds the segments of all the stencils
+(0.5 GB per rank at $`512^3`$ nodes); the arrays of the bricks are 64 times smaller. The key of particle $`i`$ is
+$`\pi(b)\cdot N_p + i`$, $`b`$ its brick and $`\pi`$ a permutation (`BRICK_SCRAMBLE`) that spreads the keys over their
+range wherever the particles are, so that the buckets of equal width stay small.
+
+**The kernels**, after the sort (`listKeySegments()` in `CommonLBMKernels.cpp`, table above):
+1. `findBrickStarts` finds where each brick starts in the sorted keys (binary searches), and `listCandidates` writes
+   the particle and the first nodes of the stencil of each sorted key.
+2. `countBrickSegments` counts, for each brick of nodes, the nodes that the stencils reach, the slots that fall on
+   them and the candidates, the particles of its 8 bricks of cells. Two scans in a fixed order (`scanBrickChunks`,
+   `scanBrickTotals`) turn the counts into offsets.
+3. `listBrickSegments`, one work group per brick of nodes, reads the candidates into local memory **merged in
+   particle order**: the candidates of a brick of cells are sorted by particle, and the position of a candidate is its
+   position in its brick plus, for each other brick, the number of candidates with a smaller index, found by a binary
+   search. For each candidate it also computes how many slots of its stencil fall on each node of the brick along each
+   axis, 3 bits per node in an integer, so that testing a candidate against a node is a product of three shifted
+   counts. It writes the segments, the first entry and the node of every node that the stencils reach, and copies the
+   merged candidates to a list in global memory.
+4. `writeSegmentEntries`, one thread per segment, writes the entries of its node from the list of the brick of the
+   node: for each candidate in particle order and each of its slots that falls on the node in slot order, the weight,
+   the particle and, with the centred drag, the segment of the slot.
+5. `findChunkSegments` finds the first segment of each chunk of 64 entries, which `spreadStencilVector` uses.
+
+The segments hold the same entries in the same order as the sorted keys of version 0.5.1, so the kernels that use them
+(the reactions, the product of the conjugate gradients, the densities of the nodes with the decomposition) are those of
+that version, reading the node of a segment instead of its key. The order of the segments changes (by brick instead of
+by permuted node), but no sum runs over it.
+
+**What the design came from** (profiles with Nsight Systems and Nsight Compute on an A100, crowded beads with `Keys`):
+- **One thread per node, with each thread merging the lists of its candidates by itself, in registers: 4.6 ms.**
+  The merged list is now built once per brick, in local memory.
+- **Occupancy.** OpenMM launches at most a fixed number of work groups (744 on an A100): with one brick of 64 nodes per
+  group of 64 threads the device ran at 16% occupancy. The count takes four bricks per group of 256 threads
+  (`BRICKS_PER_GROUP`).
+- **Load balance.** In the list, four bricks per group made the threads wait at the barriers for the brick of the group
+  with most candidates, so the list takes one brick per group, with four threads per node on contiguous blocks of the
+  merged candidates (the counts of the earlier blocks give where each one writes, which keeps the order). With
+  `Keys` only about a fifth of the nodes of the bricks receive entries, and writing them one thread per node left most
+  threads waiting, so the entries are written one thread per segment.
+- **pocl.** A `continue` before a barrier, in a loop that had other barriers, made pocl's compiler write wrong
+  segments, although the branch was the same for all the threads of the group: the kernels of the bricks have no
+  early exit before a barrier.
+
+**Cost.** With `Keys` and the crowded beads the sort and the segments take 1.6 ms instead of 3.3 to 3.7 (the step is
+39% shorter with the explicit drag and 23% with the centred one), with the three-point stencil 0.9 instead of 1.3 to
+1.4 ms. With the trilinear stencil, whose 8 keys per particle were cheap to sort (0.35 ms in all), building the
+segments takes longer than the sort it saves: its step is 0.3 ms longer on these beads. The coupling keeps a single
+way for the three stencils. Times in `docs/validation.md`.
 
 ## Invariants
 

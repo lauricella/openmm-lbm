@@ -9,7 +9,13 @@ versions the API may still change.
 - GPU platforms, interpolation stencils: the coupling sorts one key per particle, from the brick of $`4^3`$ nodes of
   the lattice that holds the first node of its stencil, instead of one key per node of its stencil (64 per particle
   with `Keys`), and builds from them the segments of the nodes, the slots that fall on each node in particle order
-  (`docs/architecture.md`). The sums run in the same order as before, so the results are the same bit for bit.
+  (`docs/architecture.md`, The sort of the coupling and the segments of the stencils). OpenMM's sort of $`3.6\cdot10^6`$
+  keys took most of the cost of the coupling with `Keys` and many particles. On an A100 with 56320 crowded beads the
+  step is 39% shorter with `Keys` and the explicit drag (5.54 to 3.36 ms), 23% with the centred drag, 22% and 12% with
+  the three-point stencil; with the trilinear stencil, whose keys were few, it is 0.3 ms longer (1.63 to 1.94 ms).
+  The sums run in the same order as before: the results are the same bit for bit with OpenCL, and with CUDA except the
+  three-point stencil with the explicit drag and a fluctuating fluid, whose fluid differs in the last bits (up to
+  $`2.6\cdot10^{-18}`$ in the populations in double precision; cause not identified).
 
 ## 0.5.1 (2026-10-11)
 
