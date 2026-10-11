@@ -664,8 +664,13 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             brickStart.initialize<int>(cc, numBricks+1, "lbmBrickStart");
             brickSegments.initialize<int>(cc, numBricks, "lbmBrickSegments");
             brickSlots.initialize<int>(cc, numBricks, "lbmBrickSlots");
+            brickCandidates.initialize<int>(cc, numBricks, "lbmBrickCandidates");
             chunkSegments.initialize<int>(cc, numBrickChunks+1, "lbmChunkSegments");
             chunkSlots.initialize<int>(cc, numBrickChunks+1, "lbmChunkSlots");
+            chunkCandidates.initialize<int>(cc, numBrickChunks+1, "lbmChunkCandidates");
+            // A particle is a candidate of the bricks of nodes whose bricks of cells hold its cell: at most 2 along each axis.
+            mergedCoverage.initialize<mm_int4>(cc, 8*numCoupled, "lbmMergedCoverage");
+            mergedSource.initialize<int>(cc, 8*numCoupled, "lbmMergedSource");
         }
         if (centered && stencilSize == 1) {
             knownVelocity.initialize(cc, 3*numCoupled, elementSize, "lbmKnownVelocity");
@@ -957,20 +962,25 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
             for (ComputeArray* array : {&sortKeys, &stencilOrigin, &candidateParticle, &candidateFirst})
                 listCandidatesKernel->addArg(*array);
             countBricksKernel = coupling->createKernel("countBrickSegments");
-            for (ComputeArray* array : {&brickStart, &candidateFirst, &brickSegments, &brickSlots})
+            for (ComputeArray* array : {&brickStart, &candidateFirst, &brickSegments, &brickSlots, &brickCandidates})
                 countBricksKernel->addArg(*array);
             scanBrickChunksKernel = coupling->createKernel("scanBrickChunks");
-            for (ComputeArray* array : {&brickSegments, &brickSlots, &chunkSegments, &chunkSlots})
+            for (ComputeArray* array : {&brickSegments, &brickSlots, &brickCandidates, &chunkSegments, &chunkSlots, &chunkCandidates})
                 scanBrickChunksKernel->addArg(*array);
             scanBrickTotalsKernel = coupling->createKernel("scanBrickTotals");
-            for (ComputeArray* array : {&chunkSegments, &chunkSlots, &segmentStart})
+            for (ComputeArray* array : {&chunkSegments, &chunkSlots, &chunkCandidates, &segmentStart})
                 scanBrickTotalsKernel->addArg(*array);
             listBricksKernel = coupling->createKernel("listBrickSegments");
             for (ComputeArray* array : {&brickStart, &candidateParticle, &candidateFirst, &brickSegments, &brickSlots,
-                    &chunkSegments, &chunkSlots, &stencilWeight, &segmentStart, &segmentNode, &sortedWeight, &sortedParticle})
+                    &brickCandidates, &chunkSegments, &chunkSlots, &chunkCandidates, &segmentStart, &segmentNode,
+                    &mergedCoverage, &mergedSource})
                 listBricksKernel->addArg(*array);
+            writeEntriesKernel = coupling->createKernel("writeSegmentEntries");
+            for (ComputeArray* array : {&segmentStart, &segmentNode, &chunkSegments, &brickCandidates, &chunkCandidates,
+                    &mergedCoverage, &mergedSource, &candidateFirst, &stencilWeight, &sortedWeight, &sortedParticle})
+                writeEntriesKernel->addArg(*array);
             if (centered)
-                listBricksKernel->addArg(keySegment);
+                writeEntriesKernel->addArg(keySegment);
             findChunkSegmentsKernel = coupling->createKernel("findChunkSegments");
             for (ComputeArray* array : {&segmentStart, &chunkSegments, &chunkOffset})
                 findChunkSegmentsKernel->addArg(*array);
@@ -1606,6 +1616,7 @@ void CommonCalcLBMForceKernel::listKeySegments() {
     scanBrickChunksKernel->execute(numBrickChunks*blockSize, blockSize);
     scanBrickTotalsKernel->execute(blockSize, blockSize);
     listBricksKernel->execute(numBricks*groupSize, groupSize);
+    writeEntriesKernel->execute(numCoupled*stencilSize, groupSize);
     findChunkSegmentsKernel->execute(chunkOffset.getSize());
 #ifdef LBM_DEBUG
     // Every slot of every stencil falls on one node, so the segments hold them all.

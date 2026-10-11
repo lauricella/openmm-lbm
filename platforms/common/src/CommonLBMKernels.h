@@ -253,11 +253,12 @@ private:
         the first segment that starts in each chunk of blockSize entries, followed by the number of segments; the first
         entry and the node of each segment; the weight and particle of each entry.  They are built from one sort key per
         particle, from its brick: the first nodes of the stencil of each particle, the particle and first nodes of each
-        sorted key, where each brick starts in the sorted keys, the segments and entries of each brick and of each chunk of
-        blockSize bricks (counts, then offsets). */
+        sorted key, where each brick starts in the sorted keys, the segments, entries and candidates of each brick and of
+        each chunk of blockSize bricks (counts, then offsets), and the candidates of every brick merged in particle order
+        (coverage of the brick and particle, position in the sorted keys). */
     OpenMM::ComputeArray chunkOffset, segmentStart, segmentNode, sortedWeight, sortedParticle;
     OpenMM::ComputeArray stencilOrigin, candidateParticle, candidateFirst, brickStart, brickSegments, brickSlots;
-    OpenMM::ComputeArray chunkSegments, chunkSlots;
+    OpenMM::ComputeArray brickCandidates, chunkSegments, chunkSlots, chunkCandidates, mergedCoverage, mergedSource;
     int numBricks, bricksPerGroup;
     /** With the domain decomposition and the centred drag with a stencil: the density of the node of each segment of
         the sorted keys, summed over the ranks (exchangeSegmentDensity()), resized when the segments outgrow it. */
@@ -283,7 +284,8 @@ private:
     OpenMM::ComputeKernel reflectKernel, coupleKernel, sumReactionsKernel, clearReactionsKernel, applyForcesKernel;
     OpenMM::ComputeKernel prepareCenteredKernel, solveCenteredKernel, packKernel, unpackKernel, packFieldsKernel;
     OpenMM::ComputeKernel findBrickStartsKernel, listCandidatesKernel, countBricksKernel, scanBrickChunksKernel;
-    OpenMM::ComputeKernel scanBrickTotalsKernel, listBricksKernel, findChunkSegmentsKernel, spreadKernel, multiplyKernel;
+    OpenMM::ComputeKernel scanBrickTotalsKernel, listBricksKernel, writeEntriesKernel, findChunkSegmentsKernel;
+    OpenMM::ComputeKernel spreadKernel, multiplyKernel;
     OpenMM::ComputeKernel dotKernel, startGradientsKernel, advanceGradientsKernel, directionKernel, stencilWallKernel;
     OpenMM::ComputeKernel packCouplingHaloKernel, unpackCouplingHaloKernel, dotFinishKernel, gatherDensityKernel;
     OpenMM::ComputeKernel interpWeightsKernel;

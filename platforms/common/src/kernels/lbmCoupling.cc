@@ -540,11 +540,11 @@ DEVICE int brickSlotsAt(int px, int py, int pz, int lx, int ly, int lz) {
 #define CANDIDATE_CHUNK (4*LBM_BLOCK_SIZE)
 
 /**
- * For every brick of nodes: the number of its nodes that the stencils reach (segments) and of the slots that fall on
- * them, in brickSegments[tb] and brickSlots[tb].
+ * For every brick of nodes: the number of its nodes that the stencils reach (segments), of the slots that fall on them
+ * and of its candidates, in brickSegments[tb], brickSlots[tb] and brickCandidates[tb].
  */
 KERNEL void countBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL const int4* RESTRICT candidateFirst,
-        GLOBAL int* RESTRICT brickSegments, GLOBAL int* RESTRICT brickSlots) {
+        GLOBAL int* RESTRICT brickSegments, GLOBAL int* RESTRICT brickSlots, GLOBAL int* RESTRICT brickCandidates) {
     LOCAL int sums[2*BRICKS_PER_GROUP*LBM_BLOCK_SIZE];
     LOCAL int rangeFirst[BRICKS_PER_GROUP*MAX_SOURCE_BRICKS], rangeOffset[BRICKS_PER_GROUP*(MAX_SOURCE_BRICKS+1)];
     LOCAL int brickNodes[8*BRICKS_PER_GROUP];
@@ -620,94 +620,101 @@ KERNEL void countBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL con
         if (lane == 0 && tb < NUM_BRICKS) {
             brickSegments[tb] = sums[S];
             brickSlots[tb] = sums[S+LBM_BLOCK_SIZE];
+            brickCandidates[tb] = numCandidates;
         }
         SYNC_THREADS;
     }
 }
 
 /**
- * For each chunk of LBM_BLOCK_SIZE bricks, one work group: the counts of its bricks become their offsets within the
- * chunk, in place, and the totals of the chunk go to chunkSegments[c] and chunkSlots[c].
+ * For each chunk of LBM_BLOCK_SIZE bricks, one work group: the counts of its bricks (segments, slots and candidates)
+ * become their offsets within the chunk, in place, and the totals of the chunk go to chunkSegments[c], chunkSlots[c] and
+ * chunkCandidates[c].
  */
 KERNEL void scanBrickChunks(GLOBAL int* RESTRICT brickSegments, GLOBAL int* RESTRICT brickSlots,
-        GLOBAL int* RESTRICT chunkSegments, GLOBAL int* RESTRICT chunkSlots) {
-    LOCAL int sums[2*LBM_BLOCK_SIZE];
+        GLOBAL int* RESTRICT brickCandidates, GLOBAL int* RESTRICT chunkSegments, GLOBAL int* RESTRICT chunkSlots,
+        GLOBAL int* RESTRICT chunkCandidates) {
+    LOCAL int sums[3*LBM_BLOCK_SIZE];
     for (int c = GROUP_ID; c < NUM_BRICK_CHUNKS; c += NUM_GROUPS) {
         int tb = c*LBM_BLOCK_SIZE + LOCAL_ID;
-        int segments = (tb < NUM_BRICKS ? brickSegments[tb] : 0), slots = (tb < NUM_BRICKS ? brickSlots[tb] : 0);
-        sums[LOCAL_ID] = segments;
-        sums[LBM_BLOCK_SIZE+LOCAL_ID] = slots;
+        int value[3] = {0, 0, 0};
+        if (tb < NUM_BRICKS) {
+            value[0] = brickSegments[tb];
+            value[1] = brickSlots[tb];
+            value[2] = brickCandidates[tb];
+        }
+        for (int a = 0; a < 3; a++)
+            sums[a*LBM_BLOCK_SIZE+LOCAL_ID] = value[a];
         for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
             SYNC_THREADS;
-            int addSegments = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
-            int addSlots = (LOCAL_ID >= step ? sums[LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
+            int add[3];
+            for (int a = 0; a < 3; a++)
+                add[a] = (LOCAL_ID >= step ? sums[a*LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
             SYNC_THREADS;
-            sums[LOCAL_ID] += addSegments;
-            sums[LBM_BLOCK_SIZE+LOCAL_ID] += addSlots;
+            for (int a = 0; a < 3; a++)
+                sums[a*LBM_BLOCK_SIZE+LOCAL_ID] += add[a];
         }
         if (tb < NUM_BRICKS) {
-            brickSegments[tb] = sums[LOCAL_ID] - segments;
-            brickSlots[tb] = sums[LBM_BLOCK_SIZE+LOCAL_ID] - slots;
+            brickSegments[tb] = sums[LOCAL_ID] - value[0];
+            brickSlots[tb] = sums[LBM_BLOCK_SIZE+LOCAL_ID] - value[1];
+            brickCandidates[tb] = sums[2*LBM_BLOCK_SIZE+LOCAL_ID] - value[2];
         }
         if (LOCAL_ID == LBM_BLOCK_SIZE-1) {
             chunkSegments[c] = sums[LOCAL_ID];
             chunkSlots[c] = sums[LBM_BLOCK_SIZE+LOCAL_ID];
+            chunkCandidates[c] = sums[2*LBM_BLOCK_SIZE+LOCAL_ID];
         }
         SYNC_THREADS;
     }
 }
 
 /**
- * One work group: the totals of the chunks of bricks become their offsets, in place, followed by the number of
- * segments and of entries in chunkSegments[NUM_BRICK_CHUNKS] and chunkSlots[NUM_BRICK_CHUNKS]; segmentStart of the
- * end of the last segment.
+ * One work group: the totals of the chunks of bricks become their offsets, in place, followed by the totals in
+ * chunkSegments[NUM_BRICK_CHUNKS], chunkSlots[NUM_BRICK_CHUNKS] and chunkCandidates[NUM_BRICK_CHUNKS]; segmentStart of
+ * the end of the last segment.
  */
 KERNEL void scanBrickTotals(GLOBAL int* RESTRICT chunkSegments, GLOBAL int* RESTRICT chunkSlots,
-        GLOBAL int* RESTRICT segmentStart) {
-    LOCAL int sums[2*LBM_BLOCK_SIZE];
+        GLOBAL int* RESTRICT chunkCandidates, GLOBAL int* RESTRICT segmentStart) {
+    LOCAL int sums[3*LBM_BLOCK_SIZE];
     const int chunksPerThread = (NUM_BRICK_CHUNKS+LBM_BLOCK_SIZE-1)/LBM_BLOCK_SIZE;
     int firstChunk = LOCAL_ID*chunksPerThread, lastChunk = min(firstChunk+chunksPerThread, NUM_BRICK_CHUNKS);
-    int segments = 0, slots = 0;
+    int total[3] = {0, 0, 0};
     for (int c = firstChunk; c < lastChunk; c++) {
-        segments += chunkSegments[c];
-        slots += chunkSlots[c];
+        total[0] += chunkSegments[c];
+        total[1] += chunkSlots[c];
+        total[2] += chunkCandidates[c];
     }
-    sums[LOCAL_ID] = segments;
-    sums[LBM_BLOCK_SIZE+LOCAL_ID] = slots;
+    for (int a = 0; a < 3; a++)
+        sums[a*LBM_BLOCK_SIZE+LOCAL_ID] = total[a];
     for (int step = 1; step < LBM_BLOCK_SIZE; step *= 2) {
         SYNC_THREADS;
-        int addSegments = (LOCAL_ID >= step ? sums[LOCAL_ID-step] : 0);
-        int addSlots = (LOCAL_ID >= step ? sums[LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
+        int add[3];
+        for (int a = 0; a < 3; a++)
+            add[a] = (LOCAL_ID >= step ? sums[a*LBM_BLOCK_SIZE+LOCAL_ID-step] : 0);
         SYNC_THREADS;
-        sums[LOCAL_ID] += addSegments;
-        sums[LBM_BLOCK_SIZE+LOCAL_ID] += addSlots;
+        for (int a = 0; a < 3; a++)
+            sums[a*LBM_BLOCK_SIZE+LOCAL_ID] += add[a];
     }
-    int segmentOffset = sums[LOCAL_ID] - segments, slotOffset = sums[LBM_BLOCK_SIZE+LOCAL_ID] - slots;
+    int offset[3];
+    for (int a = 0; a < 3; a++)
+        offset[a] = sums[a*LBM_BLOCK_SIZE+LOCAL_ID] - total[a];
     for (int c = firstChunk; c < lastChunk; c++) {
-        int chunkSegmentCount = chunkSegments[c], chunkSlotCount = chunkSlots[c];
-        chunkSegments[c] = segmentOffset;
-        chunkSlots[c] = slotOffset;
-        segmentOffset += chunkSegmentCount;
-        slotOffset += chunkSlotCount;
+        int segments = chunkSegments[c], slots = chunkSlots[c], candidates = chunkCandidates[c];
+        chunkSegments[c] = offset[0];
+        chunkSlots[c] = offset[1];
+        chunkCandidates[c] = offset[2];
+        offset[0] += segments;
+        offset[1] += slots;
+        offset[2] += candidates;
     }
     if (LOCAL_ID == LBM_BLOCK_SIZE-1) {
         chunkSegments[NUM_BRICK_CHUNKS] = sums[LOCAL_ID];
         chunkSlots[NUM_BRICK_CHUNKS] = sums[LBM_BLOCK_SIZE+LOCAL_ID];
+        chunkCandidates[NUM_BRICK_CHUNKS] = sums[2*LBM_BLOCK_SIZE+LOCAL_ID];
         segmentStart[sums[LOCAL_ID]] = NUM_KEYS;
     }
 }
 
-/**
- * For every brick of nodes, one work group of BRICKS_PER_GROUP*LBM_BLOCK_SIZE threads: the segments of the nodes that the
- * stencils reach, in the order of the nodes in the brick (x fastest), from the offsets of the brick.  The candidates are
- * read into local memory, LIST_CHUNK at a time, merged in particle order: the position of a candidate is its position in
- * its range plus, for each other range, the number of candidates with a smaller particle index (a binary search; the
- * ranges are sorted by particle).  Each node has BRICKS_PER_GROUP threads, which take contiguous blocks of the merged
- * candidates; the counts of the blocks, summed, and a scan over the nodes give the segment and first entry of a node, and
- * the counts of the earlier blocks where each thread writes, so that the node gets, for each candidate in particle order
- * and each of its slots that falls on the node in slot order, the weight and particle of the entry and, with the centred
- * drag, the segment of the slot.  One brick per work group keeps its threads on the same amount of work.
- */
 #define LIST_CHUNK (4*CANDIDATE_CHUNK)
 
 /**
@@ -750,15 +757,24 @@ DEVICE void loadMergedCandidates(int first, int n, int numCandidates, int numRan
     }
 }
 
+/**
+ * For every brick of nodes, one work group of BRICKS_PER_GROUP*LBM_BLOCK_SIZE threads: the segments of the nodes that the
+ * stencils reach, in the order of the nodes in the brick (x fastest), and the merged list of its candidates.  The
+ * candidates are read into local memory, LIST_CHUNK at a time, merged in particle order: the position of a candidate is
+ * its position in its range plus, for each other range, the number of candidates with a smaller particle index (a binary
+ * search; the ranges are sorted by particle).  The group copies them, with their coverage of the brick, to
+ * mergedCoverage (the coverage along the three axes, then the particle) and mergedSource (the position in the sorted
+ * keys), from the offset of the candidates of the brick.  Each node has BRICKS_PER_GROUP threads, which count the slots
+ * of contiguous blocks of the candidates; their sum and a scan over the nodes give the segment and first entry of the
+ * node.  writeSegmentEntries() then writes the entries, one thread per segment, so that the work goes to the nodes that
+ * the stencils reach.
+ */
 KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL const int* RESTRICT candidateParticle,
         GLOBAL const int4* RESTRICT candidateFirst, GLOBAL const int* RESTRICT brickSegments,
-        GLOBAL const int* RESTRICT brickSlots, GLOBAL const int* RESTRICT chunkSegments, GLOBAL const int* RESTRICT chunkSlots,
-        GLOBAL const mixed* RESTRICT stencilWeight, GLOBAL int* RESTRICT segmentStart, GLOBAL int* RESTRICT segmentNode,
-        GLOBAL mixed* RESTRICT sortedWeight, GLOBAL int* RESTRICT sortedParticle
-#ifdef CENTERED_DRAG
-        , GLOBAL int* RESTRICT keySegment
-#endif
-        ) {
+        GLOBAL const int* RESTRICT brickSlots, GLOBAL const int* RESTRICT brickCandidates,
+        GLOBAL const int* RESTRICT chunkSegments, GLOBAL const int* RESTRICT chunkSlots,
+        GLOBAL const int* RESTRICT chunkCandidates, GLOBAL int* RESTRICT segmentStart, GLOBAL int* RESTRICT segmentNode,
+        GLOBAL int4* RESTRICT mergedCoverage, GLOBAL int* RESTRICT mergedSource) {
     LOCAL int sums[2*LBM_BLOCK_SIZE];
     LOCAL int blockCount[BRICKS_PER_GROUP*LBM_BLOCK_SIZE];
     LOCAL int rangeFirst[MAX_SOURCE_BRICKS];
@@ -793,16 +809,36 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
             lo[a] = brickNodes[a];
             width[a] = brickNodes[3+a]-brickNodes[a];
         }
-        int segmentBase = chunkSegments[tb/LBM_BLOCK_SIZE] + brickSegments[tb];
-        int slotBase = chunkSlots[tb/LBM_BLOCK_SIZE] + brickSlots[tb];
+        const int c0 = tb/LBM_BLOCK_SIZE;
+        int segmentBase = chunkSegments[c0] + brickSegments[tb];
+        int slotBase = chunkSlots[c0] + brickSlots[tb];
+        const int candidateBase = chunkCandidates[c0] + brickCandidates[tb];
+
+        // The merged candidates, with their coverage of the brick, to global memory.
         int loaded = -1;
+        for (int cb = 0; cb < numCandidates; cb += LIST_CHUNK) {
+            int n = min(numCandidates-cb, LIST_CHUNK);
+            SYNC_THREADS;
+            loadMergedCandidates(cb, n, numCandidates, numRanges, rangeFirst, rangeOffset, lo, width, candidateParticle,
+                    candidateFirst, chunkParticle, chunkSource, chunkX, chunkY, chunkZ);
+            SYNC_THREADS;
+            loaded = cb;
+            for (int c = LOCAL_ID; c < n; c += LOCAL_SIZE) {
+                int4 coverage;
+                coverage.x = chunkX[c];
+                coverage.y = chunkY[c];
+                coverage.z = chunkZ[c];
+                coverage.w = chunkParticle[c];
+                mergedCoverage[candidateBase+cb+c] = coverage;
+                mergedSource[candidateBase+cb+c] = chunkSource[c];
+            }
+        }
+
+        // The segments: the slots that fall on each node, counted by blocks of candidates, and a scan over the nodes.
         for (int base = 0; base < numNodes; base += LBM_BLOCK_SIZE) {
             int l = base + lane;
             int lx = l%width[0], ly = (l/width[0])%width[1], lz = l/(width[0]*width[1]);
-            int jx = lo[0] + lx, jy = lo[1] + ly, jz = lo[2] + lz;
             bool isNode = (l < numNodes);
-
-            // First pass: the slots of the block of candidates of this thread that fall on its node.
             int count = 0;
             for (int cb = 0; cb < numCandidates; cb += LIST_CHUNK) {
                 int n = min(numCandidates-cb, LIST_CHUNK);
@@ -818,8 +854,6 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
                     for (int c = blockFirst; c < blockEnd; c++)
                         count += brickSlotsAt(chunkX[c], chunkY[c], chunkZ[c], lx, ly, lz);
             }
-
-            // The counts of the blocks of the node, summed, and a scan over the nodes: its segment and first entry.
             blockCount[LOCAL_ID] = count;
             SYNC_THREADS;
             count = 0;
@@ -843,71 +877,70 @@ KERNEL void listBrickSegments(GLOBAL const int* RESTRICT brickStart, GLOBAL cons
                 }
             }
             SYNC_THREADS;
-            int s = segmentBase + sums[lane] - 1;
-            int k = slotBase + sums[LBM_BLOCK_SIZE+lane] - count;
             if (part == 0 && count > 0) {
-                segmentStart[s] = k;
-                segmentNode[s] = jx + GNX*(jy + GNY*jz);
+                int s = segmentBase + sums[lane] - 1;
+                segmentStart[s] = slotBase + sums[LBM_BLOCK_SIZE+lane] - count;
+                segmentNode[s] = (lo[0] + lx) + GNX*((lo[1] + ly) + GNY*(lo[2] + lz));
             }
             segmentBase += sums[LBM_BLOCK_SIZE-1];
             slotBase += sums[2*LBM_BLOCK_SIZE-1];
-
-            // Second pass: each thread writes the entries of its block after those of the earlier blocks of the node.
-            for (int cb = 0; cb < numCandidates; cb += LIST_CHUNK) {
-                int n = min(numCandidates-cb, LIST_CHUNK);
-                if (loaded != cb) {
-                    SYNC_THREADS;
-                    loadMergedCandidates(cb, n, numCandidates, numRanges, rangeFirst, rangeOffset, lo, width,
-                            candidateParticle, candidateFirst, chunkParticle, chunkSource, chunkX, chunkY, chunkZ);
-                    SYNC_THREADS;
-                    loaded = cb;
-                }
-                int blockFirst = (part*n)/BRICKS_PER_GROUP, blockEnd = ((part+1)*n)/BRICKS_PER_GROUP;
-                int mine = 0;
-                if (isNode)
-                    for (int c = blockFirst; c < blockEnd; c++)
-                        mine += brickSlotsAt(chunkX[c], chunkY[c], chunkZ[c], lx, ly, lz);
-                blockCount[LOCAL_ID] = mine;
-                SYNC_THREADS;
-                int offset = k, chunkTotal = 0;
-                for (int b = 0; b < BRICKS_PER_GROUP; b++) {
-                    int value = blockCount[b*LBM_BLOCK_SIZE+lane];
-                    offset += (b < part ? value : 0);
-                    chunkTotal += value;
-                }
-                SYNC_THREADS;
-                k += chunkTotal;
-                if (mine > 0) {
-                    for (int c = blockFirst; c < blockEnd; c++) {
-                        if (brickSlotsAt(chunkX[c], chunkY[c], chunkZ[c], lx, ly, lz) > 0) {
-                            int i = chunkParticle[c];
-                            int4 f = candidateFirst[chunkSource[c]];
-                            for (int cz = 0; cz < STENCIL_WIDTH; cz++) {
-                                if (stencilIndex(f.z, cz, GNZ, OPEN_Z) != jz)
-                                    continue;
-                                for (int cy = 0; cy < STENCIL_WIDTH; cy++) {
-                                    if (stencilIndex(f.y, cy, GNY, OPEN_Y) != jy)
-                                        continue;
-                                    for (int cx = 0; cx < STENCIL_WIDTH; cx++) {
-                                        if (stencilIndex(f.x, cx, GNX, OPEN_X) != jx)
-                                            continue;
-                                        int e = i*STENCIL_SIZE + cx + STENCIL_WIDTH*(cy + STENCIL_WIDTH*cz);
-                                        sortedWeight[offset] = stencilWeight[e];
-                                        sortedParticle[offset] = i;
-#ifdef CENTERED_DRAG
-                                        keySegment[e] = s;
-#endif
-                                        offset++;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
             SYNC_THREADS;
         }
         SYNC_THREADS;
+    }
+}
+
+/**
+ * One thread per segment: the entries of its node, from the merged candidates of the brick of the node (written by
+ * listBrickSegments()), for each candidate in particle order and each of its slots that falls on the node in slot order:
+ * the weight and particle of the entry and, with the centred drag, the segment of the slot.
+ */
+KERNEL void writeSegmentEntries(GLOBAL const int* RESTRICT segmentStart, GLOBAL const int* RESTRICT segmentNode,
+        GLOBAL const int* RESTRICT chunkSegments, GLOBAL const int* RESTRICT brickCandidates,
+        GLOBAL const int* RESTRICT chunkCandidates, GLOBAL const int4* RESTRICT mergedCoverage,
+        GLOBAL const int* RESTRICT mergedSource, GLOBAL const int4* RESTRICT candidateFirst,
+        GLOBAL const mixed* RESTRICT stencilWeight, GLOBAL mixed* RESTRICT sortedWeight, GLOBAL int* RESTRICT sortedParticle
+#ifdef CENTERED_DRAG
+        , GLOBAL int* RESTRICT keySegment
+#endif
+        ) {
+    const int numSegments = chunkSegments[NUM_BRICK_CHUNKS];
+    for (int s = GLOBAL_ID; s < numSegments; s += GLOBAL_SIZE) {
+        int node = segmentNode[s];
+        int jx = node%GNX, jy = (node/GNX)%GNY, jz = node/(GNX*GNY);
+        int bx = brickOfCell(jx, NBX), by = brickOfCell(jy, NBY), bz = brickOfCell(jz, NBZ);
+        int tb = bx + NBX*(by + NBY*bz);
+        int lx = jx - bx*BRICK_SIZE, ly = jy - by*BRICK_SIZE, lz = jz - bz*BRICK_SIZE;
+        int first = chunkCandidates[tb/LBM_BLOCK_SIZE] + brickCandidates[tb];
+        int end = (tb+1 < NUM_BRICKS ? chunkCandidates[(tb+1)/LBM_BLOCK_SIZE] + brickCandidates[tb+1] :
+                chunkCandidates[NUM_BRICK_CHUNKS]);
+        int k = segmentStart[s];
+        for (int m = first; m < end; m++) {
+            int4 coverage = mergedCoverage[m];
+            if (brickSlotsAt(coverage.x, coverage.y, coverage.z, lx, ly, lz) == 0)
+                continue;
+            int i = coverage.w;
+            int4 f = candidateFirst[mergedSource[m]];
+            for (int cz = 0; cz < STENCIL_WIDTH; cz++) {
+                if (stencilIndex(f.z, cz, GNZ, OPEN_Z) != jz)
+                    continue;
+                for (int cy = 0; cy < STENCIL_WIDTH; cy++) {
+                    if (stencilIndex(f.y, cy, GNY, OPEN_Y) != jy)
+                        continue;
+                    for (int cx = 0; cx < STENCIL_WIDTH; cx++) {
+                        if (stencilIndex(f.x, cx, GNX, OPEN_X) != jx)
+                            continue;
+                        int e = i*STENCIL_SIZE + cx + STENCIL_WIDTH*(cy + STENCIL_WIDTH*cz);
+                        sortedWeight[k] = stencilWeight[e];
+                        sortedParticle[k] = i;
+#ifdef CENTERED_DRAG
+                        keySegment[e] = s;
+#endif
+                        k++;
+                    }
+                }
+            }
+        }
     }
 }
 
