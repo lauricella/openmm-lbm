@@ -20,8 +20,8 @@ from openmmlbm import LBMForce
 
 def create_simulation(seed=5, boundaries=False):
     """Eight beads coupled to the fluid at 300 K, with a wall and the momentum removal every 3 steps; with
-    boundaries, a fluctuating fluid, a regularized wall, open faces along x (a Velocity inlet and a Density outlet)
-    and no removal."""
+    boundaries, a fluctuating fluid, a regularized wall, open faces along x (a Velocity inlet and a DensityVelocity
+    outlet) and no removal."""
     n, L = 8, 4.0
     topology = app.Topology()
     chain = topology.addChain()
@@ -38,8 +38,9 @@ def create_simulation(seed=5, boundaries=False):
         force.setFluidFluctuations(True)
         force.setWallScheme(LBMForce.Regularized)
         force.setFaceBoundary(LBMForce.XMin, LBMForce.Velocity)
-        force.setFaceBoundary(LBMForce.XMax, LBMForce.Density)
+        force.setFaceBoundary(LBMForce.XMax, LBMForce.DensityVelocity)
         force.setFaceVelocity(LBMForce.XMin, mm.Vec3(0.4, 0.1, 0.0))
+        force.setFaceVelocity(LBMForce.XMax, mm.Vec3(0.4, 0.0, 0.0))
         force.setFaceDensity(LBMForce.XMax, 604.0)
     for i in range(8):
         topology.addAtom('B', None, topology.addResidue('BEA', chain))

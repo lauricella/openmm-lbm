@@ -41,6 +41,12 @@ versions the API may still change.
   step). Before, the momentum along a regularized wall of the first fluid node was 4.6% cooler and the plane of a
   `DensityVelocity` face 38% cooler across it. Runs without fluctuations, and fluctuating runs without these
   boundaries, are unchanged bit for bit. A warning outside that range of $`\tau`$.
+- Fluctuating fluid: `Density` faces are an error with fluid fluctuations (`setFluidFluctuations(True)`, at any
+  temperature) when the Context is created. A `Density` face copies the velocity of its node, fluctuations included,
+  into the populations it rebuilds, and an exact linear model of the step shows that then no random part keeps the
+  fluid next to it at equilibrium (`docs/theory.md`, section 7); the coupled particles near it were up to 8% hotter.
+  Use `DensityVelocity` faces, whose fluid is at equilibrium, or `Velocity` faces. Runs without fluctuations are
+  unchanged.
 
 ### Fixed
 - Tests: a range-based `for` loop read the velocities of a temporary `State` already destroyed
@@ -63,7 +69,8 @@ versions the API may still change.
   particles near `Velocity` faces have the set temperature with every stencil; near a `Density` face they are up to 8%
   hotter within four nodes, with the nearest node as well; without particles the fluid next to a `Density` face is
   hotter too, mostly in its velocity across the face (+55% on the plane of the face, +6% on the next), a limitation of
-  the open faces since version 0.3.0 (`docs/user_guide/api_reference.md`, Open faces).
+  the open faces since version 0.3.0 (`docs/user_guide/api_reference.md`, Open faces); `Density` faces are now an
+  error with fluid fluctuations (Changed).
 - `docs/user_guide/interpolation.md`: the interpolation stencils step by step, with their weights written out.
 - `docs/theory.md`, new section 9: the interpolation stencils of the coupling planned for version 0.5.0 (trilinear,
   three-point and Keys kernels; interpolation of the node velocity and spreading of the reaction with the same

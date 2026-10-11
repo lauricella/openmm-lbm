@@ -185,6 +185,16 @@ LBMLatticeParameters LBMForceImpl::computeLatticeParameters(const LBMForce& forc
     // thermalized only through the fluid.
     lattice.fluidFluctuations = force.getFluidFluctuations();
     lattice.fluidKT = (lattice.fluidFluctuations ? BOLTZ*force.getTemperature() : 0.0);
+    // A Density face copies the velocity of its node, fluctuations included, into the populations it rebuilds, and then
+    // no random part keeps the fluctuating fluid next to it at equilibrium (docs/theory.md, section 7): until the face
+    // has a fluctuating version the combination is refused, whatever the temperature.
+    if (lattice.fluidFluctuations)
+        for (int face = 0; face < 6; face++)
+            if (lattice.faceBoundary[face] == LBMForce::Density)
+                throw OpenMMException("LBMForce: Density faces cannot be used with fluid fluctuations: they do not keep "
+                        "the fluctuating fluid next to the face at equilibrium (its momentum fluctuates more than at the "
+                        "temperature of the force, and coupled particles near the face are hotter). Use DensityVelocity "
+                        "faces, which impose the density and the velocity, or Velocity faces");
     lattice.randomNumberSeed = force.getRandomNumberSeed();
     lattice.momentumRemovalFrequency = force.getFluidMomentumRemovalFrequency();
     set<int> seen;

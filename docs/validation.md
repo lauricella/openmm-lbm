@@ -436,7 +436,9 @@ coupled to node 0, next to the other face). Temperatures in K:
 With `Velocity` faces every stencil gives the set temperature at every height, within 0.5%, also in the cell between
 the last node and the end of the box (the low value at 2.5 is in every column: the shared random numbers). Near a
 `Density` face the beads are hotter, from 4 nodes away (+1% at 12, +2% at 13.5, +3% to 5% at 14.5, +5% to 8% at 15.25),
-**with the nearest node as well**: the cause is next to the `Density` face, not in the stencils.
+**with the nearest node as well**: the cause is next to the `Density` face, not in the stencils. With these
+measurements and those below, since version 0.5.0 `Density` faces are an error with fluid fluctuations
+(`docs/theory.md`, section 7).
 
 **The fluid alone next to walls and open faces** (no coupled particles; CUDA, mixed precision, one A100; regularized
 walls and `DensityVelocity` faces with the random part of their rebuilt populations before the change of version
@@ -525,9 +527,10 @@ section 7); $`T`$ = 300 K, $`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 0.01 ps and the
 | Velocity spectrum (`testVelocitySpectrum`) | fluid on 8x8x8 nodes, $`\tau = 1`$, 300 steps of transient, 400 samples every 5 steps: the velocity of `getFluidFields()` minus the mean velocity of the sample, Fourier transformed; the longitudinal and transverse parts of the spectrum equal $`k_BT/\rho`$ and $`2k_BT/\rho`$ in three bands of $`\lvert\mathbf k\rvert`$ ($`\lvert\mathbf m\rvert^2 \le 3`$, $`4 \dots 12`$, $`> 12`$, with $`\mathbf k = 2\pi\mathbf m/8`$), and the variance per node is $`(N - 1)/N\,k_BT/\rho`$ per component; at rest, in a uniform flow (0.05, 0.02, -0.03) and with a body force $`g = 10^{-5}`$ along x, whose mean velocity $`u_0 + gt`$ is checked to 2e-4 | 5% (spectrum), 3% (per node) |
 | Zero temperature | with walls, body force and particles with the NVE scheme, the run with the fluctuations switched on at $`T = 0`$ equals the run without them | bitwise |
 | Reproducibility | same seed: identical runs, also with force evaluations between steps; another seed: a different run | bitwise |
-| Restart | with coupled particles at 300 K and seed 0, a run restarted from the checkpoints of OpenMM and of the force equals the uninterrupted run (fluid, velocities and force on the walls); also with a wall (regularized with the explicit and the centred drag, bounce-back with the centred drag), open faces along x (a `Velocity` inlet and a `Density` outlet) and a body force | bitwise |
+| Restart | with coupled particles at 300 K and seed 0, a run restarted from the checkpoints of OpenMM and of the force equals the uninterrupted run (fluid, velocities and force on the walls); also with a wall (regularized with the explicit and the centred drag, bounce-back with the centred drag), open faces along x (a `Velocity` inlet and a `DensityVelocity` outlet; a `Density` outlet before version 0.5.0) and a body force | bitwise |
 | NVE | with the NVE scheme, particles at rest are set in motion by a fluctuating fluid, and stay at rest without fluctuations | exact |
 | Parameters | `updateParametersInContext()` changes the temperature and refuses to switch the fluctuations; a checkpoint is refused by a Context with the fluctuations switched differently | exceptions |
+| `Density` faces (`testDensityFaceWithFluctuations`, version 0.5.0) | with fluid fluctuations a `Density` face is refused when the Context is created, on each axis, as `XMin`, `YMax` or `ZMin`, at 300 K and at zero temperature, next to a `Velocity` or a `DensityVelocity` face; the same lattices without fluctuations, or with a `DensityVelocity` face in its place, run | exceptions |
 | Warning | with fluid fluctuations a warning is printed only for the explicit drag with the EM scheme at $`T > 0`$, with the estimate $`\text{friction}\cdot\Delta t\,m/(2m_c)`$ of the heaviest coupled particle | exact |
 
 **Measured** (OpenMM 8.6.1 and 8.3.1; Reference, and CUDA and OpenCL on an NVIDIA A100 in the three precisions): all
@@ -907,7 +910,7 @@ to 8 % at $`\tau = 0.6`$.
 | Test | Checks | Tolerance |
 |---|---|---|
 | `test_checkpoint_bytes` | `createCheckpoint()` returns bytes starting with the tag of the format, which `loadCheckpoint()` accepts; other data raise an exception | exact |
-| `test_restart_is_exact` | eight beads at 300 K; a `Simulation` restarted from the file of `LBMCheckpointReporter` at step 20 equals the uninterrupted run at step 35 (positions, fluid, force on the walls), also when a `StateDataReporter` at the same step has drawn the random numbers of the next step; with a bounce-back wall and the momentum removal, and with a fluctuating fluid, a regularized wall and open faces along x (a `Velocity` inlet and a `Density` outlet) | bitwise |
+| `test_restart_is_exact` | eight beads at 300 K; a `Simulation` restarted from the file of `LBMCheckpointReporter` at step 20 equals the uninterrupted run at step 35 (positions, fluid, force on the walls), also when a `StateDataReporter` at the same step has drawn the random numbers of the next step; with a bounce-back wall and the momentum removal, and with a fluctuating fluid, a regularized wall and open faces along x (a `Velocity` inlet and a `DensityVelocity` outlet; a `Density` outlet before version 0.5.0) | bitwise |
 | `test_save_and_load_functions` | `openmmlbm.saveCheckpoint()` and `loadCheckpoint()` restore time and force on the walls; a damaged file raises `ValueError` | exact |
 
 ## VTK output (`python/tests/TestVTKReporter.py`, Reference)

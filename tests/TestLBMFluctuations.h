@@ -283,9 +283,10 @@ void testFluctuationsReproducible(Platform& platform) {
  * A run with a fluctuating fluid and coupled particles restarted from the checkpoints of OpenMM and of the force is
  * identical, bit for bit, to the uninterrupted run.  The seed is 0, so the two Contexts choose different seeds:
  * the checkpoint restores the generator.  With boundaries the fluid also has a wall (the plane j = 0, with the
- * given wall scheme), open faces along x (a Velocity inlet and a Density outlet, whose time filter is part of the
- * populations) and a body force; the force on the walls of the last step is restored as well.  With useFile the
- * checkpoint is a file of LBMForce::saveCheckpointFile(), the one that a run with any domain decomposition can load.
+ * given wall scheme), open faces along x (a Velocity inlet and a DensityVelocity outlet, whose random part reads that
+ * of the collision of its nodes; Density faces are refused with fluctuations) and a body force; the force on the walls
+ * of the last step is restored as well.  With useFile the checkpoint is a file of LBMForce::saveCheckpointFile(), the
+ * one that a run with any domain decomposition can load.
  */
 void testFluctuationsRestart(Platform& platform, bool boundaries=false, LBMForce::WallScheme wallScheme=LBMForce::BounceBack,
         LBMForce::DragScheme drag=LBMForce::Explicit, bool useFile=false) {
@@ -305,8 +306,9 @@ void testFluctuationsRestart(Platform& platform, bool boundaries=false, LBMForce
             force->setSolidNodes(wallPlane(8, 8, 8));
             force->setWallScheme(wallScheme);
             force->setFaceBoundary(LBMForce::XMin, LBMForce::Velocity);
-            force->setFaceBoundary(LBMForce::XMax, LBMForce::Density);
+            force->setFaceBoundary(LBMForce::XMax, LBMForce::DensityVelocity);
             force->setFaceVelocity(LBMForce::XMin, Vec3(0.5, 0.2, 0.0));
+            force->setFaceVelocity(LBMForce::XMax, Vec3(0.5, 0.1, 0.0));
             force->setFaceDensity(LBMForce::XMax, 1.002*fluidDensity);
             force->setBodyAcceleration(Vec3(0.0, 0.0, 5.0));
         }
@@ -411,6 +413,39 @@ void testFluctuationsParameters(Platform& platform) {
     ASSERT(thrown);
     delete system;
     delete system2;
+}
+
+/**
+ * Density faces are refused with the fluid fluctuations, which they keep away from equilibrium next to the face
+ * (docs/theory.md, section 7), on every axis, as XMin or XMax, also at zero temperature and next to faces of the other
+ * types; without fluctuations, or with DensityVelocity faces instead, the same lattices are accepted.
+ */
+void testDensityFaceWithFluctuations(Platform& platform) {
+    for (int axis = 0; axis < 3; axis++)
+        for (int run = 0; run < 3; run++) {
+            LBMForce* force;
+            System* system = createCoupledSystem(force, 1, 5.0, (axis == 1 ? 0.0 : 300.0));
+            force->setFluidFluctuations(run != 1);
+            force->setDragScheme(LBMForce::Centered);
+            LBMForce::Face densityFace = (LBMForce::Face) (2*axis + axis%2);
+            LBMForce::Face otherFace = (LBMForce::Face) (2*axis + 1 - axis%2);
+            force->setFaceBoundary(densityFace, run == 2 ? LBMForce::DensityVelocity : LBMForce::Density);
+            force->setFaceBoundary(otherFace, axis == 2 ? LBMForce::DensityVelocity : LBMForce::Velocity);
+            force->setFaceDensity(densityFace, 1.001*fluidDensity);
+            VerletIntegrator integrator(fluidDt);
+            bool refused = false;
+            try {
+                Context context(*system, integrator, platform);
+                context.setPositions({Vec3(1.3, 1.4, 1.5)});
+                integrator.step(1);
+            }
+            catch (OpenMMException& e) {
+                refused = (string(e.what()).find("Density faces cannot be used with fluid fluctuations") != string::npos);
+                ASSERT(refused);
+            }
+            ASSERT_EQUAL(run == 0, refused);
+            delete system;
+        }
 }
 
 /**
@@ -546,5 +581,6 @@ void runFluctuationTests(Platform& platform) {
     testFluctuationsRestart(platform, true, LBMForce::Regularized, LBMForce::Centered, true);
     testFluctuationsWithNVE(platform);
     testFluctuationsParameters(platform);
+    testDensityFaceWithFluctuations(platform);
     testFluctuationDragWarning(platform);
 }

@@ -306,9 +306,10 @@ densities.
   open face are never bounced back. Malaspinas [22] treats edges and corners with finite differences
   instead; the rule here keeps the scheme local.
 - With two `Density` faces at the same density and no walls (the other axes periodic) the mean flow across
-  the faces has no restoring force: equal pressures, no friction. Any disturbance moves the whole fluid, and
-  with fluid fluctuations the mean flow wanders like a free Brownian particle until the Mach number check stops
-  the run (`docs/validation.md`). Walls along the flow damp it by viscous friction; a `Velocity` face fixes it.
+  the faces has no restoring force: equal pressures, no friction. Any disturbance moves the whole fluid: with fluid
+  fluctuations (which `Density` faces no longer accept, section 7) the mean flow wandered like a free Brownian
+  particle until the Mach number check stopped the run (`docs/validation.md`). Walls along the flow damp it by
+  viscous friction; a `Velocity` face fixes it.
 - With open faces the fluid exchanges momentum with the outside, so its momentum cannot be removed:
   `setFluidMomentumRemovalFrequency(0)` is required. The reaction of a coupled particle acts on the face nodes
   as on any fluid node. The particles themselves still live in OpenMM's periodic box: a particle that crosses
@@ -1201,7 +1202,8 @@ far above the temperature). Since a boundary that reads only the present state o
 deterministic change of the velocity from a thermal fluctuation, a `Density` face at equilibrium needs either a memory
 of the mean flow or a different rule for the populations that enter; this is open (the exponential mean of the
 velocity of the node, tried in the model, holds the equilibrium only when it is longer than the viscous time of the
-whole box).
+whole box). Until it is solved, a `Density` face is an error with fluid fluctuations, at any temperature, when the
+Context is created: `DensityVelocity` faces, at equilibrium, and `Velocity` faces, with the limit above, remain.
 
 **Tests** (`tests/TestLBMFluctuations.h`, all platforms and precisions).
 - A lattice of a single node, which streams every population back to itself: mass and momentum stay those of the
@@ -1630,8 +1632,9 @@ the fluctuating fluid and the centred drag, particles near `Velocity` faces have
 stencil, also in the cell between node $`n - 1`$ and the end of the box; near a `Density` face they are hotter, up to
 8% within four nodes, with the nearest node as well, where the fluid alone is hotter too: in its velocity across the
 face, and above all in the mean velocity of its planes, up to 4.8 times the temperature along the face on its plane,
-as an exact linear model of the boundary step confirms; near a `DensityVelocity` face at rest the particles keep the
-set temperature (`docs/validation.md`, Interpolation stencils, Temperature near open faces).
+as an exact linear model of the boundary step confirms (so `Density` faces are an error with fluid fluctuations,
+section 7); near a `DensityVelocity` face at rest the particles keep the set temperature (`docs/validation.md`,
+Interpolation stencils, Temperature near open faces).
 
 **Domain decomposition** (section 8). The rank that owns the nearest node of a particle computes
 its coupling, as with the nearest node. From the nearest node the stencil reaches one node in each direction with the

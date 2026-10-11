@@ -35,7 +35,8 @@ Know these before using the plugin for a study:
 - **Walls and open faces.** Solid nodes are no-slip walls at rest, with bounce-back (the default) or
   regularized walls (`setWallScheme()`); a moving plate, an inlet or an outlet is an open face with an
   imposed velocity, density or both (`setFaceBoundary()`; both in development for version 0.5.0). The particles stay in OpenMM's periodic box also with
-  open faces: keep coupled particles away from them.
+  open faces: keep coupled particles away from them. With fluid fluctuations, faces with the density alone
+  (`Density`) are an error: use `DensityVelocity` or `Velocity` faces ([open faces](api_reference.md#open-faces)).
 
 ## Contents
 

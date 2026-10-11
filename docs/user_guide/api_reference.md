@@ -342,7 +342,9 @@ The theory is in
      the fluid at rest (`setFluidDensity()`). The velocity across the face is filtered in time, half the value that
      the arriving fluid gives and half that of the face node at the start of the step (the velocity of
      `getFluidFields()`): this damps a spurious oscillation from one node to the next and from one step to the next,
-     and does not change steady flows ([theory, Time filter of the Density faces](../theory.md#open-faces)).
+     and does not change steady flows ([theory, Time filter of the Density faces](../theory.md#open-faces)). Not with
+     fluid fluctuations: with `setFluidFluctuations(True)` a `Density` face is an error (version 0.5.0, see
+     Fluctuating fluid below); use a `DensityVelocity` face.
    - `LBMForce.DensityVelocity` (version 0.5.0): the fluid beyond the face has both the density of
      `setFaceDensity(face, density)` and the velocity of `setFaceVelocity(face, velocity)`: a reservoir. The face
      sets the fluid that enters the box, not the fluid on its nodes. When the two values agree with the flow inside
@@ -390,14 +392,16 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
 - **Particles** still live in OpenMM's periodic box: a particle that crosses an open face reappears on the
   opposite side. Keep coupled particles away from the open faces. With an interpolation stencil the stencil stops at
   the last nodes ([interpolation.md](interpolation.md#4-what-the-plugin-does-with-the-weights)).
-- **Fluctuating fluid.** Next to a `Density` face the velocity of the fluid across the face fluctuates more than at
-  the set temperature (+55% on the plane of the face, +6% on the next plane, about +1% four planes in); on the plane
-  of a `Velocity` face the velocity across the face is the imposed one. Coupled particles near a `Velocity` face keep
-  the set temperature; near a `Density` face they are up to 8% hotter within four nodes ([validation](../validation.md),
-  Interpolation stencils, Temperature near open faces): the mean velocity of the planes next to a `Density` face is far
-  above equilibrium. Keep coupled particles at least five nodes away from `Density` faces. Near a `DensityVelocity`
-  face at rest the particles keep the set temperature, and the fluid next to it is at equilibrium (version 0.5.0,
-  for $`0.586 \le \tau \le 3.41`$).
+- **Fluctuating fluid.** `Density` faces cannot be used with fluid fluctuations: since version 0.5.0 they are an
+  error when the Context is created. Next to them the fluid is not at equilibrium: its velocity across the face
+  fluctuated more than at the set temperature (+55% on the plane of the face, +6% on the next plane, about +1% four
+  planes in), the mean velocity of the planes next to the face was far above equilibrium, and coupled particles were
+  up to 8% hotter within four nodes ([validation](../validation.md), Interpolation stencils, Temperature near open
+  faces; [theory](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), section 7, for the reason). Use
+  `DensityVelocity` faces: near a `DensityVelocity` face at rest the particles keep the set temperature, and the
+  fluid next to it is at equilibrium (for $`0.586 \le \tau \le 3.41`$). `Velocity` faces can be used too: on the plane
+  of a `Velocity` face the velocity across the face is the imposed one, the density of that plane fluctuates more than
+  at equilibrium, and coupled particles near the face keep the set temperature.
 - **Mass** is not conserved with open faces (fluid enters and leaves), and `getWallForce()` counts only the
   solid walls, not the open faces.
 - **Keep the flow slow and the density differences small**: a few percent at most, so that the fluid stays
@@ -411,7 +415,8 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
 ### `setFaceBoundary(face, type)`, `getFaceBoundary(face)`
 
 The type of a face: `LBMForce.Periodic` (default), `LBMForce.Velocity`, `LBMForce.Density` or
-`LBMForce.DensityVelocity`. Fixed when the Context is created.
+`LBMForce.DensityVelocity`. Fixed when the Context is created. `Density` faces cannot be used with fluid
+fluctuations ([open faces](#open-faces)).
 
 ### `setFaceVelocity(face, velocity)`, `getFaceVelocity(face)`
 
@@ -603,6 +608,8 @@ the thermal Mach number $`\sqrt{3k_BT}`$, and warns if $`k_BT`$ exceeds 1/3000, 
 as $`\Delta t^2/\Delta x^5`$, so a larger lattice spacing or a smaller time step makes it smaller (water at 300 K
 with $`\Delta x`$ = 0.5 nm and $`\Delta t`$ = 0.01 ps: 1.3e-5;
 [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), section 7, Size of the fluctuations).
+With fluid fluctuations `Density` faces are an error when the Context is created, because they do not keep the fluid
+next to them at equilibrium ([open faces](#open-faces)): use `DensityVelocity` faces, or `Velocity` faces.
 
 With the fluctuating fluid **use the centred drag**
 ([`setDragScheme(LBMForce.Centered)`](#setdragschemescheme-getdragscheme)) and measure the temperature with

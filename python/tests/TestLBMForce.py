@@ -361,6 +361,20 @@ def test_open_faces_need_no_momentum_removal():
         mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
 
 
+def test_density_face_with_fluctuations():
+    # Density faces keep a fluctuating fluid away from equilibrium next to the face (docs/theory.md, section 7): with
+    # fluid fluctuations they are an error when the Context is created, while DensityVelocity faces are accepted.
+    system, force, positions = create_system(num_particles=1)
+    force.setFluidMomentumRemovalFrequency(0)
+    force.setFluidFluctuations(True)
+    force.setFaceBoundary(LBMForce.ZMin, LBMForce.Velocity)
+    force.setFaceBoundary(LBMForce.ZMax, LBMForce.Density)
+    with pytest.raises(mm.OpenMMException, match='Density faces cannot be used with fluid fluctuations'):
+        mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+    force.setFaceBoundary(LBMForce.ZMax, LBMForce.DensityVelocity)
+    mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+
+
 @pytest.mark.parametrize('grid, message', [((490, 490, 490), 'a domain of the lattice holds up to 117649000 nodes'),
                                            ((1300, 1300, 1300), 'more than the 2147483647')])
 def test_lattice_too_large(grid, message):
