@@ -901,25 +901,47 @@ KERNEL void prepareCenteredStencil(GLOBAL const real4* RESTRICT posq, GLOBAL con
  * Conjugate gradients of the centred drag: the vector p of the particles spread on the nodes, sum_l xi_jl p_l in
  * particle order, written for the node of segment s at spreadValue[3*s ... 3*s+2], the three components together for
  * the scattered reads of multiplyStencilMatrix().  With the domain decomposition every rank runs the conjugate
- * gradients for all the particles, and spreads p on all the nodes of the stencils.
+ * gradients for all the particles, and spreads p on all the nodes of the stencils.  A work group of LBM_BLOCK_SIZE
+ * threads takes the segments that start in a chunk of LBM_BLOCK_SIZE keys, one thread per segment: the threads read the
+ * weights and the values of p of the keys of these segments together, LBM_BLOCK_SIZE keys at a time, into local memory,
+ * and the thread of each segment adds those of its segment in key order.
  */
 KERNEL void spreadStencilVector(GLOBAL const int* RESTRICT segmentStart, GLOBAL const int* RESTRICT chunkOffset,
         GLOBAL const mixed* RESTRICT sortedWeight, GLOBAL const int* RESTRICT sortedParticle, GLOBAL const mixed* RESTRICT p,
         GLOBAL mixed* RESTRICT spreadValue) {
-    const int numSegments = chunkOffset[NUM_KEY_CHUNKS];
-    for (int s = GLOBAL_ID; s < numSegments; s += GLOBAL_SIZE) {
-        int first = segmentStart[s], end = segmentStart[s+1];
+    LOCAL mixed keyValue[4*LBM_BLOCK_SIZE];
+    for (int c = GROUP_ID; c < NUM_KEY_CHUNKS; c += NUM_GROUPS) {
+        int firstSegment = chunkOffset[c], endSegment = chunkOffset[c+1];
+        int s = firstSegment + LOCAL_ID;
+        bool owner = (s < endSegment);
+        int first = (owner ? segmentStart[s] : 0), end = (owner ? segmentStart[s+1] : 0);
+        int chunkEnd = segmentStart[endSegment];
         mixed sx = 0, sy = 0, sz = 0;
-        for (int m = first; m < end; m++) {
-            int i = sortedParticle[m];
-            mixed w = sortedWeight[m];
-            sx += w*p[i];
-            sy += w*p[NUM_COUPLED+i];
-            sz += w*p[2*NUM_COUPLED+i];
+        for (int base = segmentStart[firstSegment]; base < chunkEnd; base += LBM_BLOCK_SIZE) {
+            int m = base + LOCAL_ID;
+            if (m < chunkEnd) {
+                int i = sortedParticle[m];
+                keyValue[4*LOCAL_ID] = sortedWeight[m];
+                keyValue[4*LOCAL_ID+1] = p[i];
+                keyValue[4*LOCAL_ID+2] = p[NUM_COUPLED+i];
+                keyValue[4*LOCAL_ID+3] = p[2*NUM_COUPLED+i];
+            }
+            SYNC_THREADS;
+            int to = min(end, base+LBM_BLOCK_SIZE);
+            for (int k = max(first, base); k < to; k++) {
+                int slot = 4*(k-base);
+                mixed w = keyValue[slot];
+                sx += w*keyValue[slot+1];
+                sy += w*keyValue[slot+2];
+                sz += w*keyValue[slot+3];
+            }
+            SYNC_THREADS;
         }
-        spreadValue[3*s] = sx;
-        spreadValue[3*s+1] = sy;
-        spreadValue[3*s+2] = sz;
+        if (owner) {
+            spreadValue[3*s] = sx;
+            spreadValue[3*s+1] = sy;
+            spreadValue[3*s+2] = sz;
+        }
     }
 }
 

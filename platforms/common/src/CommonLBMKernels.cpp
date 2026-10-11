@@ -1585,10 +1585,10 @@ void CommonCalcLBMForceKernel::solveStencilDrag() {
     // forces are written into particleForce.  The dot products are three per vector, in gradientScalars: r.z (at 0 and 12,
     // alternately the old and the new value), the right-hand side squared (3), r.r (6) and p.Ap (9); the host reads them
     // to decide when to stop.
-    int numCoupled = lattice.particles.size();
+    int numCoupled = lattice.particles.size(), numChunks = chunkCount.getSize();
     auto multiply = [&](ComputeArray& p) {
         spreadKernel->setArg(4, p);
-        spreadKernel->execute(numCoupled*stencilSize);
+        spreadKernel->execute(numChunks*blockSize, blockSize);
         multiplyKernel->setArg(4, p);
         if (stencilSize >= 27) {
             int particlesPerGroup = blockSize/stencilSize;

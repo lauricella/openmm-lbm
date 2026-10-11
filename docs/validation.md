@@ -1264,15 +1264,18 @@ explicit / centred drag:
 
 | Stencil | 1 GPU, $`120^3`$ nodes | 4 GPUs, $`120^3`$ nodes | 4 GPUs, $`240^3`$ nodes |
 |---|---|---|---|
-| `Trilinear` | 1.62 / 2.53 | 2.42 / 4.50 | 6.75 / 8.72 |
-| `ThreePoint` | 2.95 / 4.98 | 3.43 / 7.19 | 7.67 / 11.81 |
-| `Keys` | 5.49 / 11.02 | 6.86 / 15.08 | 13.69 / 22.30 |
+| `Trilinear` | 1.62 / 2.51 | 2.42 / 4.30 | 6.75 / 8.80 |
+| `ThreePoint` | 2.95 / 4.91 | 3.43 / 7.46 | 7.67 / 12.00 |
+| `Keys` | 5.49 / 10.56 | 6.86 / 14.76 | 13.69 / 21.34 |
 
 The beads are crowded (8 to 64 sort keys each, 3.6 million with `Keys`), so the coupling takes most of the step. The
 sums over the nodes of the stencils run one thread per node, from a list of the segments of the sorted keys made after
 each sort; before, one thread per key scanned the keys of its node when it was the first of them, and most threads of
 a warp were idle: with `Keys` and the centred drag on one GPU the spreading of the conjugate gradients took 14 of 28.6
-ms per step, now 2.7 of 12.9 (profile of the step). The product of the conjugate gradients reads the values of the
+ms per step, then 2.7 of 12.9 (profile of the step). The threads of a work group now read the keys of the segments
+that start among 64 keys together, into local memory, before each adds those of its node in the same order: 2.6 to 2.2
+ms with `Keys`, 0.84 to 0.75 with the three-point stencil, the same with the trilinear one, and the same results bit for
+bit. The product of the conjugate gradients reads the values of the
 slots of a stencil scattered over the nodes: with the three-point kernel and Keys a work group reads those of a
 particle together and three threads add them in order (`Keys` 2.06 to 1.72 ms per step, three-point 0.82 to 0.57;
 the trilinear kernel keeps one thread per particle, which is faster with 8 slots), and the preparation of the system,
