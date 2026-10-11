@@ -378,10 +378,11 @@ on where it is in the cell: with the centred drag, between a node and the centre
 keeps $`\sum W^2`$ constant ([theory.md](../theory.md), section 9, and [validation.md](../validation.md),
 Interpolation stencils). For particles that move through the fluid the three-point stencil is the safe choice.
 
-**Cost.** Each node of a stencil is one more sort key and one more term in every sum: Keys costs about 8 times the
-trilinear stencil in the coupling. With the explicit drag on one A100, for 56320 crowded beads on $`120^3`$ nodes, a
-step takes 1.6 ms with the trilinear stencil, 3.0 ms with the three-point one and 5.5 ms with Keys (the fluid alone
-0.9 ms); with the centred drag 2.6, 5.7 and 12.8 ms ([validation.md](../validation.md)).
+**Cost.** Each node of a stencil is one more term in every sum, and with the trilinear stencil one more sort key
+(the three-point stencil and Keys sort one key per particle since version 0.6.0,
+[architecture.md](../architecture.md)). With the explicit drag on one A100, for 56320 crowded beads on $`120^3`$ nodes,
+a step takes 1.6 ms with the trilinear stencil, 2.2 ms with the three-point one and 3.2 ms with Keys (the fluid alone
+0.9 ms); with the centred drag 2.5, 4.2 and 7.9 ms ([validation.md](../validation.md)).
 
 ## References
 

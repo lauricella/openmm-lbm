@@ -3,7 +3,10 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.6.0 (2026-10-12)
+
+A faster coupling through the three-point and `Keys` stencils on the GPU platforms. The results are those of version
+0.5.1 bit for bit, except rounding differences of the three-point stencil with the explicit drag on CUDA (Changed).
 
 ### Changed
 - GPU platforms, three-point and `Keys` stencils: the coupling sorts one key per particle, from the brick of $`4^3`$
@@ -18,6 +21,13 @@ versions the API may still change.
   stencil with the explicit drag and the Euler–Maruyama scheme, with or without fluid fluctuations, whose results
   differ by rounding (in double and mixed precision only the fluid, by up to $`2.6\cdot10^{-18}`$ in the populations;
   cause not identified).
+
+### Documentation
+- `docs/architecture.md`, The sort of the coupling and the segments of the stencils: why the coupling sorts, how the
+  cost of the sort shaped the coupling since version 0.1.0, the kernels that build the segments, the designs tried
+  before them with their costs, and the two ways (one key per slot or per particle).
+- `docs/validation.md`: the comparison with version 0.5.1 bit for bit, the domain decomposition on four GPUs and on
+  two nodes, and the timings of the stencils against version 0.5.1.
 
 ## 0.5.1 (2026-10-11)
 
