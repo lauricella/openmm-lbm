@@ -3,7 +3,10 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.6.2 (2026-10-12)
+
+The temperature of the fluctuating fluid in the diffusion example, its validation on SOD1 at 298 K and 310 K, and the
+whole documentation proofread. The code of the plugin is that of version 0.6.0.
 
 ### Added
 - `examples/cocomo/diffusion.py --fluid-fluctuations` writes `<prefix>_fluid_temperature.txt`, the temperature of the

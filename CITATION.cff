@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "openmm-lbm: lattice Boltzmann fluid plugin for OpenMM"
-version: 0.6.1
+version: 0.6.2
 date-released: 2026-10-12
 license: MIT
 authors:
