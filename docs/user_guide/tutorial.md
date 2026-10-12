@@ -158,14 +158,14 @@ python $EX/particle/thermal.py --beads 100 --friction 10 --steps 20000 --equilib
 ```
 
 ```
-Mean temperature over 18000 steps: 295.1 K (explicit drag, set temperature 300 K)
+Mean temperature over 18000 steps: 297.6 K (explicit drag, set temperature 300 K)
 Trajectory written to thermal.txt, temperature to thermal_temperature.txt
 ```
 
-(on the Reference platform; a GPU gives slightly different numbers, because its random numbers come from another
-generator and are rounded differently.) The temperature is somewhat below 300 K: the fluid itself has no thermal
-fluctuations in this example (they are off by default, `setFluidFluctuations()`), and it takes part of the momentum
-of the beads.
+(on an A100 GPU; another platform gives slightly different numbers, because the random numbers come from another
+generator (Reference) or are rounded differently.) The temperature is about 1% below 300 K: the fluid itself has no
+thermal fluctuations in this example (they are off by default, `setFluidFluctuations()`), and it takes part of the
+momentum of the beads.
 
 Exercises:
 
