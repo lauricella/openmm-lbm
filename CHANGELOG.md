@@ -5,6 +5,19 @@ versions the API may still change.
 
 ## Unreleased
 
+### Added
+- `examples/cocomo/diffusion.py --fluid-fluctuations` writes `<prefix>_fluid_temperature.txt`, the temperature of the
+  fluid every 10 reports from the velocities of the nodes, and prints its mean at the end of the run.
+
+### Documentation
+- `docs/validation.md`, Temperature of SOD1 with a fluctuating fluid: the temperature of the beads and of the fluid
+  with the preset `sod1-g30` (friction 30/ps), for both drags with and without fluid fluctuations, at 298 K and
+  310 K; `examples/README.md` summarizes it, and the tutorial has an exercise with the fluctuating fluid.
+- The whole documentation proofread: corrected references to sections, statements that did not match their tables or
+  the code (the speeds of the centred drag, the temperatures of the centred drag in the temperature example, the
+  Mach number computed from $`\mathbf j/\rho`$, one sort key per particle only with the three-point and `Keys`
+  stencils), typos and consistent spelling.
+
 ### Fixed
 - `examples/cocomo/diffusion.py`: the summary at the end printed only the mean full-step temperature, also with the
   centred drag, where the half-step temperature is the right one (a few kelvin higher). It now prints both and says

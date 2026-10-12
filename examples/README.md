@@ -100,6 +100,8 @@ export EX=/path/to/openmm-lbm/examples                   # the folder of the exa
 python $EX/cocomo/diffusion.py --preset smoke            # SOD1, 2000 steps: a quick check
 python $EX/cocomo/diffusion.py --preset sod1 --seed 1    # SOD1, 200 ns, about 30 minutes on an A100
 python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient of the protein
+python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctuations --seed 1
+                                                         # fluctuating fluid, 50 ns, about 20 minutes on an A100
 # with --drag Centered the prefix of the files is sod1_lb_on_centered
 # with a fluctuating fluid use the centred drag: --drag Centered --fluid-fluctuations (prefix sod1_lb_on_centered_fluct)
 # --vtk 10000 writes the fluid and the beads every 10000 steps for ParaView: open sod1_lb_on.pvd
@@ -116,6 +118,16 @@ python $EX/cocomo/msd.py sod1_lb_on_com.txt              # diffusion coefficient
 - The script writes the trajectory (DCD), the energies and temperature (OpenMM's log), the full-step and
   half-step temperature and the centre of mass of the protein, not wrapped into the box, which `msd.py`
   reads.
+- **Temperature.** `<prefix>_temperature.txt` has the temperature of the beads from full-step and from half-step
+  velocities: the right one is the full-step temperature with the explicit drag and the half-step one with the
+  centred drag. The end of the run prints both means and says which one is right. With `--fluid-fluctuations` the
+  script also writes `<prefix>_fluid_temperature.txt`, the temperature of the fluid every 10 reports, from the
+  velocities of the nodes: the fluid of a cell, of mass $`m_c = \rho\Delta x^3`$, has $`k_BT/2`$ per component of its
+  momentum ([theory.md](../docs/theory.md), section 7). With the preset `sod1-g30` (friction 30/ps), the centred drag
+  and the fluctuating fluid keep the beads and the fluid at the set temperature, at 298 K and with
+  `--temperature 310`; without fluctuations the fluid is cold and the beads are 16% below $`T`$ with the centred
+  drag, 0.7% with the explicit one; the explicit drag with a fluctuating fluid makes them 20% too hot (numbers in
+  [validation.md](../docs/validation.md#temperature-of-sod1-with-a-fluctuating-fluid-examplescocomodiffusionpy-cuda-nvidia-a100)).
 - **Long runs.** Every `--checkpoint` steps (default: every 100 reports) the script saves the whole run,
   fluid included, in `<prefix>.chk`. If the run stops, for example at the time limit of a job, the same
   command with `--restart` continues it from the last checkpoint up to `--steps`, exactly as an

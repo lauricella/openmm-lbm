@@ -1610,6 +1610,42 @@ were regenerated with the Euler-Maruyama scheme for this comparison ($`v_1/v_0 =
   ($`k_BT/(M\gamma)`$ = 0.75 Å²/ns); the temperature is 294.6 K at full steps with the explicit drag and 250.2 K
   at half steps with the centred drag, 16% below $`T`$.
 
+## Temperature of SOD1 with a fluctuating fluid (`examples/cocomo/diffusion.py`, CUDA, NVIDIA A100)
+
+The thermalization of a protein and of the fluid, with the parameters of the preset `sod1-g30`: SOD1 in COCOMO2
+(110 beads), box of 30 nm ($`60^3`$ nodes), friction 30/ps, $`\Delta t`$ = 10 fs, $`\nu = 5.0175`$ nm²/ps
+($`\tau = 1.10`$), removal of the fluid momentum at every step; reports every 1000 steps, CUDA in mixed precision,
+OpenMM 8.6.1, version 0.6.1 of the plugin, one A100 per run, 20 ns per run. The rows with seeds 1 and 2 give the
+beads of these runs and the fluid of their reruns with the fluid temperature written at every report, stopped after
+16 ns; the run at 310 K, with the fluid temperature, stopped after 16.5 ns. Temperatures of the beads: mean after the first 10%
+of the reports, with the standard error of 10 blocks; the right one for each drag is in bold (half step for the
+centred drag, full step for the explicit drag). Temperature of the fluid: the mean of `<prefix>_fluid_temperature.txt`
+(written at every report in these runs), or, for the runs marked VTK, of the velocities of 10 VTK files.
+
+| drag | fluid fluctuations | $`T`$ (K) | beads, half step (K) | beads, full step (K) | fluid (K) |
+|---|---|---|---|---|---|
+| centred | yes, seed 1 | 298 | **298.6 ± 0.5** | 264.9 ± 0.3 | 298.01 |
+| centred | yes, seed 2 | 298 | **299.0 ± 0.5** | 264.7 ± 0.5 | 298.01 |
+| centred | yes | 310 | **310.6 ± 0.7** | 275.6 ± 0.6 | 310.01 |
+| centred | no | 298 | **250.8 ± 0.6** | 221.3 ± 0.5 | 0.01 (VTK) |
+| explicit | yes | 298 | 420.3 ± 0.5 | **356.3 ± 0.4** | 298.19 (VTK) |
+| explicit | no | 298 | 350.6 ± 0.9 | **295.8 ± 0.7** | 0.03 (VTK) |
+| explicit | no | 310 | 364.7 ± 1.0 | **307.7 ± 0.7** | 0.03 (VTK) |
+
+- **Centred drag with the fluctuating fluid**, the combination that the documentation recommends: the beads are at
+  the set temperature at 298 K and at 310 K, within 0.35% (1 to 2 standard errors), and the fluid within 0.01 K. Its
+  values of 1000 steps apart scatter by 0.5 K, as expected for $`3\cdot60^3`$ velocity components.
+- **Without fluid fluctuations** the fluid stays cold and takes energy from the beads: with the centred drag they are
+  16% below $`T`$, with the explicit drag 0.7% (at 298 K and at 310 K), close to the run of 50 ns of the previous
+  section (250.2 K and 294.6 K).
+- **Explicit drag with the fluctuating fluid**: the beads are 20% too hot. When the Context is created the plugin
+  warns, with the estimate $`\gamma\Delta t\, m/(2m_c)`$ = 37% for the heaviest bead (`docs/theory.md`, section 7).
+- With the preset `sod1` (box 15 nm, friction 10/ps), the explicit drag without fluctuations gives 294.3 ± 0.5 K at
+  full steps, 1.2% below 298 K; 1 ns with the centred drag and the fluctuating fluid (the exercise of lesson 5 of the
+  tutorial) gives 297.8 ± 2.3 K for the beads and 298.1 K for the fluid.
+- Writing the fluid temperature does not change the run: the temperatures of the beads of the rerun with seed 1 are
+  identical, report by report, to those of the run without it.
+
 ## Many proteins: 64 copies of SOD1 (CUDA, NVIDIA A100)
 
 64 copies of SOD1 (COCOMO2, 7040 beads, well above the size at which the GPU platforms may repeat a force evaluation
