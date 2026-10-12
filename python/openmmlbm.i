@@ -625,7 +625,8 @@ class LBMTemperatureReporter(object):
     the temperature that StateDataReporter reports for the same particles.  With the Centered drag it is the
     velocity of the State, half a step after the force, while StateDataReporter reports the full-step temperature,
     which is lower, by 1/(1 + friction*dt/2) for a particle in a fluid at rest.  The temperature counts three degrees
-    of freedom per coupled particle.  Each line holds the step, the time (ps) and the temperature (K).
+    of freedom per coupled particle.  Each line holds the step, the time (ps) and the temperature (K).  The header is
+    written only at the start of a file, so that a reporter given a file opened for appending continues it (a restart).
     """
 
     def __init__(self, file, reportInterval, force):
@@ -659,7 +660,12 @@ class LBMTemperatureReporter(object):
         if self._particles is None:
             self._particles = [self._force.getParticle(i) for i in range(self._force.getNumParticles())]
             self._masses = np.array([simulation.system.getParticleMass(i).value_in_unit(unit.dalton) for i in self._particles])
-            print('#"Step","Time (ps)","Temperature (K)"', file=self._out)
+            try:
+                new = self._out.tell() == 0       # a file opened for appending continues without a second header
+            except (AttributeError, OSError, ValueError):
+                new = True                        # a stream without a position, such as sys.stdout
+            if new:
+                print('#"Step","Time (ps)","Temperature (K)"', file=self._out)
         velocities = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)[self._particles]
         if self._force.getDragScheme() != LBMForce.Centered:
             forces = state.getForces(asNumpy=True).value_in_unit(unit.kilojoule_per_mole/unit.nanometer)[self._particles]

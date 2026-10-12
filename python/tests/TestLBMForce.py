@@ -172,6 +172,14 @@ def test_temperature_reporter(drag, tmp_path):
         v = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)
         expected = 100.0*np.sum(v**2)/(3*20*kB)
     assert temperature == pytest.approx(expected, abs=1e-3)       # written with three decimals
+    # A second reporter on the same file opened for appending continues it, without a second header.
+    with open(path, 'a') as out:
+        simulation.reporters.append(LBMTemperatureReporter(out, 5, force))
+        simulation.step(10)
+        del simulation.reporters[:]
+    lines = path.read_text().splitlines()
+    assert sum(line.startswith('#') for line in lines) == 1
+    assert [int(line.split()[0]) for line in lines[1:]] == [5, 10, 15, 20, 25, 30]
 
 
 def test_wall_force():

@@ -541,7 +541,9 @@ A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps
 temperature (K) of the particles coupled to `force`, with three degrees of freedom per particle. It uses the
 velocity that has the right temperature for the drag scheme of the force: the full-step velocity
 $`\mathbf v + \Delta t\,\mathbf F/(2m)`$ with the explicit drag (the same temperature as `StateDataReporter`), the
-velocity of the State with the centred drag. `file` is a path or an open file such as `sys.stdout`. With the domain
+velocity of the State with the centred drag. `file` is a path or an open file such as `sys.stdout`; the header is
+written only at the start of a file, so that a file opened for appending (`open(path, 'a')`, for a restart) is
+continued. With the domain
 decomposition and the explicit drag the reporter asks the State for the forces, which every rank must do together:
 add it on every rank, with the file only on rank 0 (`os.devnull` on the others).
 
