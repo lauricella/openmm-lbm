@@ -677,8 +677,10 @@ cell); let $`z = \lambda\Delta t/2`$.
   analysed in [14, 15]), but none of them has an on-site velocity with the exact temperature [14].
 
 `StateDataReporter` reports the temperature of the full-step velocity (section 2, Kinetic temperature):
-right with the explicit drag, lower with the centred drag. `openmmlbm.LBMTemperatureReporter` reports the
-temperature of the coupled particles with the right velocity for each scheme.
+right with the explicit drag, lower with the centred drag. The plugin gives the right temperature automatically:
+`openmmlbm.LBMTemperatureReporter` reads the drag scheme of the force and reports the temperature of the coupled
+particles from the full-step velocities with the explicit drag and from the half-step velocities with the centred
+drag. The examples take the temperature from it.
 
 **Temperature with a fluid without fluctuations.** The fluid has no thermal fluctuations of its own, so the coupled
 particles are colder than $`T`$ (Kinetic temperature, above). The centred drag couples a particle to the velocity of

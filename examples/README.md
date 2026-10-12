@@ -9,7 +9,7 @@ the [tutorial](../docs/user_guide/tutorial.md), which goes through these example
 | Script | What it shows | Default size | Time on an A100 GPU | Time on one CPU core (Reference) |
 |---|---|---|---|---|
 | [particle/kick.py](particle/kick.py) | a bead kicked in a fluid at rest, with and without the fluid | $`100^3`$ nodes, 2000 steps | 2 s | 10 min |
-| [particle/thermal.py](particle/thermal.py) | a bead brought to temperature by the fluid; full-step and half-step temperature | $`10^3`$ nodes, 20000 steps | 4 s | 10 s |
+| [particle/thermal.py](particle/thermal.py) | a bead brought to temperature by the fluid; its temperature from the reporter of the plugin | $`10^3`$ nodes, 20000 steps | 4 s | 12 s |
 | [particle/uniform_flow.py](particle/uniform_flow.py) | a bead dragged by a uniform flow; momentum and kinetic energy | $`20^3`$ nodes, 1000 steps | 1 s | 3 s |
 | [fluid/initial_state.py](fluid/initial_state.py) | a fluid started from a shear wave; saving and loading the fluid state | 32 x 32 x 4 nodes, 1000 steps | 1 s | 2 s |
 | [cocomo/diffusion.py](cocomo/diffusion.py) | diffusion of a protein (COCOMO2): the folded SOD1 (110 beads) or a disordered one, with and without the fluid | $`30^3`$ nodes, 2000 steps (`--preset smoke`) to 2e7 steps (200 ns) | 2 s (smoke), 30 min (200 ns) | 25 s (smoke) |
@@ -62,10 +62,10 @@ the two cases.
 ### particle/thermal.py
 
 One bead, started with the velocity $`\sqrt{k_BT/m}`$ along $`x`$, in a box of 3 nm with $`10^3`$ nodes; the
-friction and the random force of `LBMForce` (the Euler-Maruyama scheme) bring it to 300 K. At the end the script
-prints the temperature computed from the velocities that OpenMM stores, which are half a step behind the positions,
-and from the full-step velocities (the mean of two consecutive steps). With `--beads N` there are N beads at random
-positions.
+friction and the random force of `LBMForce` (the Euler-Maruyama scheme) bring it to 300 K. The temperature of the
+beads is written at every step in `thermal_temperature.txt` by the reporter of the plugin,
+`openmmlbm.LBMTemperatureReporter`, which gives the right temperature for the drag scheme
+([theory.md](../docs/theory.md), section 2), and the script prints its mean at the end. With `--beads N` there are N beads at random positions.
 
 - The default friction is small, 0.1/ps, so one bead needs about 10 ps to thermalize and its
   temperature fluctuates strongly. Use `--steps 200000` or more beads for a stable mean.
@@ -117,18 +117,16 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
   momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin gives the same value.
 - The script writes the trajectory (DCD), the energies (OpenMM's log), the temperature of the beads and the centre
   of mass of the protein, not wrapped into the box, which `msd.py` reads.
-- **Temperature.** The second column of `<prefix>_temperature.txt` is the temperature of the beads, the right one
-  for the run: from full-step velocities with the explicit drag, from half-step velocities with the centred drag
-  ([theory.md](../docs/theory.md), section 2), OpenMM's with `--no-lb`; the full-step and the half-step temperatures
-  follow, to compare them, and the end of the run prints the mean of the right one. OpenMM's log has no temperature:
-  `StateDataReporter` gives that of the full step, too low with the centred drag (276 K instead of 310 K in the
-  case below). With `--fluid-fluctuations` the
-  script also writes `<prefix>_fluid_temperature.txt`, the temperature of the fluid every 10 reports, from the
-  velocities of the nodes: the fluid of a cell, of mass $`m_c = \rho\Delta x^3`$, has $`k_BT/2`$ per component of its
-  momentum ([theory.md](../docs/theory.md), section 7). With the preset `sod1-g30` (friction 30/ps), the centred drag
-  and the fluctuating fluid keep the beads and the fluid at the set temperature, at 298 K and with
-  `--temperature 310`; without fluctuations the fluid is cold and the beads are 16% below $`T`$ with the centred
-  drag, 0.7% with the explicit one; the explicit drag with a fluctuating fluid makes them 20% too hot (numbers in
+- **Temperature.** `<prefix>_temperature.txt` (step, time in ps, temperature in K) is written by the reporter of the
+  plugin, `openmmlbm.LBMTemperatureReporter`, which gives the right temperature for the drag scheme
+  ([theory.md](../docs/theory.md), section 2, Which velocity has the right temperature); with `--no-lb` by OpenMM. The
+  end of the run prints its mean. With `--fluid-fluctuations` the script also writes
+  `<prefix>_fluid_temperature.txt`, the temperature of the fluid every 10 reports, from the velocities of the nodes:
+  the fluid of a cell, of mass $`m_c = \rho\Delta x^3`$, has $`k_BT/2`$ per component of its momentum
+  ([theory.md](../docs/theory.md), section 7). With the preset `sod1-g30` (friction 30/ps), the centred drag and the
+  fluctuating fluid keep the beads and the fluid at the set temperature, at 298 K and with `--temperature 310`;
+  without fluctuations the fluid is cold and the beads are 16% below $`T`$ with the centred drag, 0.7% with the
+  explicit one; the explicit drag with a fluctuating fluid makes them 20% too hot (numbers in
   [validation.md](../docs/validation.md#temperature-of-sod1-with-a-fluctuating-fluid-examplescocomodiffusionpy-cuda-nvidia-a100)).
 - **Long runs.** Every `--checkpoint` steps (default: every 100 reports) the script saves the whole run,
   fluid included, in `<prefix>.chk`. If the run stops, for example at the time limit of a job, the same

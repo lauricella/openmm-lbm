@@ -39,8 +39,8 @@ the centred drag is stable for any friction ([recipe](lattice.md#quick-recipe),
 
 **Full step, half step.** `VerletIntegrator` (a "leapfrog" integrator) stores the velocities half a step
 behind the positions. The velocity at the same time as the positions, the full step, is the mean of two
-consecutive stored velocities. Temperatures computed from the two differ
-([examples](examples.md#temperature-of-coupled-particles)).
+consecutive stored velocities. Temperatures computed from the two differ: `LBMTemperatureReporter` uses the right ones
+for the drag scheme ([examples](examples.md#temperature-of-coupled-particles)).
 
 **Halo.** The layer of nodes one node thick around a domain, which belongs to the neighbouring domains: the populations
 that leave a domain are pushed into it and sent to their owners, and on request the density and the velocity of these

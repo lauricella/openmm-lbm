@@ -12,21 +12,23 @@ those of the old plugin's single-particle test: one bead of 5 lattice cells (80.
 with 10^3 nodes, time step 1 fs, friction 0.1/ps, tau = 1, 300 K, 20000 steps.  With --beads N the beads
 are placed at random in the box.
 
-OpenMM's leapfrog stores the velocities half a step behind the positions.  The script writes, for every
-step, the time (ps), the velocity vx vy vz (nm/ps) and the position x y z (nm) of the first bead, and at
-the end it prints the temperature of the beads computed from the half-step velocities and from the
-full-step velocities, the mean of two consecutive steps (docs/theory.md, section 2): with the explicit
-drag (the default) the full-step one is right, with the centred drag (--drag Centered) the half-step one.
-The kinetic temperature of one bead fluctuates strongly: its mean converges slowly, with a correlation time of
-about 1/gamma.
+The script writes, for every step, the time (ps), the velocity vx vy vz (nm/ps) and the position x y z (nm) of
+the first bead; OpenMM's leapfrog stores the velocities half a step behind the positions.  The temperature of the
+beads is written at every step by the plugin's reporter, openmmlbm.LBMTemperatureReporter, in <output>_temperature.txt
+(step, time in ps, temperature in K): it gives the right temperature for the drag scheme (docs/theory.md, section 2).
+At the end the script prints its mean after --equilibration steps.  The kinetic temperature of one bead fluctuates
+strongly: its mean converges slowly, with a correlation time of about 1/gamma.
 """
 
 import argparse
 import math
+import os
 
 import numpy as np
 import openmm as mm
+import openmm.app as app
 import openmm.unit as unit
+import openmmlbm
 from openmmlbm import LBMForce
 
 
@@ -70,6 +72,27 @@ def select_platform(name, precision):
         return platform, properties
 
 
+class FirstBeadReporter:
+    """Writes at every step the time (ps), the velocity (nm/ps, half step) and the position (nm, not wrapped into the
+    box) of the first bead."""
+
+    def __init__(self, out, dt):
+        self._out = out
+        self._dt = dt
+
+    def describeNextReport(self, simulation):
+        return {'steps': 1, 'periodic': False, 'include': ['positions', 'velocities']}
+
+    def report(self, simulation, state):
+        write_first_bead(self._out, simulation.currentStep*self._dt, state)
+
+
+def write_first_bead(out, time, state):
+    v = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)
+    x = state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+    print('%.5f %.10e %.10e %.10e %.10e %.10e %.10e' % (time, *v[0], *x[0]), file=out)
+
+
 def main():
     args = parse_arguments()
     kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole/unit.kelvin)
@@ -97,7 +120,8 @@ def main():
     system.addForce(force)
     integrator = mm.VerletIntegrator(args.dt)
     platform, properties = select_platform(args.platform, args.precision)
-    context = mm.Context(system, integrator, platform, properties)
+    simulation = app.Simulation(app.Topology(), system, integrator, platform, properties)
+    context = simulation.context
     if args.beads == 1:
         positions = np.full((1, 3), box/2)
     else:
@@ -111,35 +135,20 @@ def main():
         args.beads, mass, v0, args.friction, args.friction*args.dt, args.temperature))
     print('Fluid: density %.4f Da/nm^3, viscosity %.4f nm^2/ps, tau %g' % (density, viscosity, args.tau))
 
-    # Sums of m v^2 over the beads and the steps after equilibration, at half and full steps.
-    halfSum, fullSum, count = 0.0, 0.0, 0
-    previous = None
+    temperatureFile = os.path.splitext(args.output)[0] + '_temperature.txt'
     with open(args.output, 'w') as out:
         print('# time (ps), vx vy vz (nm/ps, half step), x y z (nm) of the first bead', file=out)
-        for step in range(args.steps + 1):
-            if step > 0:
-                integrator.step(1)
-            state = context.getState(getPositions=True, getVelocities=True)
-            v = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)
-            x = state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
-            print('%.5f %.10e %.10e %.10e %.10e %.10e %.10e' % (step*args.dt, *v[0], *x[0]), file=out)
-            if step > args.equilibration and previous is not None:
-                halfSum += mass*(v**2).sum()
-                fullSum += mass*(((v + previous)/2)**2).sum()
-                count += 1
-            previous = v
+        write_first_bead(out, 0.0, context.getState(getPositions=True, getVelocities=True))
+        simulation.reporters.append(FirstBeadReporter(out, args.dt))
+        simulation.reporters.append(openmmlbm.LBMTemperatureReporter(temperatureFile, 1, force))
+        simulation.step(args.steps)
+        del simulation.reporters[:]
 
-    dof = 3*args.beads*count
-    a = args.friction*args.dt
-    print('Mean temperature over %d steps: full step %.1f K, half step %.1f K' % (count, fullSum/(dof*kB),
-                                                                                halfSum/(dof*kB)))
-    if args.drag == 'Explicit':
-        print('Free bead in a fluid at rest, explicit drag: full step %.1f K, half step T/(1 - gamma dt/2) = %.1f K' % (
-            args.temperature, args.temperature/(1 - a/2)))
-    else:
-        print('Free bead in a fluid at rest, centred drag: full step T/(1 + gamma dt/2) = %.1f K, half step %.1f K' % (
-            args.temperature/(1 + a/2), args.temperature))
-    print('Trajectory written to', args.output)
+    temperature = np.loadtxt(temperatureFile, ndmin=2)
+    temperature = temperature[temperature[:, 0] > args.equilibration]
+    print('Mean temperature over %d steps: %.1f K (%s drag, set temperature %g K)' % (
+        len(temperature), temperature[:, 2].mean(), args.drag.lower(), args.temperature))
+    print('Trajectory written to %s, temperature to %s' % (args.output, temperatureFile))
 
 
 if __name__ == '__main__':

@@ -6,8 +6,8 @@ file and run as it is. The outputs shown were obtained with OpenMM 8.6.1.
 1. [Channel flow between two walls](#channel-flow-between-two-walls): solid nodes, body force,
    comparison with the analytical profile, changing a parameter during the run.
 2. [A particle kicked in the fluid](#a-particle-kicked-in-the-fluid): drag, momentum passed to the fluid.
-3. [Temperature of coupled particles](#temperature-of-coupled-particles): a reporter of the full-step
-   temperature.
+3. [Temperature of coupled particles](#temperature-of-coupled-particles): the reporter of the plugin, with the
+   two drags.
 4. [Monitoring a run and the Mach number check](#monitoring-a-run-and-the-mach-number-check).
 5. [Saving and restoring the fluid](#saving-and-restoring-the-fluid).
 6. [Serialization](#serialization).
@@ -201,114 +201,70 @@ Notes:
 
 ## Temperature of coupled particles
 
-The random force at temperature $`T`$ and the friction keep the coupled particles at about $`T`$: `LBMForce`
-is their thermostat. OpenMM's leapfrog stores the velocities at half steps. The temperature that OpenMM
-reports (`StateDataReporter`) is that of the full step, because OpenMM shifts the velocities by half a
-step with the coupling force of the next step
-([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)). The
-reporter below computes both temperatures explicitly: the full-step one from the mean of the velocities
-of two consecutive steps, and the half-step one from the stored velocities. With the explicit drag (the
-default) the full-step temperature is the right one; with the centred drag it is the half-step one, and
-`openmmlbm.LBMTemperatureReporter` reports the right one for either drag
-([API](api_reference.md#openmmlbmlbmtemperaturereporterfile-reportinterval-force)).
+The random force at temperature $`T`$ and the friction keep the coupled particles at about $`T`$: `LBMForce` is their
+thermostat. Which velocities have the temperature of the particles depends on the drag scheme
+([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)), and the reporter of the plugin,
+`openmmlbm.LBMTemperatureReporter`, gives the right temperature for the drag of the force automatically
+([API](api_reference.md#openmmlbmlbmtemperaturereporterfile-reportinterval-force)). The script below runs the same
+gas of free beads with the two drags.
 
 ```python
 import numpy as np
 import openmm as mm
 import openmm.app as app
 import openmm.unit as unit
-from openmmlbm import LBMForce
+from openmmlbm import LBMForce, LBMTemperatureReporter
 
 
-class FullStepTemperatureReporter:
-    """Writes the temperature of the coupled particles computed from full-step velocities.
-
-    With the leapfrog of VerletIntegrator the stored velocities are at half steps.  The reporter takes the
-    velocities of two consecutive steps, n - 1 and n, and uses their mean, the velocity at the full step.
-    """
-
-    def __init__(self, file, reportInterval, particles):
-        self._out = open(file, 'w') if isinstance(file, str) else file
-        self._reportInterval = reportInterval
-        self._particles = np.array(particles)
-        self._previous = None
-        print('# step, full-step temperature (K), half-step temperature (K)', file=self._out)
-
-    def describeNextReport(self, simulation):
-        steps = self._reportInterval - simulation.currentStep%self._reportInterval
-        if steps > 1:
-            steps -= 1                    # first stop one step before the report
-        return {'steps': steps, 'periodic': None, 'include': ['velocities']}
-
-    def report(self, simulation, state):
-        v = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)[self._particles]
-        if simulation.currentStep%self._reportInterval != 0:
-            self._previous = v
-            return
-        system = simulation.system
-        m = np.array([system.getParticleMass(int(i)).value_in_unit(unit.dalton) for i in self._particles])
-        kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole/unit.kelvin)
-        dof = 3*len(m)
-        half = (m[:, None]*v**2).sum()/(dof*kB)
-        if self._previous is None:
-            print('%d nan %.1f' % (simulation.currentStep, half), file=self._out, flush=True)
-            return
-        full = (m[:, None]*((v + self._previous)/2)**2).sum()/(dof*kB)
-        print('%d %.1f %.1f' % (simulation.currentStep, full, half), file=self._out, flush=True)
+def run(drag, file, steps=5000):
+    """200 free beads of 100 Da coupled to the fluid at 300 K, gamma dt = 0.1; mean temperature after 1000 steps."""
+    numBeads, L = 200, 8.0
+    system = mm.System()
+    system.setDefaultPeriodicBoxVectors(mm.Vec3(L, 0, 0), mm.Vec3(0, L, 0), mm.Vec3(0, 0, L))
+    force = LBMForce()
+    force.setGridSize(16, 16, 16)
+    force.setKinematicViscosity(5.0175)
+    force.setFriction(10.0)
+    force.setTemperature(300.0)
+    force.setRandomNumberSeed(7)
+    force.setDragScheme(drag)
+    for i in range(numBeads):
+        system.addParticle(100.0)
+        force.addParticle(i)
+    system.addForce(force)
+    simulation = app.Simulation(app.Topology(), system, mm.VerletIntegrator(0.01*unit.picosecond),
+                                mm.Platform.getPlatformByName('Reference'))
+    simulation.context.setPositions(np.random.default_rng(1).uniform(0, L, (numBeads, 3)))
+    simulation.context.setVelocitiesToTemperature(300.0, 3)
+    simulation.reporters.append(LBMTemperatureReporter(file, 50, force))
+    simulation.step(steps)
+    data = np.loadtxt(file)
+    return data[data[:, 0] > 1000, 2]
 
 
-# 200 free beads of 100 Da coupled to the fluid at 300 K, gamma dt = 0.1.
-numBeads, L = 200, 8.0
-topology = app.Topology()
-chain = topology.addChain()
-system = mm.System()
-system.setDefaultPeriodicBoxVectors(mm.Vec3(L, 0, 0), mm.Vec3(0, L, 0), mm.Vec3(0, 0, L))
-force = LBMForce()
-force.setGridSize(16, 16, 16)
-force.setKinematicViscosity(5.0175)
-force.setFriction(10.0)
-force.setTemperature(300.0)
-force.setRandomNumberSeed(7)
-for i in range(numBeads):
-    topology.addAtom('B', None, topology.addResidue('BEA', chain))
-    system.addParticle(100.0)
-    force.addParticle(i)
-system.addForce(force)
-
-simulation = app.Simulation(topology, system, mm.VerletIntegrator(0.01*unit.picosecond),
-                            mm.Platform.getPlatformByName('Reference'))
-simulation.context.setPositions(np.random.default_rng(1).uniform(0, L, (numBeads, 3)))
-simulation.context.setVelocitiesToTemperature(300.0, 3)
-simulation.reporters.append(FullStepTemperatureReporter('temperature.txt', 50, range(numBeads)))
-simulation.step(5000)
-
-data = np.loadtxt('temperature.txt')[20:]          # skip the first 1000 steps
-print('full step %.0f K, half step %.0f K' % (data[:, 1].mean(), data[:, 2].mean()))
+print('explicit drag %.0f K, centred drag %.0f K' % (run(LBMForce.Explicit, 'explicit.txt').mean(),
+                                                    run(LBMForce.Centered, 'centred.txt').mean()))
 ```
 
 Output:
 
 ```
-full step 293 K, half step 308 K
+explicit drag 292 K, centred drag 275 K
 ```
 
 Notes:
 
-- **Full step.** Slightly below $`T`$: the fluid has no thermal fluctuations of its own (`setFluidFluctuations()`
-  is off by default) and takes part of the momentum of the particles. Over 20000 steps the same system gives
-  295.8 ± 0.4 K, 1.4% below $`T`$
-  ([validation.md](../validation.md)).
-- **Half step.** For a free particle it is $`T/(1 - \gamma\Delta t/2) = 315.8`$ K, lowered by the same factor:
-  311.7 ± 0.4 K over 20000 steps.
-- **OpenMM's own temperature.** `StateDataReporter(..., temperature=True)` gives the full-step temperature at the
-  report step; the reporter above computes it one step earlier, from steps $`n - 1`$ and $`n`$.
-- **Centred drag.** With `setDragScheme(LBMForce.Centered)` the half-step temperature is the right one; for a
-  particle in a fluid at rest the full-step one is lower by $`1/(1 + \gamma\Delta t/2)`$, and the particles are
-  colder than with the explicit drag ([choosing the drag](lattice.md#choosing-the-drag)). On this system the centred
-  drag gives 275 K at half steps and 263 K at full steps over the same reports, against 293 K at full steps with the
-  explicit drag.
-- **Using the reporter.** It works with any Simulation: pass the indices of the coupled particles. It
-  stops one step before each report to record the velocities.
+- **Below $`T`$.** The fluid has no thermal fluctuations of its own (`setFluidFluctuations()` is off by default) and
+  takes part of the momentum of the particles. Over 20000 steps the same system gives 295.4 ± 1.4 K with the
+  explicit drag, 1.5% below $`T`$, and 277.9 ± 1.2 K with the centred drag, 7.4% below: without fluid fluctuations
+  the centred drag makes the particles colder ([choosing the drag](lattice.md#choosing-the-drag)). With fluid
+  fluctuations and the centred drag the particles are at $`T`$
+  ([validation.md](../validation.md#temperature-of-sod1-with-a-fluctuating-fluid-examplescocomodiffusionpy-cuda-nvidia-a100)).
+- **OpenMM's own temperature.** `StateDataReporter(..., temperature=True)` is right only with the explicit drag
+  ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)): use `LBMTemperatureReporter`
+  for the coupled particles.
+- **Using the reporter.** It works with any Simulation: it reads the drag scheme and the coupled particles from the
+  force. Pass a path or an open file; a file opened for appending is continued, for a restart.
 
 ## Monitoring a run and the Mach number check
 
@@ -590,8 +546,8 @@ Notes:
   `LBMForce`, which is the thermostat of the coupled particles.
 - **Initial velocities.** They come from NumPy here because `setVelocitiesToTemperature()` gives
   different velocities in different OpenMM versions; either is fine in practice.
-- **Temperature.** With `temperature=True`, the temperature column of `StateDataReporter` is that of the full step, as in the
-  [temperature example](#temperature-of-coupled-particles).
+- **Temperature.** For the temperature of the coupled particles use `LBMTemperatureReporter`, which gives the right
+  one for the drag ([temperature example](#temperature-of-coupled-particles)).
 - **Reporters.** A reporter can read the fluid with any of the methods of `LBMForce` that take the
   Context; none of them advances the fluid.
 - **Which particles to couple.** Only the particles passed to `addParticle()` interact with the fluid.

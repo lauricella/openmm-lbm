@@ -9,14 +9,15 @@ centred drag, at the nearest node or through an interpolation stencil, run on al
 HIP), with one domain or with the lattice divided over MPI ranks, one GPU per rank ([running on several
 GPUs](docs/user_guide/parallel.md)); the platforms agree with each other, and the explicit drag at the nearest node
 with the reference CUDA library of the DragOpenMM project. Version 0.6.2 adds the temperature of the fluctuating fluid
-to the diffusion example and proofreads the documentation, and version 0.6.1 corrects the description of the Guo
-forcing in `docs/theory.md`, both with the code of version 0.6.0. Version 0.6.0 makes the coupling through the
-three-point and Keys stencils faster on the GPUs (up to 41% shorter steps with many particles), and version 0.5.1 the
-domain decomposition with coupled particles, both with the same results (in one case on CUDA up to rounding, see the
-CHANGELOG). New in version 0.5.0: the interpolation stencils of the coupling, trilinear, three-point and Keys
-(`setInterpolationStencil()`, [step by step](docs/user_guide/interpolation.md)); open faces with both the density and
-the velocity imposed (`DensityVelocity`); with a fluctuating fluid, regularized walls and `DensityVelocity` faces
-exactly at equilibrium, while `Density` faces are refused; see the [CHANGELOG](CHANGELOG.md), the [user
+to the diffusion example, takes the temperature of the beads in the examples from the reporter of the plugin and
+proofreads the documentation, and version 0.6.1 corrects the description of the Guo forcing in `docs/theory.md`, both
+with the C++ code of version 0.6.0. Version 0.6.0 makes the coupling through the three-point and Keys stencils faster
+on the GPUs (up to 41% shorter steps with many particles), and version 0.5.1 the domain decomposition with coupled
+particles, both with the same results (in one case on CUDA up to rounding, see the CHANGELOG). New in version 0.5.0:
+the interpolation stencils of the coupling, trilinear, three-point and Keys (`setInterpolationStencil()`, [step by
+step](docs/user_guide/interpolation.md)); open faces with both the density and the velocity imposed
+(`DensityVelocity`); with a fluctuating fluid, regularized walls and `DensityVelocity` faces exactly at equilibrium,
+while `Density` faces are refused; see the [CHANGELOG](CHANGELOG.md), the [user
 guide](docs/user_guide/README.md#what-works-in-this-version) and `docs/validation.md`.
 
 ## Requirements

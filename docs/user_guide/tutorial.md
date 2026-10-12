@@ -143,17 +143,12 @@ python $EX/particle/thermal.py --platform Reference --seed 1
 python $EX/plot.py thermal.txt --x 1 --y 2 --xlabel 'time (ps)' --ylabel 'vx (nm/ps)' --output thermal.png
 ```
 
-`thermal.png` shows the velocity of the bead fluctuating around zero. At the end the script prints the
-mean temperature computed in two ways:
-
-- from the velocities that OpenMM stores, which with `VerletIntegrator` are half a step behind the
-  positions ("half step");
-- from the mean of two consecutive velocities, the velocity at the same time as the positions ("full
-  step"). With the explicit drag (the default) this is the temperature of the coupled particles, and it
-  is also the one that OpenMM itself reports, for example in `StateDataReporter`, because OpenMM shifts the
-  stored velocities by half a step with the forces of the next step (see
-  [examples](examples.md#temperature-of-coupled-particles)). With `--drag Centered` the half-step
-  temperature is the right one ([choosing the drag](lattice.md#choosing-the-drag)).
+`thermal.png` shows the velocity of the bead fluctuating around zero. The temperature of the beads is written at
+every step in `thermal_temperature.txt` by the reporter of the plugin, `openmmlbm.LBMTemperatureReporter`, and the
+script prints its mean at the end. The reporter gives the right temperature for the drag scheme of the run: why it
+depends on the scheme is explained in
+[theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms) (Which velocity has the right
+temperature).
 
 With one bead and a small friction the mean converges slowly. A gas of 100 beads with a larger
 friction gives a precise value in a few seconds, on a GPU or on the Reference platform:
@@ -163,14 +158,14 @@ python $EX/particle/thermal.py --beads 100 --friction 10 --steps 20000 --equilib
 ```
 
 ```
-Mean temperature over 18000 steps: full step 297.6 K, half step 299.1 K
-Free bead in a fluid at rest, explicit drag: full step 300.0 K, half step T/(1 - gamma dt/2) = 301.5 K
+Mean temperature over 18000 steps: 295.1 K (explicit drag, set temperature 300 K)
+Trajectory written to thermal.txt, temperature to thermal_temperature.txt
 ```
 
-(on an A100 GPU; another platform gives slightly different numbers, because the random numbers come
-from another generator (Reference) or are rounded differently.) The full-step temperature is about 1% below 300 K: the fluid itself has no
-thermal fluctuations in this example (they are off by default, `setFluidFluctuations()`), and it takes part
-of the momentum of the beads.
+(on the Reference platform; a GPU gives slightly different numbers, because its random numbers come from another
+generator and are rounded differently.) The temperature is somewhat below 300 K: the fluid itself has no thermal
+fluctuations in this example (they are off by default, `setFluidFluctuations()`), and it takes part of the momentum
+of the beads.
 
 Exercises:
 
@@ -237,9 +232,9 @@ Exercises:
 2. Run the same with `--no-lb` (no fluid, Langevin integrator) and compare the diffusion coefficients.
    A run of 1 ns gives only a rough value; the SOD1 presets run for 50 to 200 ns.
 3. Run it again with a fluctuating fluid, which needs the centred drag: add `--drag Centered --fluid-fluctuations
-   --output sod1_1ns_fluct`. The temperature of the beads is in `sod1_1ns_fluct_temperature.txt` (the second column
-   is the right one for the drag: with the centred drag, that of the half steps), the temperature of the fluid in
-   `sod1_1ns_fluct_fluid_temperature.txt`. Both should be close to 298 K, and the end of the run prints their means.
+   --output sod1_1ns_fluct`. The temperature of the beads is in `sod1_1ns_fluct_temperature.txt`, the temperature of
+   the fluid in `sod1_1ns_fluct_fluid_temperature.txt`. Both should be close to 298 K, and the end of the run prints
+   their means.
 
 ## 8. Lesson 6: a long run in several pieces
 

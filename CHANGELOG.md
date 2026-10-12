@@ -5,8 +5,18 @@ versions the API may still change.
 
 ## 0.6.2 (2026-10-12)
 
-The temperature of the fluctuating fluid in the diffusion example, its validation on SOD1 at 298 K and 310 K, and the
-whole documentation proofread. The code of the plugin is that of version 0.6.0.
+The temperature of the fluctuating fluid in the diffusion example, its validation on SOD1 at 298 K and 310 K, the
+temperature of the beads in the examples from the reporter of the plugin, and the whole documentation proofread. The
+C++ code of the plugin is that of version 0.6.0.
+
+### Changed
+- The examples take the temperature of the beads from the reporter of the plugin, `openmmlbm.LBMTemperatureReporter`,
+  which gives the right temperature for the drag scheme (`docs/theory.md`, section 2), instead of computing it
+  themselves: `examples/cocomo/diffusion.py` (`<prefix>_temperature.txt` with step, time and temperature; OpenMM's
+  log without temperature), `examples/particle/thermal.py` (`<output>_temperature.txt`, and its mean at the end) and
+  the recipe Temperature of coupled particles of the user guide.
+- `openmmlbm.LBMTemperatureReporter` writes its header only at the start of a file, so that a file opened for
+  appending is continued (a restart).
 
 ### Added
 - `examples/cocomo/diffusion.py --fluid-fluctuations` writes `<prefix>_fluid_temperature.txt`, the temperature of the
@@ -23,10 +33,8 @@ whole documentation proofread. The code of the plugin is that of version 0.6.0.
 
 ### Fixed
 - `examples/cocomo/diffusion.py`: with the centred drag the temperature of OpenMM's log and of the summary at the end
-  was that of the full step, too low: 276 K instead of 310 K with the preset `sod1-g30` and a fluctuating fluid. The
-  second column of `<prefix>_temperature.txt` is now the right temperature for the run (full step with the explicit
-  drag, half step with the centred drag, OpenMM's with `--no-lb`), followed by the full-step and half-step
-  temperatures; the summary prints its mean, and the log has no temperature column.
+  was that of the full step, too low: 276 K instead of 310 K with the preset `sod1-g30` and a fluctuating fluid. It
+  now comes from the reporter of the plugin (Changed).
 
 ## 0.6.1 (2026-10-12)
 
