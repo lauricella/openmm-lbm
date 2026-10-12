@@ -22,9 +22,11 @@ whole documentation proofread. The code of the plugin is that of version 0.6.0.
   stencils), typos and consistent spelling.
 
 ### Fixed
-- `examples/cocomo/diffusion.py`: the summary at the end printed only the mean full-step temperature, also with the
-  centred drag, where the half-step temperature is the right one (a few kelvin higher). It now prints both and says
-  which one is right for the drag of the run.
+- `examples/cocomo/diffusion.py`: with the centred drag the temperature of OpenMM's log and of the summary at the end
+  was that of the full step, too low: 276 K instead of 310 K with the preset `sod1-g30` and a fluctuating fluid. The
+  second column of `<prefix>_temperature.txt` is now the right temperature for the run (full step with the explicit
+  drag, half step with the centred drag, OpenMM's with `--no-lb`), followed by the full-step and half-step
+  temperatures; the summary prints its mean, and the log has no temperature column.
 
 ## 0.6.1 (2026-10-12)
 

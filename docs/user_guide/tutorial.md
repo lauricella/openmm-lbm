@@ -237,9 +237,9 @@ Exercises:
 2. Run the same with `--no-lb` (no fluid, Langevin integrator) and compare the diffusion coefficients.
    A run of 1 ns gives only a rough value; the SOD1 presets run for 50 to 200 ns.
 3. Run it again with a fluctuating fluid, which needs the centred drag: add `--drag Centered --fluid-fluctuations
-   --output sod1_1ns_fluct`. With the centred drag the temperature of the beads is the half-step column of
-   `sod1_1ns_fluct_temperature.txt`; the temperature of the fluid is in `sod1_1ns_fluct_fluid_temperature.txt`. Both
-   should be close to 298 K, and the end of the run prints their means.
+   --output sod1_1ns_fluct`. The temperature of the beads is in `sod1_1ns_fluct_temperature.txt` (the second column
+   is the right one for the drag: with the centred drag, that of the half steps), the temperature of the fluid in
+   `sod1_1ns_fluct_fluid_temperature.txt`. Both should be close to 298 K, and the end of the run prints their means.
 
 ## 8. Lesson 6: a long run in several pieces
 

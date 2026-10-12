@@ -115,12 +115,14 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
   DragOpenMM plugin. Its full-step temperature stays at about 260 K, 13% below 298 K: with this large friction the
   fluid, which has no thermal fluctuations of its own without `--fluid-fluctuations`, takes a large part of the
   momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin gives the same value.
-- The script writes the trajectory (DCD), the energies and temperature (OpenMM's log), the full-step and
-  half-step temperature and the centre of mass of the protein, not wrapped into the box, which `msd.py`
-  reads.
-- **Temperature.** `<prefix>_temperature.txt` has the temperature of the beads from full-step and from half-step
-  velocities: the right one is the full-step temperature with the explicit drag and the half-step one with the
-  centred drag. The end of the run prints both means and says which one is right. With `--fluid-fluctuations` the
+- The script writes the trajectory (DCD), the energies (OpenMM's log), the temperature of the beads and the centre
+  of mass of the protein, not wrapped into the box, which `msd.py` reads.
+- **Temperature.** The second column of `<prefix>_temperature.txt` is the temperature of the beads, the right one
+  for the run: from full-step velocities with the explicit drag, from half-step velocities with the centred drag
+  ([theory.md](../docs/theory.md), section 2), OpenMM's with `--no-lb`; the full-step and the half-step temperatures
+  follow, to compare them, and the end of the run prints the mean of the right one. OpenMM's log has no temperature:
+  `StateDataReporter` gives that of the full step, too low with the centred drag (276 K instead of 310 K in the
+  case below). With `--fluid-fluctuations` the
   script also writes `<prefix>_fluid_temperature.txt`, the temperature of the fluid every 10 reports, from the
   velocities of the nodes: the fluid of a cell, of mass $`m_c = \rho\Delta x^3`$, has $`k_BT/2`$ per component of its
   momentum ([theory.md](../docs/theory.md), section 7). With the preset `sod1-g30` (friction 30/ps), the centred drag

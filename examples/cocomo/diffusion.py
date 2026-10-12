@@ -28,11 +28,12 @@ The protocol is that of the original scripts: velocities at T, energy minimizati
 T, production.  Files written, with the prefix given by --output (default <preset>_lb_on, <preset>_lb_on_centered with
 --drag Centered, <preset>_lb_on_fluct with --fluid-fluctuations, or <preset>_lb_off):
   <prefix>.dcd               trajectory (DCD), every --report steps
-  <prefix>.log               step, time, potential energy, temperature, speed (OpenMM's StateDataReporter;
-                             its temperature is that of the full step, docs/theory.md, section 2)
-  <prefix>_temperature.txt   temperature of the beads from full-step and from half-step velocities (the
-                             full-step one is right for the explicit drag, the half-step one for the
-                             centred drag)
+  <prefix>.log               step, time, potential energy, speed (OpenMM's StateDataReporter, without its
+                             temperature, which is that of the full step and too low with the centred drag)
+  <prefix>_temperature.txt   step and temperature of the beads, the right one for the run (docs/theory.md,
+                             section 2): from full-step velocities with the explicit drag, from half-step
+                             velocities with the centred drag, OpenMM's with --no-lb; then, to compare, the
+                             temperatures from full-step and from half-step velocities
   <prefix>_fluid_temperature.txt
                              with --fluid-fluctuations, the temperature of the fluid every 10 reports, from the
                              velocities of the nodes (FluidTemperatureReporter below): it shows that the fluid is
@@ -144,22 +145,32 @@ def select_platform(name, precision):
         return platform, properties
 
 
-class FullStepTemperatureReporter:
-    """Temperature of the beads from full-step velocities, the mean of two consecutive steps."""
+class TemperatureReporter:
+    """Temperature of the beads, with three degrees of freedom per bead.  The first value of each line is the right one
+    for the run (docs/theory.md, section 2): with the explicit drag the temperature of full-step velocities, the mean of
+    two consecutive steps; with the centred drag that of the half-step velocities that OpenMM stores; with --no-lb
+    (LangevinMiddleIntegrator) the kinetic energy of OpenMM's State.  The full-step and the half-step temperatures
+    follow, to compare them."""
 
-    def __init__(self, file, reportInterval, masses, append=False):
+    LABELS = {'full': 'full step, right for the explicit drag', 'half': 'half step, right for the centred drag',
+              'openmm': "OpenMM's kinetic energy"}
+
+    def __init__(self, file, reportInterval, masses, right, append=False):
         self._out = open(file, 'a' if append else 'w')
         self._reportInterval = reportInterval
         self._masses = np.asarray(masses)
+        self._right = right               # 'full', 'half' or 'openmm'
         self._previous = None
         if not append:
-            print('# step, full-step temperature (K), half-step temperature (K)', file=self._out)
+            print('# step, temperature (K, %s), full-step temperature (K), half-step temperature (K)'
+                  % self.LABELS[right], file=self._out)
 
     def describeNextReport(self, simulation):
         steps = self._reportInterval - simulation.currentStep%self._reportInterval
         if steps > 1:
             steps -= 1                    # first stop one step before the report
-        return {'steps': steps, 'periodic': None, 'include': ['velocities']}
+        include = ['velocities', 'energy'] if self._right == 'openmm' else ['velocities']
+        return {'steps': steps, 'periodic': None, 'include': include}
 
     def report(self, simulation, state):
         v = state.getVelocities(asNumpy=True).value_in_unit(unit.nanometer/unit.picosecond)
@@ -170,7 +181,11 @@ class FullStepTemperatureReporter:
         dof = 3*len(self._masses)
         half = (self._masses[:, None]*v**2).sum()/(dof*kB)
         full = np.nan if self._previous is None else (self._masses[:, None]*((v + self._previous)/2)**2).sum()/(dof*kB)
-        print('%d %.2f %.2f' % (simulation.currentStep, full, half), file=self._out, flush=True)
+        if self._right == 'openmm':
+            right = 2*state.getKineticEnergy().value_in_unit(unit.kilojoule_per_mole)/(dof*kB)
+        else:
+            right = full if self._right == 'full' else half
+        print('%d %.2f %.2f %.2f' % (simulation.currentStep, right, full, half), file=self._out, flush=True)
 
 
 class CentreOfMassReporter:
@@ -317,10 +332,11 @@ def main():
         dcdFile = '%s_%d.dcd' % (args.output, step)
     simulation.reporters.append(app.DCDReporter(dcdFile, args.report))
     simulation.reporters.append(app.StateDataReporter(args.output + '.log', args.report, step=True, time=True,
-                                                      potentialEnergy=True, temperature=True, speed=True,
+                                                      potentialEnergy=True, speed=True,
                                                       separator='\t', append=append))
-    simulation.reporters.append(FullStepTemperatureReporter(args.output + '_temperature.txt', args.report, masses,
-                                                            append))
+    right = 'openmm' if args.no_lb else ('half' if args.drag == 'Centered' else 'full')
+    simulation.reporters.append(TemperatureReporter(args.output + '_temperature.txt', args.report, masses, right,
+                                                    append))
     simulation.reporters.append(CentreOfMassReporter(args.output + '_com.txt', args.report, masses, append))
     if not args.no_lb and args.fluid_fluctuations:
         simulation.reporters.append(FluidTemperatureReporter(args.output + '_fluid_temperature.txt', 10*args.report,
@@ -339,11 +355,8 @@ def main():
         np.savez(args.output + '_fluid.npz', state=np.array(force.getFluidState(simulation.context)),
                  time=simulation.context.getTime().value_in_unit(unit.picosecond))
     temperature = np.loadtxt(args.output + '_temperature.txt', ndmin=2)
-    print('Mean temperature over %d reports: full step %.1f K, half step %.1f K' % (len(temperature),
-          np.nanmean(temperature[:, 1]), np.nanmean(temperature[:, 2])))
-    if not args.no_lb:
-        print('With the %s drag the %s-step temperature is the right one' % (args.drag.lower(),
-              'half' if args.drag == 'Centered' else 'full'))
+    print('Mean temperature of the beads over %d reports: %.1f K (%s)' % (len(temperature),
+          np.nanmean(temperature[:, 1]), TemperatureReporter.LABELS[right]))
     if not args.no_lb and args.fluid_fluctuations:
         fluid = np.loadtxt(args.output + '_fluid_temperature.txt', ndmin=2)
         if len(fluid) > 0:
