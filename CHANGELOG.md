@@ -3,6 +3,13 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Fixed
+- `examples/cocomo/diffusion.py`: the summary at the end printed only the mean full-step temperature, also with the
+  centred drag, where the half-step temperature is the right one (a few kelvin higher). It now prints both and says
+  which one is right for the drag of the run.
+
 ## 0.6.1 (2026-10-12)
 
 A correction of the documentation of the Guo forcing; the code is that of version 0.6.0.

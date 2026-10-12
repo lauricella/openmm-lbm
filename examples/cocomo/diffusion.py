@@ -298,7 +298,11 @@ def main():
         np.savez(args.output + '_fluid.npz', state=np.array(force.getFluidState(simulation.context)),
                  time=simulation.context.getTime().value_in_unit(unit.picosecond))
     temperature = np.loadtxt(args.output + '_temperature.txt', ndmin=2)
-    print('Mean full-step temperature %.1f K over %d reports' % (np.nanmean(temperature[:, 1]), len(temperature)))
+    print('Mean temperature over %d reports: full step %.1f K, half step %.1f K' % (len(temperature),
+          np.nanmean(temperature[:, 1]), np.nanmean(temperature[:, 2])))
+    if not args.no_lb:
+        print('With the %s drag the %s-step temperature is the right one' % (args.drag.lower(),
+              'half' if args.drag == 'Centered' else 'full'))
     print('Files written with prefix', args.output)
 
 
