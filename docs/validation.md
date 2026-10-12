@@ -44,7 +44,7 @@ removal is off unless stated.
 | `testLatticeParameters` | 4x6x8 nodes, $`\tau = 0.9`$ | `getLatticeParametersInContext()` returns $`\Delta x`$, $`\Delta t`$ and $`\tau`$ | 1e-14 ($`\Delta x`$, $`\Delta t`$), 1e-12 ($`\tau`$) |
 | `testRelaxationTimeWarning` | $`\tau`$ = 0.503, 1, 2.2 | warning on stderr at Context creation only outside [0.505, 2] | exact |
 | `testSolidNodeChecks` | solid node index out of range, repeated, or all nodes solid | exception at Context creation | exact |
-| `testPoiseuille` | 2x12x2 nodes, solid plane $`j = 0`$, body force along x, $`\tau`$ = 0.7, 0.875, 1.2, $`4H^2/\nu`$ steps | steady profile equal to the exact solution of the scheme (`docs/theory.md`, solid nodes), zero density and velocity at the solid nodes | 1e-9 (relative to the maximum velocity) |
+| `testPoiseuille` | 2x12x2 nodes, solid plane $`j = 0`$, body force along x, $`\tau`$ = 0.7, 0.875, 1.2, $`4H^2/\nu`$ steps | steady profile equal to the exact solution of the scheme (`docs/theory.md`, section 1, Solid nodes and walls), zero density and velocity at the solid nodes | 1e-9 (relative to the maximum velocity) |
 | `testWallConservation` | 6x5x4 nodes with a solid block of 8 nodes, initial uniform flow, without and with momentum removal | mass of the fluid conserved; after a removal step the momentum of the fluid is zero | 1e-13 |
 | `testRestartFromCheckpoint` | removal of the fluid momentum every few steps, a checkpoint of OpenMM at a step that is not a multiple of the period, the fluid restored with `setFluidState()` | the restarted run against the uninterrupted one | identical bit for bit |
 | `testUpdateParameters` | an existing Context | `updateParametersInContext()` changes the body acceleration, the removal of the fluid momentum and the Mach number check, and rejects a change of the viscosity | |
@@ -71,7 +71,7 @@ in one step.
 for every $`\tau`$ tested (0.7 to 1.5, channel widths 11 and 19; at most 1.2e-13 relative to the centre-line velocity,
 measured again for version 0.3.0). `testPoiseuille` checks $`\tau`$ = 0.7, 7/8 and 1.2 at width 11 to 1e-9. In the
 steady state the force on the walls from the momentum exchange (`getWallForce()`) equals the body force on the fluid,
-$`\mathbf g`$ times its mass, to 1e-8 (`testPoiseuille`). Its wall position differs from the halfway position by
+$`\mathbf g`$ times its mass, to 1e-8 (`testPoiseuille`). The wall position of the profile differs from the halfway position by
 $`(3 - 16\Lambda)/(12H)`$, $`\Lambda = (\tau - 1/2)/2`$; measured in a channel of width $`H = 23`$:
 
 | $`\tau`$ | 0.55 | 0.6 | 0.7 | 0.8 | 0.875 | 0.9 | 1.0 | 1.2 | 1.5 | 2.0 |
@@ -87,11 +87,11 @@ coupled particles, with a fluctuating fluid and the explicit or the centred drag
 `Density` face, and with faces, fluctuations and particles together. Populations, density and velocity of the
 fluid, positions and velocities of the particles and wall force are identical bit for bit in all 98 runs: the
 Reference platform, CUDA and OpenCL in single, mixed and double precision, OpenMM 8.6.1 and 8.3.1, NVIDIA A100.
-The cost per step does not change (CUDA, mixed precision: 88.6 against 86.3 us in a 64x34x64 channel, 170.7
-against 171.0 us in a $`64^3`$ lattice with 13 % solid nodes in spheres).
+The cost per step does not change (CUDA, mixed precision: 88.6 against 86.3 µs in a 64x34x64 channel, 170.7
+against 171.0 µs in a $`64^3`$ lattice with 13% solid nodes in spheres).
 
 Writing the returned population inside the collision kernel, without a separate pass, is the same arithmetic,
-and it was 3 % faster in a channel and 8 % faster in a porous medium, but the compiler then rounded the collision
+and it was 3% faster in a channel and 8% faster in a porous medium, but the compiler then rounded the collision
 differently in some variants of the kernel: with CUDA in single precision the results
 differed in the last bit of a float, and with CUDA in double and mixed precision a fluid with fluctuations at
 zero temperature and coupled particles was no longer identical bit for bit to a fluid without fluctuations
@@ -124,10 +124,10 @@ runs in double precision (`docs/theory.md`, section 2).
 | Warning | $`\text{friction}\cdot\Delta t > 1`$ with coupled particles and the explicit drag is reported at Context creation, not with the centred drag (`testFrictionWarning`) | |
 | Equipartition | 100 free particles, $`\gamma\Delta t = 0.1`$, $`T`$ = 300 K: full-step temperature close to $`T`$, half-step temperature close to $`T/(1 - \gamma\Delta t/2)`$ | 10% (measured 4% below, from the missing fluid fluctuations) |
 | Warning on $`\tau`$ | $`\tau > 1.7`$ with coupled particles and the explicit drag is reported at Context creation, not without coupled particles or with the centred drag (`testSelfMobilityWarning`) | |
-| Repeated force evaluation | 8000 particles with a short-range `CustomNonbondedForce`, compressed into a cube of 2 nm so that the neighbor list overflows and the GPU platforms repeat the force evaluation of the step: the total momentum is conserved in that step (`testRepeatedForceEvaluation`; GPU platforms only) | 1e-11 relative (1.3e-2 on CUDA and OpenCL with the defect this test guards against, corrected in version 0.2.0) |
+| Repeated force evaluation | 8000 particles with a short-range `CustomNonbondedForce`, compressed into a cube of 2 nm so that the neighbour list overflows and the GPU platforms repeat the force evaluation of the step: the total momentum is conserved in that step (`testRepeatedForceEvaluation`; GPU platforms only) | 1e-11 relative (1.3e-2 on CUDA and OpenCL with the defect this test guards against, corrected in version 0.2.0) |
 
 The tests that do not depend on the drag (full-step kinetic energy, momentum conservation, moving with the
-fluid, partial coupling, force evaluations and seeds, momentum with walls, restart, checkpoint with random
+fluid, partial coupling, force evaluations and seeds, repeated force evaluation, momentum with walls, restart, checkpoint with random
 force, equipartition) run again with the centred drag (next section).
 
 ## Centred drag (`tests/TestLBMCentered.h`, all platforms)
@@ -138,7 +138,7 @@ force, equipartition) run again with the centred drag (next section).
 | Shared node | three particles of 80, 120 and 150 Da at one node and a fourth alone, external forces, uniform flow and body acceleration: velocities after the first step against the direct solution of the linear system of the drag, and the momentum received by the fluid ($`\mathbf j + \mathbf G`$ at every node, $`\mathbf G = \mathbf F_{\mathrm{body}} - \mathbf S`$) | 1e-12, 1e-11 |
 | Wall | a particle at a solid node moving out of the wall: $`v_1 = v_0(1 - a)/(1 + a)`$, and the wall receives the opposite of its coupling force | 1e-14 (5e-14 on the GPU platforms), 1e-12 |
 | Large friction | $`\gamma\Delta t = 3`$, four particles at one node: velocities decay, total momentum conserved | 1e-11 |
-| Repeated evaluation | 8000 particles with a short-range pair force compressed into a cube of 2 nm: a step whose force evaluation overflows the neighbor list gives the same velocities as the same step after the list has grown in an evaluation between steps, so the step uses the complete other forces (`testCenteredRepeatedEvaluation`; GPU platforms only) | 1e-12 relative to the largest velocity |
+| Repeated evaluation | 8000 particles with a short-range pair force compressed into a cube of 2 nm: a step whose force evaluation overflows the neighbour list gives the same velocities as the same step after the list has grown in an evaluation between steps, so the step uses the complete other forces (`testCenteredRepeatedEvaluation`; GPU platforms only) | 1e-12 relative to the largest velocity |
 | Requirements | `LBMForce` not last, virtual sites, change of the drag in `updateParametersInContext()`, checkpoint loaded with the other drag | exception |
 | Equipartition | as above, with a fluid 100 times denser: half-step temperature close to $`T`$, full-step close to $`T/(1 + \gamma\Delta t/2)`$ | 10% |
 
@@ -166,7 +166,7 @@ version 0.2.0).
   read them: all the OpenCL tests passed in single, mixed and double precision. With the same build and the
   floating point buffers not read, `testCenteredSharedNode` failed (velocities wrong by 3e-3).
 - *Repeated evaluation.* In a build without the check of the validity of the evaluation, the centred drag
-  of a step whose evaluation overflows the neighbor list used the incomplete forces, and
+  of a step whose evaluation overflows the neighbour list used the incomplete forces, and
   `testCenteredRepeatedEvaluation` failed with velocities wrong by 1e-3.
 - *Explicit drag unchanged.* The final state of a run with random force, momentum removal, walls and force
   evaluations between steps is identical bit for bit to that of version 0.1.0 on the Reference platform and
@@ -255,7 +255,7 @@ platform: coupled particles) also runs the three stencils with both drags, witho
   $`z`$ or with a `Velocity` and a `DensityVelocity` face, with particles next to the faces and two on one node, both
   drags, with and without fluid fluctuations (32 arrays, 30 steps). Identical bit for bit on OpenCL on the CPU (double
   and mixed precision) and on an A100 GPU (double precision), and on CUDA in the three precisions except one case: the
-  three-point stencil with the explicit drag and the random force on the particles (Euler–Maruyama), with and without
+  three-point stencil with the explicit drag and the random force on the particles (Euler-Maruyama), with and without
   fluid fluctuations. There, in double and mixed precision only the fluid differs, by at most $`2.6\cdot10^{-18}`$
   ($`1.1\cdot10^{-19}`$ without fluid fluctuations; the populations, stored as deviations from the rest equilibrium,
   reach 0.33); in single precision the positions, velocities and forces differ too, by at most $`2.8\cdot10^{-7}`$ of
@@ -292,7 +292,7 @@ section 9 (the fluid of section 1 linearized about rest, Guo forcing, the fluctu
 positions with their random force) is a linear map with Gaussian noise, whose stationary covariance is computed
 exactly, by summing $`A^nQA^{n\mathsf T}`$ with repeated squaring after removing the conserved modes (eigenvalue 1:
 mass and total momentum) and the staggered modes that the particles do not reach (eigenvalue -1, for example the
-momentum $`(-1)^{x+t}j_x`$ at the wavevector $`\pi`$, an exact invariant of the fluid on a periodic lattice with an even
+momentum $`(-1)^{x+t}j_x`$ at the wave vector $`\pi`$, an exact invariant of the fluid on a periodic lattice with an even
 number of nodes). The plugin runs on the same lattice of $`4^3`$ nodes ($`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 0.01 ps,
 $`\tau = 1.1`$, $`\gamma\Delta t = 0.1`$, 300 K) with the particles held at their positions (set again before every
 step), $`4\times10^6`$ steps per case: 56 cases, every stencil at a node, at the centre of a cell and at a generic
@@ -458,7 +458,7 @@ measurements and those below, since version 0.5.0 `Density` faces are an error w
 
 **The fluid alone next to walls and open faces** (no coupled particles; CUDA, mixed precision, one A100; regularized
 walls and `DensityVelocity` faces with the random part of a collision in their rebuilt populations, as the walls had up
-to version 0.4.0; with the random part of version 0.5.0 see Fluctuations next to walls and open faces, in the section
+to version 0.4.0; with the random part of version 0.5.0, see Fluctuations next to walls and open faces, in the section
 on walls and open faces). $`16 \times 16
 \times 24`$ nodes, the same fluid at 300 K, no removal of the momentum, periodic along $`x`$ and $`y`$, along $`z`$
 periodic, solid planes $`k = 0`$ and $`k = 23`$ (bounce-back or regularized walls), or open faces; $`2\cdot10^5`$
@@ -499,10 +499,10 @@ collision); plane 23 is the face at $`z_{\max}`$:
 | 22 | 287 / 277 | 312 / 240 | 1092 ± 53 / 525 ± 29 | 312 / 219 |
 | 23 | 288 / 275 | 306 / 0 | 1440 ± 50 / 654 ± 27 | 306 / 159 |
 
-(errors 2 to 6 K where not given). With two `Density` faces the mean flow wandered (above), and its collective
+(errors 2 to 6 K where not given). With two `Density` faces the mean flow wandered (below), and its collective
 temperature grew without bound. In the periodic box the values are the canonical ones with the conserved
 quantities of the lattice: $`T(1 - 1/n_z)`$ = 287.5 K along the planes (total momentum) and $`T(1 - 2/n_z)`$ = 275 K
-across them, since the bulk also conserves the staggered momentum $`\sum_z (-1)^{z+t} j_z`$ (theory, section 1). Next
+across them, since the bulk also conserves the staggered momentum $`\sum_z (-1)^{z+t} j_z`$ (`docs/theory.md`, section 1). Next
 to a `Density` face the mean velocity of the planes is far from equilibrium, up to 4.8 $`T`$ along the face on its
 plane, while the temperature without it stays within 1.4%.
 
@@ -550,7 +550,7 @@ section 7); $`T`$ = 300 K, $`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 0.01 ps and the
 | NVE | with the NVE scheme, particles at rest are set in motion by a fluctuating fluid, and stay at rest without fluctuations | exact |
 | Parameters | `updateParametersInContext()` changes the temperature and refuses to switch the fluctuations; a checkpoint is refused by a Context with the fluctuations switched differently | exceptions |
 | `Density` faces (`testDensityFaceWithFluctuations`, version 0.5.0) | with fluid fluctuations a `Density` face is refused when the Context is created, on each axis, as `XMin`, `YMax` or `ZMin`, at 300 K and at zero temperature, next to a `Velocity` or a `DensityVelocity` face; the same lattices without fluctuations, or with a `DensityVelocity` face in its place, run; in Python `test_density_face_with_fluctuations` | exceptions |
-| Warning | with fluid fluctuations a warning is printed only for the explicit drag with the EM scheme at $`T > 0`$, with the estimate $`\text{friction}\cdot\Delta t\,m/(2m_c)`$ of the heaviest coupled particle | exact |
+| Warning | with fluid fluctuations a warning is printed only for the explicit drag with the Euler-Maruyama (EM) scheme at $`T > 0`$, with the estimate $`\text{friction}\cdot\Delta t\,m/(2m_c)`$ of the heaviest coupled particle | exact |
 | Boundary warning (`testBoundaryNoiseWarning`, version 0.5.0) | with fluid fluctuations a warning is printed at $`\tau = 0.55`$ with regularized walls and with `DensityVelocity` faces, and not at $`\tau = 1`$, nor with bounce-back walls or `Velocity` faces, nor without fluctuations | exact |
 
 **Measured** (OpenMM 8.6.1 and 8.3.1; Reference, and CUDA and OpenCL on an NVIDIA A100 in the three precisions): all
@@ -558,7 +558,7 @@ pass. OpenMM's buffer of random numbers is enlarged when the Context is created 
 in the first step instead, with OpenMM 8.3.1 the restart test failed on CUDA and OpenCL in all precisions (the restarted
 fluid was a different realization, with populations such as 5.4e-3 against 5.2e-4), because OpenMM's checkpoint reads
 the buffer back with the size it has in the new Context; with 8.6.1 it passed. Cost of the fluctuations on the A100
-(CUDA, mixed precision, version 0.3.0): 59.8 → 76.6, 168.9 → 240.4 and 1115.8 → 1590.4 us per step on $`32^3`$, $`64^3`$
+(CUDA, mixed precision, version 0.3.0): 59.8 → 76.6, 168.9 → 240.4 and 1115.8 → 1590.4 µs per step on $`32^3`$, $`64^3`$
 and $`128^3`$ nodes. Without fluctuations, and with fluctuations at zero temperature, the fluid, positions and
 velocities after 40 steps with walls, body force and six coupled particles (explicit and centred drag, EM and NVE) are
 identical, bit for bit, to those of version 0.2.1.
@@ -690,12 +690,12 @@ $`k_BT = 1/3000`$ and 1.0001 at the $`k_BT`$ of water, which is what is measured
 | $`\tau = 1`$, $`k_BT`$ of water | 1.000, 1.000, 1.000, 1.000 | 0.995 - 1.006 (0.995 - 1.003) | 0.994 - 1.004 (0.994 - 1.004) | 0.996 - 1.038 (0.996 - 1.002) |
 
 CUDA in mixed precision unless said otherwise, $`k_BT = 1/3000`$ in lattice units. The statistical error of the first
-shell (6 wave vectors) is 1.5 - 2 %, of the shells from 4 on below 0.6 %. CUDA in single and double precision and OpenCL
+shell (6 wave vectors) is 1.5 - 2%, of the shells from 4 on below 0.6%. CUDA in single and double precision and OpenCL
 in mixed precision draw the same random numbers and give the same values as CUDA mixed to the digits shown; the
-Reference platform ($`16^3`$ nodes, its own generator) gives ER per node 1.002, 1.001, 1.003 and spectra within 2.5 %,
+Reference platform ($`16^3`$ nodes, its own generator) gives ER per node 1.002, 1.001, 1.003 and spectra within 2.5%,
 within its larger statistical error. The mean velocity is subtracted at every sample: in the run with the body force it
 grows from 0 to 0.05 and the spectra are those of the fluid at rest. In the uniform flow and in the accelerated fluid
-the ER per node of the velocity along the flow is 0.6 % and 0.2 % above that at rest, an effect of the second-order
+the ER per node of the velocity along the flow is 0.6% and 0.2% above that at rest, an effect of the second-order
 equilibrium of D3Q19 at Mach 0.09, which grows as $`u^2`$. The test `testVelocitySpectrum` checks the same quantities on
 $`8^3`$ nodes on every platform (Fluctuating fluid, above).
 
@@ -759,12 +759,12 @@ coupling tests). In `single` precision the tolerances of 1e-12 and below become 
 | `testRegularizedPoiseuille` ($`\tau`$ = 0.7, 1, 1.5) | channel between regularized walls on the solid nodes $`j = 0`$ and $`j = n_y`$, driven by $`g`$: $`u(y) = g/(2\nu)\,y\,(n_y - y) + 3g(\tau - 1)/(\tau - 1/2)`$ at every fluid node, uniform density, wall force $`= gM`$ | 1e-9 (wall force 1e-8) |
 | `testWallBalance` (both wall schemes) | a plate one node thick and a block, a flow against them and a body force: mass conserved and $`\mathbf P(t + \Delta t) - \mathbf P(t) = (M\mathbf g - \mathbf F_{\mathrm{wall}})\,\Delta t`$ at every step | 1e-13, 1e-12 |
 | `testWallMomentumBalance` (`tests/TestLBMCoupling.h`; both drags, regularized walls) | particles, fluid and walls: total momentum conserved | 1e-11 relative (1e-12 with bounce-back): rebuilding the boundary nodes adds rounding (up to 4e-6 in `single` precision) |
-| `testCouette` ($`\tau`$ = 0.6, 1, 1.5; `DensityVelocity` faces at 0.6 and 1.5) | ZMin `Velocity` at rest, ZMax `Velocity` $`U`$ along x: $`u_x = U(z + 1)/(n_z + 1)`$, the faces holding on the nodes beyond them, uniform density; the same between two `DensityVelocity` faces at the density of the fluid at rest | 1e-9 |
+| `testCouette` ($`\tau`$ = 0.6, 1, 1.5; `DensityVelocity` faces at 0.6 and 1.5) | `ZMin` `Velocity` at rest, `ZMax` `Velocity` $`U`$ along x: $`u_x = U(z + 1)/(n_z + 1)`$, the faces holding on the nodes beyond them, uniform density; the same between two `DensityVelocity` faces at the density of the fluid at rest | 1e-9 |
 | `testUniformFlowThroughFaces` | a uniform flow from a `Velocity` inlet to a `Density` outlet stays unchanged; also from a `DensityVelocity` inlet to a `Density` or `DensityVelocity` outlet | 1e-13 |
 | `testDensityVelocityReservoir` | a fluid at rest between two `DensityVelocity` faces at the density 1.01 and the velocity (0.01, 0.02, 0) (lattice units) reaches the uniform flow with that density and velocity in 2500 steps | 1e-9 (1e-5 in `single`) |
 | `testDensityVelocityInlet` | a `DensityVelocity` inlet at the density 1.01 and the velocity 0.01 with a `Density` outlet at 1: uniform steady flow at the density 1 and the velocity $`u`$ of $`1 + 3u + 3u^2 = 1.01\,(1 + 0.03 + 0.0003)`$, 0.013356 (`docs/theory.md`, section 1) | 1e-10 (1e-5 in `single`) |
-| `testBoundaryKinds` (Reference) | the kinds of the nodes on edges and corners of six open faces of every type (internal/LBMBoundaries.h): the first face that sets the velocity gives it, and the density too if it is a `DensityVelocity` face | exact |
-| `testPressureDrivenDuct` | square duct between bounce-back walls, `Density` faces at 1.01 and 1: density at the node $`n_y/2`$ on the straight line between those of the faces, held at $`y = -1`$ and $`y = n_y`$, gradient in the middle between those of the lengths $`n_y + 1`$ and $`n_y - 3`$, velocity in the middle within 2 % of the incompressible duct solution for that gradient, steady to 1e-9 between two steps | see text |
+| `testBoundaryKinds` (Reference) | the kinds of the nodes on edges and corners of six open faces of every type (`openmmapi/include/internal/LBMBoundaries.h`): the first face that sets the velocity gives it, and the density too if it is a `DensityVelocity` face | exact |
+| `testPressureDrivenDuct` | square duct between bounce-back walls, `Density` faces at 1.01 and 1: density at the node $`n_y/2`$ on the straight line between those of the faces, held at $`y = -1`$ and $`y = n_y`$, gradient in the middle between those of the lengths $`n_y + 1`$ and $`n_y - 3`$, velocity in the middle within 2% of the incompressible duct solution for that gradient, steady to 1e-9 between two steps | see text |
 | `testCheckpointBoundaries` | a checkpoint with regularized walls and `Density` faces loads in the same configuration and is refused with another wall scheme or other face types | exceptions |
 | `testFluidStateRestartWithBoundaries` (bounce-back and regularized walls) | a wall, a `Velocity` inlet, a `Density` outlet and a body force: a run restarted with `getFluidState()`/`setFluidState()` at step 11 equals the uninterrupted run at step 30 | bitwise |
 | `testFaceChecks` | one open face on an axis, open faces with momentum removal, fewer than 3 nodes on an open axis: errors | |
@@ -810,7 +810,7 @@ $`\tau = 0.8`$, a decaying flow; relative change of the total mass):
 
 Between two `Velocity` faces at rest with a fluctuating fluid ($`8^3`$ nodes), the mean density fell to 0.82 in 3000
 steps and 0.40 in 10000 with the density of the face node, and stays within 2e-4 of 1 with the mass balance. With
-a `Velocity` inlet and a `Density` outlet it stays within 0.5 %, held by the outlet.
+a `Velocity` inlet and a `Density` outlet it stays within 0.5%, held by the outlet.
 
 **Density faces as inlets** (Reference, channel of 10 x 32 x 2 nodes between bounce-back walls, the faces along y):
 
@@ -839,9 +839,9 @@ the plane / $`\mu\rho b_k`$, as in the equilibrium spectra above):
 | $`y`$ = 4 to 9 | 0.987 - 1.016 | 0.996 - 1.010 | 0.994 - 1.010, 0.995 - 1.001 | 0.990 - 1.013 | 0.990 - 1.008 |
 
 Bounce-back walls are in thermal equilibrium with the fluctuating fluid at every distance, within the
-statistical error (about 1 %): bounce-back permutes the populations and keeps the Gaussian equilibrium state.
+statistical error (about 1%): bounce-back permutes the populations and keeps the Gaussian equilibrium state.
 Next to regularized walls the fluctuations are at equilibrium from the second node on; on the first node the
-momentum along the wall is 3 to 4 % low and some stress and ghost modes up to 9 % low. Latt's condition, tried and
+momentum along the wall is 3 to 4% low and some stress and ghost modes up to 9% low. Latt's condition, tried and
 left out, was much further from equilibrium: on the boundary node the momentum was zero (imposed)
 and the density 0.777, and on the next node the density was 0.954 and the momentum normal to the wall 0.910.
 
@@ -866,7 +866,7 @@ values 0.992 are those of equilibrium with the mass and the staggered momentum $
 lattice (1 - 1/8 for the mean of each of the 8 planes, over 16 wave vectors). A `Velocity` face keeps the earlier
 random part and the exact model gives its earlier values.
 
-On an NVIDIA A100 (CUDA, mixed precision; `CUDA` and `OpenCL` in every precision give the same statistics, since they
+On an NVIDIA A100 (CUDA, mixed precision; CUDA and OpenCL in every precision give the same statistics, since they
 draw the same random numbers), $`16 \times 16 \times 24`$ nodes, $`\tau = 0.62`$, $`4\cdot10^5`$ steps, the temperature of
 the first fluid plane along / across the boundary is 299.7 / 300.1 K next to regularized walls (bounce-back walls:
 299.8 / 300.1 K; the earlier random part: 286 / 300 K) and 300.1 / 300.5 K on the plane of a `DensityVelocity` face
@@ -888,12 +888,12 @@ the wave number $`\lvert\mathbf k\rvert`$ along the plane, 2D FFT, $`k_BT = 1/30
   the wavelength: the normal velocity had ER 0.72 at the longest wavelength (16 nodes) and 0.97 at the shortest,
   the density 0.83 - 0.86 at the longest; imposing the velocity on the boundary node damped the long-wavelength
   fluctuations next to it.
-- `Density` faces (16 x 16 x 16, faces YMin and YMax at the fluid density, a solid plane $`x = 0`$): on the nodes of the
-  faces the velocity along the face fluctuates at equilibrium (0.96 - 0.99), the velocity across the face 51 % more than
-  in equilibrium with bounce-back walls and 38 % more with regularized walls, and the density 0.43 and 0.57 of the
-  equilibrium variance; the next plane is within 2 % and the following ones within the statistical error. With Latt's
+- `Density` faces (16 x 16 x 16, faces `YMin` and `YMax` at the fluid density, a solid plane $`x = 0`$): on the nodes of the
+  faces the velocity along the face fluctuates at equilibrium (0.96 - 0.99), the velocity across the face 51% more than
+  in equilibrium with bounce-back walls and 38% more with regularized walls, and the density 0.43 and 0.57 of the
+  equilibrium variance; the next plane is within 2% and the following ones within the statistical error. With Latt's
   condition on the faces, the density and the velocity along the face were imposed on the face nodes (ER 0) and the
-  velocity across it fluctuated 21 to 29 % more. Without the solid plane, with x and z periodic, the mean flow across
+  velocity across it fluctuated 21 to 29% more. Without the solid plane, with x and z periodic, the mean flow across
   the two faces has no restoring force (equal pressures, no friction): the fluctuations make it wander like a free
   Brownian particle, and the run stopped with a Mach number of 0.3 after 87000 steps (measured with Latt's condition on
   the faces). A duct with walls is stable (mean velocity below 1e-3), because the viscous friction at the walls damps
@@ -904,10 +904,10 @@ flow is steady (1e-18 between two steps) with a uniform mass flux, the staggered
 linearly in the middle, but on the face nodes it overshoots the densities of the faces (1.0104 and 0.9996 at
 $`\tau = 1`$): next to the faces the flow enters and leaves the duct, and the gradient in the middle is that of a
 length of 14.6 nodes instead of the 17 between the nodes beyond the faces. With that gradient the largest error in the
-middle cross-section relative to the incompressible solution is 0.9 % at $`\tau = 1`$ (15 % with the gradient of 17
-nodes), and 1.3 % at $`\tau = 1.1`$ in the example of the user guide (gradient of a length of 7.3 nm for 8.5 nm
+middle cross-section relative to the incompressible solution is 0.9% at $`\tau = 1`$ (15% with the gradient of 17
+nodes), and 1.3% at $`\tau = 1.1`$ in the example of the user guide (gradient of a length of 7.3 nm for 8.5 nm
 between the nodes beyond the faces). With Latt's condition on the faces, which imposed the densities on the
-face nodes, the gradient was that of the faces, and the errors were 1.3 % at $`\tau = 0.6`$ and 0.5 % at $`\tau = 1`$
+face nodes, the gradient was that of the faces, and the errors were 1.3% at $`\tau = 0.6`$ and 0.5% at $`\tau = 1`$
 (10 x 32 x 10).
 
 **Staggered mode.** With the faces of the plugin the staggered momentum is at 1e-16 in the duct above with the time
@@ -915,14 +915,14 @@ filter; without it, it decayed by itself at $`\tau = 1`$ (to 1e-12 in 3000 steps
 the `Density` inlets were unstable at $`\tau = 0.6`$ (above). With Latt's condition on the faces and without the
 time filter of the `Density` faces (`docs/theory.md`, section 1, Time filter of the Density faces), the duct between
 bounce-back walls kept an oscillation of the velocity from one node to the next and from one step to the next, of 0.6
-to 2.9 % of the velocity at $`\tau = 0.8`$ (at $`\tau`$ = 0.6 and 1 the mass flux through neighbouring cross sections
-differed by 9 to 18 %): the staggered momentum $`\sum_y (-1)^{y+t} j_y`$, an exact invariant of the bulk (eigenvalue
+to 2.9% of the velocity at $`\tau = 0.8`$ (at $`\tau`$ = 0.6 and 1 the mass flux through neighbouring cross-sections
+differed by 9 to 18%): the staggered momentum $`\sum_y (-1)^{y+t} j_y`$, an exact invariant of the bulk (eigenvalue
 -1 of the linearized step at $`k = \pi`$, for every $`\tau`$), was excited by the start and then kept constant (-0.047
 in lattice units from step 2000 to 16000). With regularized walls, or with `Velocity` faces, it was at the level of
 rounding. With that condition the time filter ($`\beta = 1/2`$) damped it to rounding (1e-16) in every combination of
 walls and faces, with the same steady state; the alternative of taking the velocity of the `Density` face from the
 next node (zero gradient, as in the outflow of Malaspinas) also damped it, but raised the error with regularized walls
-to 8 % at $`\tau = 0.6`$.
+to 8% at $`\tau = 0.6`$.
 
 ## Checkpoints from Python (`python/tests/TestCheckpoint.py`, Reference)
 
@@ -976,7 +976,7 @@ and a block of 8 solid nodes with bounce-back walls, with regularized walls, and
 along x (a `Velocity` inlet and a `Density` outlet; `faces`); the same walls with `DensityVelocity` faces along x and z
 mixed with the other types, so that the edges take every rule (`dvfaces`, version 0.5.0); periodic with the removal of
 the fluid momentum every third step.
-Run with OpenMPI 4.1.6 on one node, plugin built with `-DOPENMM_LBM_MPI=ON`, OpenMM 8.6.1, decompositions
+Run with Open MPI 4.1.6 on one node, plugin built with `-DOPENMM_LBM_MPI=ON`, OpenMM 8.6.1, decompositions
 $`2 \times 1 \times 1`$, $`1 \times 2 \times 1`$, $`1 \times 1 \times 2`$, $`2 \times 2 \times 1`$,
 $`4 \times 1 \times 1`$, $`1 \times 2 \times 2`$ and $`2 \times 2 \times 2`$:
 
@@ -1045,7 +1045,7 @@ precision with $`2 \times 2 \times 2`$ and $`8 \times 1 \times 1`$ (blocks one n
 $`4 \times 2 \times 1`$, OpenCL in double precision with $`2 \times 2 \times 2`$ and in single precision with
 $`4 \times 2 \times 1`$ (40 ranks): fluid identical bit for bit in 200 of 200, particles in 120 of 120, removal of the
 momentum at most $`1.0 \cdot 10^{-17}`$ ($`2.9 \cdot 10^{-9}`$ in single precision), checks 144 of 144. They were
-launched with `mpirun` of OpenMPI 4.1.6, which passes to the processes of the other node only the environment variables
+launched with `mpirun` of Open MPI 4.1.6, which passes to the processes of the other node only the environment variables
 named with `-x` (here `PATH`, `LD_LIBRARY_PATH` and, for OpenCL, `OCL_ICD_VENDORS`), and with UCX on one port of the
 network (`UCX_NET_DEVICES`): with the four ports of the nodes the setup of UCX between the nodes stopped in
 `MPI_Comm_split_type` ("endpoint reconfiguration not supported yet"), before any call of the plugin.
@@ -1056,8 +1056,8 @@ stay identical on every rank (13 of 13 runs), and a fluctuating fluid without pa
 domain does. The ranks draw independent random numbers: a fluctuating fluid without walls and without the initial
 perturbation is invariant under translations apart from the noise, so the fluctuations of corresponding nodes of two
 equal blocks along x would be identical if two ranks drew the same numbers; their correlation coefficient is between
--0.09 and 0.01 on every platform (the statistics of the fluctuations with the decomposition are in the next
-subsection). The checks that must stop every rank together all do (150 of 150): copies of the particles that differ
+-0.09 and 0.01 on every platform (the statistics of the fluctuations with the decomposition are in the subsection
+Fluctuating fluid and particles across the domains, below). The checks that must stop every rank together all do (150 of 150): copies of the particles that differ
 ($`10^{-12}`$ in the velocities, $`10^{-6}`$ in single precision, where the velocities are stored as float), an
 `AndersenThermostat`, `DeterministicForces` off on CUDA, and `LBMForce.createCheckpoint()`, which holds the state of
 one domain (the checkpoint files are below). Without the decomposition nothing changes on
@@ -1067,7 +1067,7 @@ precisions.
 
 **Coupled particles.** Seven particles of 50 Da, with a constant field and a soft pair force, at $`T = 0`$: near the
 borders of the blocks, two on the same node, and one crossing the periodic boundaries into the solid plane
-$`j = 0`$, where it is reflected; friction 10 ps⁻¹, 60 steps. Cases: explicit drag with bounce-back walls,
+$`j = 0`$, where it is reflected; friction 10/ps, 60 steps. Cases: explicit drag with bounce-back walls,
 centred drag with regularized walls, centred drag with regularized walls and open faces along x. On every rank the
 script compares the fluid nodes of the rank and the positions and velocities of all the particles. Decompositions
 $`2 \times 1 \times 1`$, $`1 \times 2 \times 1`$, $`1 \times 1 \times 2`$, $`2 \times 2 \times 1`$,
@@ -1131,9 +1131,9 @@ with $`2 \times 2 \times 2`$ and in single precision with $`4 \times 2 \times 1`
 `TestMPIReferenceLBMForce` (CTest, two ranks) continues the run of two domains from a checkpoint file with two domains
 and with one domain, bit for bit. Without MPI the C++ tests continue a run with the fluctuating fluid, regularized walls
 and open faces from a file of `saveCheckpointFile()` bit for bit on every platform, and `test_checkpoint_file` does the
-same in Python; the files of `openmmlbm.saveCheckpoint()` with one domain are those of version 0.3, byte for byte (the
+same in Python; the files of `openmmlbm.saveCheckpoint()` with one domain are those of version 0.3.0, byte for byte (the
 part of the force; the OpenMM checkpoint inside them is not reproducible from one run to the next on OpenCL with pocl,
-with any version), and the arrays of the VTK files are those of version 0.3, byte for byte, on the Reference platform
+with any version), and the arrays of the VTK files are those of version 0.3.0, byte for byte, on the Reference platform
 and on CUDA and OpenCL in the three precisions.
 
 ### Performance of the domain decomposition (CUDA, NVIDIA A100)
@@ -1413,7 +1413,7 @@ $`64^3`$, $`\tau = 1`$, the axis normal to the wall divided in four ($`1 \times 
 $`j`$ against the same plane with one domain gives $`\chi^2`$ per plane 0.70 to 1.17, largest deviation 3.4 errors,
 including the deficit of the momentum next to the wall (0.979 and 0.981 in the first fluid plane).
 
-**Particles.** 256 free particles of 100 Da coupled with the centred drag ($`\gamma`$ = 5 ps⁻¹) to the fluctuating fluid
+**Particles.** 256 free particles of 100 Da coupled with the centred drag ($`\gamma`$ = 5/ps) to the fluctuating fluid
 at 300 K ($`32^3`$ nodes, $`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 10 fs, the viscosity of water, $`\tau = 0.607`$), the
 temperature from the velocities at half step, 20000 samples every 50 steps after $`10^4`$ steps, errors from 20 blocks:
 with $`2 \times 2 \times 2`$ domains on two nodes 300.30 ± 0.08 K, with the particles changing domain 91005 times
@@ -1539,10 +1539,10 @@ single precision; the OpenCL platform also rounds the total force on a particle 
 | CUDA and OpenCL single | 1.5e-7 to 2.1e-7 | 1.4e-7 to 1.7e-7 |
 
 **Speed.** With 110 coupled particles on a $`30^3`$ lattice at 300 K and the removal of the fluid momentum at
-every step, a step takes 61 us with CUDA in mixed precision (51 us in single, 55 us in double) and 64 us
+every step, a step takes 61 µs with CUDA in mixed precision (54 µs in single, 58 µs in double) and 67 µs
 with OpenCL in mixed precision, on an NVIDIA A100 with OpenMM 8.6.1. The CUDA library of the DragOpenMM
-project takes 517 us for the same system. The centred drag costs 0 to 6% more (A100, OpenMM 8.6.1, 300 K,
-removal at every step, 5000 steps after 200), in us per step:
+project takes 517 µs for the same system. The centred drag changes the time per step by -4% to +6% (A100, OpenMM 8.6.1, 300 K,
+removal at every step, 5000 steps after 200), in µs per step:
 
 | System | precision | CUDA explicit | CUDA centred | OpenCL explicit | OpenCL centred |
 |---|---|---|---|---|---|
@@ -1603,7 +1603,7 @@ were regenerated with the Euler-Maruyama scheme for this comparison ($`v_1/v_0 =
   decimal up to 5 ns, and within the statistical error at longer lags. The temperature of the centred drag,
   at half steps, is 277.5 K (half step 310.3 K and full step 294.0 K with the explicit drag; full step
   264.4 K with the centred drag): 6.9% below $`T`$, against 1.3% for the explicit drag
-  ([theory.md](theory.md), section 2, temperature with a fluid without fluctuations).
+  ([theory.md](theory.md), section 2, Temperature with a fluid without fluctuations).
 - **Friction 30/ps** (`--preset sod1-g30`, 50 ns, seed 1): both drags are stable; the apparent diffusion
   coefficient is 0.89, 0.98, 1.00, 1.00, 1.04, 1.24 and 1.25 Å²/ns with the explicit drag and 0.86, 0.93,
   0.96, 0.99, 1.02, 1.28 and 1.35 with the centred drag, within the statistics of one run
@@ -1613,7 +1613,7 @@ were regenerated with the Euler-Maruyama scheme for this comparison ($`v_1/v_0 =
 ## Many proteins: 64 copies of SOD1 (CUDA, NVIDIA A100)
 
 64 copies of SOD1 (COCOMO2, 7040 beads, well above the size at which the GPU platforms may repeat a force evaluation
-to enlarge the neighbor list) on a 4 x 4 x 4 grid in a box of 20 nm ($`40^3`$ nodes), friction 10/ps, 298 K,
+to enlarge the neighbour list) on a 4 x 4 x 4 grid in a box of 20 nm ($`40^3`$ nodes), friction 10/ps, 298 K,
 $`\Delta t`$ = 0.01 ps, every bead coupled, removal of the fluid momentum switched off so that the total momentum can
 be checked; 2 ns in mixed precision and 0.2 ns in double precision, OpenMM 8.6.1. Mean temperatures after the first
 quarter of the run, and drift of the total momentum of particles and fluid relative to
@@ -1682,7 +1682,7 @@ temperatures in K, openmm-lbm / reference; statistical error about 0.5 K.
 | 10 | 16 | 1.010 / 1.011 | 1.007 / 1.004 | 254.0 / 254.0 |
 | 5 | 8 | 0.979 / 0.983 | 0.979 / 0.980 | 271.4 / 271.4 |
 
-**T7, velocity autocorrelation against the kick response** ($`\gamma`$ = 10, $`L`$ = 16 nm): the ratio of the
+**T7, velocity autocorrelation against the kick response** ($`\gamma`$ = 10/ps, $`L`$ = 16 nm): the ratio of the
 normalized VACF at half steps to the kick response minus its plateau is 0.93, 0.90, 0.85, 0.81, 0.69 and
 0.50 at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps (reference: 0.93, 0.90, 0.85, 0.81, 0.70, 0.47). With thermal
 fluctuations of the fluid the two curves would coincide (fluctuation-dissipation theorem).
@@ -1703,7 +1703,7 @@ T6, particles of 1000 Da ($`m/m_c`$ = 13.3): the diffusion coefficient is that o
 temperature is 274.7, 207.7, 161.1 and 204.2 K: the deficit of a fluid without fluctuations grows with
 $`\gamma\Delta t\,m/m_c`$, as predicted (`docs/theory.md`, section 2, Temperature with a fluid without fluctuations).
 
-T7, with the response to a kick (particle of 1000 Da, $`\gamma`$ = 10, $`L`$ = 16 nm) computed with the same drag
+T7, with the response to a kick (particle of 1000 Da, $`\gamma`$ = 10/ps, $`L`$ = 16 nm) computed with the same drag
 on CUDA (with the explicit drag it
 reproduces the kick of the reference campaign): ratio of the normalized VACF to the kick response minus its
 plateau at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps:
@@ -1736,7 +1736,7 @@ for the explicit drag and the half step for the centred drag:
 
 T6, particles of 1000 Da ($`m/m_c`$ = 13.3), $`L`$ = 16 nm except the last row:
 
-| $`\gamma`$ (1/ps) | $`L`$ (nm) | $`D/(k_BT/m\gamma)`$, MSD, explicit / centred | $`D/(k_BT\,(1/\zeta + y_{\mathrm{centred}}))`$ | full-step $`T`$, explicit | half-step $`T`$, centred |
+| $`\gamma`$ (1/ps) | $`L`$ (nm) | $`D/(k_BT/m\gamma)`$, MSD, explicit / centred | $`D/(k_BT\,(1/\zeta + y_{\mathrm{centred}}))`$, explicit / centred | full-step $`T`$, explicit | half-step $`T`$, centred |
 |---|---|---|---|---|---|
 | 1 | 16 | 1.109 / 1.108 | 1.009 / 1.009 | 318.4 K | 298.9 K |
 | 5 | 16 | 1.511 / 1.496 | 1.011 / 1.001 | 388.7 K | 299.5 K |

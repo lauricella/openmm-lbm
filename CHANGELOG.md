@@ -38,13 +38,13 @@ A faster coupling through the three-point and `Keys` stencils on the GPU platfor
   and 14% with the three-point stencil; on four A100s 7% to 29% shorter (`docs/validation.md`, Performance of the
   domain decomposition). The trilinear stencil keeps one key per slot, which is faster for its 8 slots. The sums run
   in the same order as before: the results are the same bit for bit with OpenCL, and with CUDA except the three-point
-  stencil with the explicit drag and the Euler–Maruyama scheme, with or without fluid fluctuations, whose results
+  stencil with the explicit drag and the Euler-Maruyama scheme, with or without fluid fluctuations, whose results
   differ by rounding (in double and mixed precision only the fluid, by up to $`2.6\cdot10^{-18}`$ in the populations;
   cause not identified).
 
 ### Documentation
 - `docs/architecture.md`, The sort of the coupling and the segments of the stencils: why the coupling sorts, how the
-  cost of the sort shaped the coupling since version 0.1.0, the kernels that build the segments, the designs tried
+  cost of the sort has shaped the coupling since version 0.1.0, the kernels that build the segments, the designs tried
   before them with their costs, and the two ways (one key per slot or per particle).
 - `docs/validation.md`: the comparison with version 0.5.1 bit for bit, the domain decomposition on four GPUs and on
   two nodes, and the timings of the stencils against version 0.5.1.
@@ -101,9 +101,9 @@ regularized walls (Changed).
   (density, momentum, stress and ghost modes), correlated with the random part of the collision of their own node,
   instead of the random part of a collision, and so do those of the new `DensityVelocity` faces; the fluid next to
   them is then exactly at equilibrium for $`0.586 \le \tau \le 3.41`$ (`docs/theory.md`, section 7, derivation
-  checked with an exact linear model of the step). Before, the momentum along a regularized wall of the first fluid
-  node was 4.6% cooler. Runs without fluctuations, and fluctuating runs without these boundaries, are unchanged bit
-  for bit. A warning outside that range of $`\tau`$.
+  checked with an exact linear model of the step). Before, the momentum of the first fluid node along a regularized
+  wall was 4.6% cooler. Runs without fluctuations, and fluctuating runs without these boundaries, are unchanged bit
+  for bit. A warning is printed outside that range of $`\tau`$.
 - Fluctuating fluid: `Density` faces are an error with fluid fluctuations (`setFluidFluctuations(True)`, at any
   temperature) when the Context is created. A `Density` face copies the velocity of its node, fluctuations included,
   into the populations it rebuilds, and an exact linear model of the step shows that then no random part keeps the
@@ -122,8 +122,8 @@ regularized walls (Changed).
   (1.3 ms per step); the results are the same bit for bit (`docs/theory.md`, section 2, and `docs/validation.md`,
   Performance of the domain decomposition).
 - Tests: the coupling tests at 300 K ran with a random seed chosen by the platform, so `testMomentumConservation`,
-  which checks that a particle has crossed the periodic boundary after 50 steps, failed about once in 10^4 runs: the crossing is 4.1 standard deviations of the random displacement away with the
-  explicit drag (measured with 2*10^4 to 4*10^4 repetitions of the test on each of the Reference, CUDA and OpenCL
+  which checks that a particle has crossed the periodic boundary after 50 steps, failed about once in $`10^4`$ runs: the crossing is 4.1 standard deviations of the random displacement away with the
+  explicit drag (measured with $`2\cdot10^4`$ to $`4\cdot10^4`$ repetitions of the test on each of the Reference, CUDA and OpenCL
   platforms, with the same distribution on all of them).  The Systems of the coupling tests now have a fixed seed.
 
 ### Documentation
@@ -206,15 +206,12 @@ the ranks together. Without the decomposition the algorithm is that of version 0
   gives an error with more than one domain.
 - `LBMVTKReporter` with more than one domain: the files of the fluid are the same as with one domain, written together
   by all the ranks with MPI-IO (`writeFluidFile()`), and rank 0 writes the particles and the list of files.
-
-- CUDA platform with more than one domain: with an MPI library that reads and writes device memory (CUDA-aware MPI)
-  the populations exchanged between the ranks of the same node go from device to device, over NVLink, while the
-  interior of the block collides; between nodes they go through the host, which was faster.
-  `OPENMM_LBM_DEVICE_MPI=0` makes them go through the host also within a node. Only the first Context of a process
-  uses it (the MPI library binds these transfers to the CUDA context of the first one). The populations exchanged
-  through the host are in their own precision and without copies on the host. `devtools/benchmark_decomposition.py`
-  measures the time per step (`docs/validation.md`), also with coupled particles (`--particles`, `--centered`).
-
+- CUDA platform with more than one domain and CUDA-aware MPI (above): between nodes the populations go through the
+  host, which was faster, and `OPENMM_LBM_DEVICE_MPI=0` makes them go through the host also within a node. Only the
+  first Context of a process uses CUDA-aware MPI (the MPI library binds these transfers to the CUDA context of the
+  first one). The populations exchanged through the host are in their own precision and without copies on the host.
+  `devtools/benchmark_decomposition.py` measures the time per step (`docs/validation.md`), also with coupled particles
+  (`--particles`, `--centered`).
 - A job of the continuous integration builds with MPI and runs the decomposition on CPUs (Reference and OpenCL, two
   to eight ranks); the decomposition on GPUs is tested by hand before every release (`CONTRIBUTING.md`).
 - With fluid fluctuations at a temperature above zero, the Context prints $`k_BT`$ in lattice units and the thermal
@@ -327,7 +324,7 @@ identical, bit for bit, to those of version 0.2.1 (walls, coupled particles, bot
   bounce-back is exact for Poiseuille flow at $`\tau = 7/8`$, the regularized wall at $`\tau = 1`$, and the
   bounce-back is about four times more accurate at the $`\tau`$ of water. With fluid fluctuations the fluctuations
   are at equilibrium from the second node on. A first version with the local regularized boundary condition of Latt
-  was replaced: imposing the velocity of the wall on the boundary node put the fluctuations next to it 3 to 9 %
+  was replaced: imposing the velocity of the wall on the boundary node put the fluctuations next to it 3 to 9%
   below equilibrium. Without the mass balance a fluctuating fluid lost half of its mass in 10000 steps
   (`docs/validation.md`). Serialization version 6 and checkpoint version 4 record the scheme; older files are read
   with bounce-back. `docs/theory.md`, section 1. Checkpoint version 5 also records the types of the faces, and
@@ -337,10 +334,10 @@ identical, bit for bit, to those of version 0.2.1 (walls, coupled particles, bot
   `setFaceDensity()`, six independent faces, on all platforms: inlets, outlets, moving plates and
   flows driven by a pressure difference. As for the regularized walls, the nodes of a face rebuild the populations
   that come from beyond the face as those of fluid with the moments of the node and the velocity of a Velocity
-  face ($`\rho_b`$ from the mass balance with the inflow, as Zou and He) or the density of a Density face; the
+  face ($`\rho_b`$ from the mass balance with the inflow, as in Zou and He) or the density of a Density face; the
   velocity or the density of a face holds one node beyond it. The Density faces filter their velocity across the
   face in time, which damps the staggered mode that the lattice otherwise keeps; a Density face used as an inlet
-  is unstable at $`\tau \le 0.55`$ with a difference of density of 1 %, so the documentation recommends a Velocity inlet
+  is unstable at $`\tau \le 0.55`$ with a difference of density of 1%, so the documentation recommends a Velocity inlet
   at small $`\tau`$. The velocities and
   densities can be changed with `updateParametersInContext()`. Serialization version 7. With open faces the
   removal of the fluid momentum must be off. Examples: Couette flow and a duct driven by a pressure difference
@@ -418,7 +415,7 @@ version 0.1.0.
   explicit drag, and a checkpoint is refused by a Context with the other drag scheme).
 
 ### Fixed
-- CUDA, OpenCL and HIP: when OpenMM repeated the force evaluation of a step to enlarge the neighbor list of a
+- CUDA, OpenCL and HIP: when OpenMM repeated the force evaluation of a step to enlarge the neighbour list of a
   nonbonded force (Systems of more than about 1250 atoms), the repeated evaluation applied the coupling force
   of the next step instead of that of the step, so particles and fluid received different momenta in that
   step (1.3e-2 of the momentum of the particles in the test that compresses 8000 particles). It now applies

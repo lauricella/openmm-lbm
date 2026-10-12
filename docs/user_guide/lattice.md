@@ -200,13 +200,13 @@ Context is created.
 
 **With the fluctuating fluid**
 ([`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)) **use the
-centred drag**: its particles have the set temperature (at half steps), while the explicit drag makes them too hot (last
-paragraph).
+centred drag**: its particles have the set temperature (at half steps), while the explicit drag makes them too hot
+(below).
 
 **Without fluid fluctuations use the explicit drag** (the default) in most cases: it is accurate for
 $`\text{friction}\times\Delta t`$ up to about 0.1, it reproduces the results of version 0.1.0 and of the DragOpenMM
 library, the temperature that OpenMM
-reports is right, and its particles are the closest to $`T`$ (next paragraph).
+reports is right, and its particles are the closest to $`T`$ (below).
 
 **Use the centred drag** when the explicit drag is unstable: large friction, or several heavy beads at a node. With
 beads of 130 Da, $`\Delta x = 0.5`$ nm and $`\Delta t = 0.01`$ ps, three or four beads at a node make the explicit

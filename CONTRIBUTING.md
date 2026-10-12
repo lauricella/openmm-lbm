@@ -31,7 +31,7 @@ reproducible and understandable by someone who arrives without any prior context
   - D3Q19 with regularized, thread-safe collision (populations rebuilt from moments up to second order);
   - Guo forcing with prefactor 1/2;
   - exact weakly compressible density convention;
-  - explicit Euler–Maruyama particle–fluid coupling at the half step.
+  - explicit Euler-Maruyama particle–fluid coupling at the half step.
 
   Until equivalence is reached, any difference from the reference values of that library in double precision is a defect, unless a written decision says otherwise. The centred drag (`LBMForce::Centered`, version 0.2.0) is an extension beyond that library, derived in `docs/theory.md` (section 2) and validated in `docs/validation.md`; so are the regularized walls and the open faces (section 1) and the fluctuating fluid (section 7). The explicit drag stays identical to it.
 - **Changes to the physics** (fluctuating LB, interpolation, boundaries; the centred drag followed this rule) require three things:
@@ -97,10 +97,10 @@ The documentation is written for users and developers. It must be complete enoug
 | File | Content |
 |---|---|
 | `README.md` | what the plugin does, installation, minimal example, authors, license, how to cite |
-| `docs/theory.md` | model (regularized D3Q19, weakly compressible, Guo forcing; walls and open faces; fluctuating fluid), Euler–Maruyama coupling with the explicit and the centred drag, time levels (leapfrog, half step), units and conversions, the domain decomposition (section 8), equations with references |
+| `docs/theory.md` | model (regularized D3Q19, weakly compressible, Guo forcing; walls and open faces; fluctuating fluid), Euler-Maruyama coupling with the explicit and the centred drag, time levels (leapfrog, half step), units and conversions, the domain decomposition (section 8), the interpolation stencils (section 9), equations with references |
 | `docs/architecture.md` | file map; data flow within one step; invariants (one fluid update per step, no atomics, kernel order); how to add a platform or a kernel |
 | `docs/validation.md` | tests, reference values, tolerances, how to reproduce them |
-| `docs/user_guide/` | user guide: installation, tutorial, getting started, the lattice, API reference, restarts, examples, troubleshooting, glossary, running on several GPUs; its Python blocks are checked with `devtools/check_user_guide.py` |
+| `docs/user_guide/` | user guide: installation, tutorial, getting started, the lattice, API reference, restarts, examples, interpolation stencils, troubleshooting, glossary, running on several GPUs; its Python blocks are checked with `devtools/check_user_guide.py` |
 | `CONTRIBUTING.md` | this file |
 | `CHANGELOG.md`, `CITATION.cff` | version history; citation, with authors in the order of the README |
 

@@ -184,7 +184,7 @@ rest placed on the solid node.
 
   with $`\Pi^{\mathrm{neq}}(\mathbf x)`$ the non-equilibrium stress of $`\mathbf x`$ in this step, $`S_q`$ the Guo
   term of the body force and, with a fluctuating fluid, $`\xi_q`$ the random part of a node with the density of
-  $`\mathbf x`$, drawn for $`\mathbf x`$ before the mass balance below, and with a fluctuating fluid correlated with the
+  $`\mathbf x`$, drawn for $`\mathbf x`$ before the mass balance below, and correlated with the
   random part of the collision of $`\mathbf x`$ (section 7). The known populations
   of $`\mathbf x`$, and its collision, are those of any fluid node.
 - This is the thread-safe boundary condition of Lauricella et al. [24] (appendix, eqs. A4 and A5; introduced in
@@ -192,7 +192,7 @@ rest placed on the solid node.
   with the equilibrium at the imposed values on the node beyond the boundary and $`(1 - \omega)`$ times the
   non-equilibrium part of the neighbouring fluid node, rebuilt from its stress by Hermite projection. Here it also
   carries the Guo term of the body force and, with a fluctuating fluid, a random part, and only the unknown
-  populations are rebuilt, with $`\rho_b`$ from the mass balance below. As every scheme of this family (wet-node
+  populations are rebuilt, with $`\rho_b`$ from the mass balance below. Like every scheme of this family (wet-node
   schemes, section 5.3.4 of [11]) it puts the boundary on the node where the imposed values are taken: it solves a
   Couette flow exactly for every $`\tau`$, and a Poiseuille flow exactly only at $`\tau = 1`$ (below).
 - The density $`\rho_b`$ follows from the mass balance of the rebuilt links: their populations carry, in total, the
@@ -205,12 +205,12 @@ rest placed on the solid node.
   that leave towards the wall carry the mean of the quadratic term
   $`\rho\,\bigl(4.5\,(\mathbf c\cdot\mathbf u)^2 - 1.5\,u^2\bigr)`$ of the velocity fluctuations, about $`k_BT/2`$
   per node and step, which the rebuilt populations, at zero velocity, do not return. In a test at $`k_BT = 1/3000`$
-  the fluid lost 5 % of its mass in 1000 steps and 49 % in 10000 (`docs/validation.md`). The mass balance removes
+  the fluid lost 5% of its mass in 1000 steps and 49% in 10000 (`docs/validation.md`). The mass balance removes
   this.
 - The wall lies on the solid nodes: the populations that arrive at $`\mathbf x`$ are those of a node at rest on the
   solid node, while with bounce-back they are the populations of $`\mathbf x`$ itself, sent back, and the wall is
   halfway. In the channel of the solid plane $`j = 0`$ of a periodic lattice the walls are on $`j = 0`$ and
-  $`j = n_y`$, a full node further out than with bounce-back on each side. Starting from either of the two parabolas
+  $`j = n_y`$, half a node further out than with bounce-back on each side. Starting from either of the two parabolas
   (zero on the solid nodes or halfway), the fluid next to the wall moves to the profile of its scheme in about a
   thousand steps.
 - Each boundary node reads only its own populations and moments and the solid slots that it wrote itself
@@ -223,7 +223,7 @@ rest placed on the solid node.
   the reaction of a coupled particle whose nearest node is a boundary node acts on the fluid.
 - An alternative, tried and left out, is the local regularized boundary condition of Latt [20, 21] (section 5.2 of [20];
   "BC3" of Malaspinas [22]), which rebuilds all 19 populations of the boundary node with the velocity of the wall
-  imposed on the node. It put the wall on the boundary nodes, and next to it the fluctuations were 3 to 9 % below
+  imposed on the node. It put the wall on the boundary nodes, and next to it the fluctuations were 3 to 9% below
   equilibrium (momentum normal to the wall 0.910 on the first node): imposing $`\mathbf u = 0`$ on the node removes its
   momentum fluctuations in every step without returning them. The scheme above is used instead.
 
@@ -247,9 +247,9 @@ nodes. The validation tests check the profile to 1e-9.
   permutes the populations and keeps the Gaussian equilibrium state, so the fluctuations of all modes keep
   their equilibrium variance next to the walls. Regularized walls are in exact thermal equilibrium too, with
   the random part of their rebuilt populations of section 7 (version 0.5.0), for $`0.586 \le \tau \le 3.41`$; up to
-  version 0.4.0 the momentum along the wall of the boundary node was 3 to 4 % low and some stress and ghost modes
-  up to 9 % low ($`\tau = 0.8`$, `docs/validation.md`).
-- With Density faces (below) bounce-back walls let a spurious staggered mode survive, which the Density
+  version 0.4.0 the momentum along the wall of the boundary node was 3 to 4% low and some stress and ghost modes
+  up to 9% low ($`\tau = 0.8`$, `docs/validation.md`).
+- With `Density` faces (below) bounce-back walls let a spurious staggered mode survive, which the `Density`
   faces damp.
 
 **Force on the walls with regularized walls.** On each link from a boundary node $`\mathbf x`$ to a solid node the
@@ -300,7 +300,7 @@ densities.
   particles whose nearest node is $`\mathbf x`$, since the rebuilt populations are those of a node beyond the face,
   on which the particles do not act (their reaction acts on $`\mathbf x`$ through its own collision), and the Guo
   term of the rebuilt populations has the body force only. Up to version 0.3.0 the Reference platform included that
-  reaction, unlike the other platforms; the two agree since then (`test_coupling_agrees_with_reference`, case
+  reaction, unlike the other platforms; the two have agreed since then (`test_coupling_agrees_with_reference`, case
   `faces`).
 - On a `DensityVelocity` face (version 0.5.0) $`\rho_b`$ and $`\mathbf u_b`$ are both those of the face: the
   rebuilt populations are those of a `Velocity` face with the density of the face instead of the mass balance, or
@@ -322,16 +322,16 @@ densities.
   and bounce-back walls keep it. It is the lattice Boltzmann form of the pressure oscillations of collocated grids
   that staggered finite-difference grids avoid ([20], chapter 7). The `Density` faces damp it (below).
 - **Density faces as inlets.** A `Density` face through which the fluid enters is less robust than a `Velocity`
-  inlet: in a channel between bounce-back walls driven by two `Density` faces (a difference of density of 1 %,
+  inlet: in a channel between bounce-back walls driven by two `Density` faces (a difference of density of 1%,
   inflow velocity about 0.03 in lattice units) the flow is steady for $`\tau \ge 0.6`$ and unstable for
-  $`\tau \le 0.55`$ (also with a difference of 0.3 %), while a `Velocity` inlet with a `Density` outlet is stable
+  $`\tau \le 0.55`$ (also with a difference of 0.3%), while a `Velocity` inlet with a `Density` outlet is stable
   down to $`\tau = 0.52`$ with an inflow of 0.05. Without the time filter below the `Density` inlet was unstable
   already at $`\tau = 0.6`$. Prefer a `Velocity` inlet and a `Density` outlet at small $`\tau`$.
 - **Entrance and exit regions.** Next to the faces the flow enters and leaves: in a duct driven by two
   `Density` faces the density on the face nodes overshoots the densities of the faces (1.0104 for 1.01 and
   0.9996 for 1.0 in a duct of 16 nodes), and the gradient in the middle is that of a length of 14.6 nodes
   rather than of the 17 between the nodes beyond the faces. In the middle the flow is that of the
-  incompressible duct for that gradient (within 0.9 %).
+  incompressible duct for that gradient (within 0.9%).
 - Nodes on several open faces (edges and corners): the first face that sets the velocity (`Velocity` or
   `DensityVelocity`) in the order XMin, XMax, YMin, YMax, ZMin, ZMax gives the velocity, and the density too if it
   is a `DensityVelocity` face (otherwise the density comes from the mass balance); if all are `Density` faces, the
@@ -350,17 +350,17 @@ densities.
   `setFluidMomentumRemovalFrequency(0)` is required. The reaction of a coupled particle acts on the face nodes
   as on any fluid node. The particles themselves still live in OpenMM's periodic box: a particle that crosses
   an open face reappears on the opposite one, so keep them away from the open faces.
-- The body acceleration (`setBodyAcceleration()`) acts on the face nodes like on the others, and the velocity of a
+- The body acceleration (`setBodyAcceleration()`) acts on the face nodes as on the others, and the velocity of a
   face is the velocity of the fluid $`(\mathbf j + \mathbf F/2)/\rho`$.
 - The local regularized boundary condition of Latt [20] (all 19 populations of the face node rebuilt, with the
   velocity or the density imposed on the face node itself) was tried for the faces too, and left out with the one
   of the walls.
 - Validation (`docs/validation.md`): a Couette flow between a face at rest and a moving face is linear to
-  1e-14, with `Velocity` and with `DensityVelocity` faces; a uniform flow from a Velocity or DensityVelocity inlet
-  to a Density or DensityVelocity outlet is steady to rounding; a duct driven by a difference of density of 1 %
-  agrees in the middle with the incompressible solution within 0.9 %.
+  1e-14, with `Velocity` and with `DensityVelocity` faces; a uniform flow from a `Velocity` or `DensityVelocity` inlet
+  to a `Density` or `DensityVelocity` outlet is steady to rounding; a duct driven by a difference of density of 1%
+  agrees in the middle with the incompressible solution within 0.9%.
 
-**Time filter of the Density faces.** On a node of a `Density` face the velocity across the face, $`v_n`$, used for
+**Time filter of the `Density` faces.** On a node of a `Density` face the velocity across the face, $`v_n`$, used for
 the rebuilt populations is
 
 ```math
@@ -369,7 +369,7 @@ v_n = \tfrac12\,(v_{\mathrm{ZH}} + v_x),
 
 the mean of $`v_{\mathrm{ZH}}`$, the velocity that gives the node the density of the face from the populations that
 have arrived (the unknown ones replaced by the bounce-back of their opposite directions:
-$`\rho_{\mathrm{face}} = \rho_0 + 2\rho_{\mathrm{out}} + \rho_{\mathrm{face}}\, v_n`$, with $`v_n`$ the component of
+$`\rho_{\mathrm{face}} = \rho_0 + 2\rho_{\mathrm{out}} + \rho_{\mathrm{face}}\, v_{\mathrm{ZH}}`$, with $`v_{\mathrm{ZH}}`$ the component of
 the velocity that points into the box, $`\rho_0`$ the sum of the populations along the face and
 $`\rho_{\mathrm{out}}`$ that of those that leave through it; Zou and He [23], note 5.1 of Latt [20]), and of
 $`v_x`$, the velocity of the node at the start of the step, from its moments and the body force (above). $`v_x`$ is
@@ -473,7 +473,7 @@ without changing the fluid.
   velocities between the evaluations and the step (the reflection at the walls, `setVelocities()`) is
   taken into account. Extra evaluations therefore do not change the trajectory, which is identical with
   and without them.
-- The CUDA, OpenCL and HIP platforms repeat all the force evaluations of a step when the neighbor list of
+- The CUDA, OpenCL and HIP platforms repeat all the force evaluations of a step when the neighbour list of
   a nonbonded force with a cutoff has to grow (`ContextImpl::calcForcesAndEnergy()`, `finishComputation()`
   returns valid = false). This needs more than about 1250 atoms: OpenMM first allocates 20 tiles of 32 × 32
   atoms per block of 32 atoms, which covers every tile of a smaller System. The repeated
@@ -648,7 +648,7 @@ platform (`test_centered_drag_sees_all_forces`).
   point force buffers, which it adds to the fixed point one only after the post-computations: they are read too. On
   one device OpenMM's own forces do not write them during the evaluation (OpenMM 8.3 to 8.6), but forces of other
   plugins may.
-- When the neighbor list of a nonbonded force has overflowed, OpenMM has already marked the evaluation as
+- When the neighbour list of a nonbonded force has overflowed, OpenMM has already marked the evaluation as
   invalid when the post-computation runs, and will repeat it: the other forces are then incomplete, and the
   post-computation does nothing. The lattice step is done in the repeated evaluation, with the complete
   forces (`testCenteredRepeatedEvaluation`).
@@ -900,7 +900,7 @@ so it is rejected.
   precision; a checkpoint of version 1 (plugin version 0.1.0) is read as one of the explicit drag, those of
   versions 1 and 2 (plugin versions 0.1 and 0.2) as ones without fluid fluctuations, those of versions 1 to 3
   as ones with bounce-back walls and those of versions 1 to 4 as ones with periodic faces. The boundary nodes
-  have no state of their own beyond the populations (the time filter of the Density faces reads the velocity
+  have no state of their own beyond the populations (the time filter of the `Density` faces reads the velocity
   of the previous step from them), so the restart is exact with walls and open faces too
   (`testFluctuationsRestart`, `testFluidStateRestartWithBoundaries`).
 - **Fluid state.** `getFluidState()` returns the deviations $`\delta f_q`$ in this layout, in lattice units: a
@@ -932,7 +932,7 @@ range. The plugin checks both.
 - A warning is printed on stderr if $`\tau`$ is outside [0.505, 2], the range used by the reference implementation.
 - With coupled particles and the explicit drag, warnings for $`\tau > 1.7`$ (not with the three-point stencil) and
   $`\gamma\Delta t > 1`$ (section 2),
-  and, with fluid fluctuations and the EM scheme at $`T > 0`$, a warning that the particles will be too hot, with
+  and, with fluid fluctuations and the `EulerMaruyama` scheme at $`T > 0`$, a warning that the particles will be too hot, with
   the estimate $`\gamma\Delta t\, m/(2m_c)`$ for the heaviest one (section 7), times the self weight of the
   interpolation stencil averaged over a cell (section 9); with the centred drag, an error if
   `LBMForce` is not the last force or the System has virtual sites (section 2, Solution of the centred drag).
@@ -978,7 +978,7 @@ own, at the temperature of `setTemperature()`: particles and fluid share one hea
 coupling schemes; with `NVE` the particles have no random force and are thermalized only by the fluid. The
 default is off, and then nothing changes: the run is identical, bit for bit, to that of version 0.2.
 
-**Model: ghost-mode filtered fluctuating lattice Boltzmann (GMF-FLBM, reference 17).** The regularized
+**Model: ghost-mode filtered fluctuating lattice Boltzmann (GMF-FLBM [17]).** The regularized
 collision of section 1 is already its deterministic part: it rebuilds the non-equilibrium populations from
 the second moment alone, so the ghost moments (those above the stress) leave the collision at zero, as if they
 relaxed with rate 1, and they carry no deterministic memory. The fluctuating model adds to the post-collision
@@ -994,7 +994,7 @@ populations of each fluid node, before streaming, the random part
 
 with $`r_k`$ fifteen independent normal numbers $`N(0, 1)`$, $`\rho`$ the density of the node, $`\omega = 1/\tau`$
 and $`\mu = k_BT/c_s^2`$ in lattice units. The $`e_k`$ are the polynomials of the orthogonal D3Q19 basis of Lulli et
-al. (reference 18), orthogonal with the weights $`w_q`$,
+al. [18], orthogonal with the weights $`w_q`$,
 $`\sum_q w_q\, e_k(\mathbf c_q)\, e_l(\mathbf c_q) = b_k\,\delta_{kl}`$, with $`c_s^2 = 1/3`$:
 
 | $`k`$ | $`e_k(\mathbf c)`$ | $`b_k`$ |
@@ -1034,8 +1034,8 @@ The two tables give the same values on the 19 velocities (checked in exact ratio
 $`b_k`$ and the orthogonality). Up to $`k = 12`$ each polynomial is one component of a Hermite tensor; from
 $`k = 13`$ they are combinations orthogonalized on the lattice, because the Hermite polynomials of third and fourth
 order are not all orthogonal to each other on D3Q19, and $`H^{(3)}_{xyz} = c_x c_y c_z`$ vanishes on every D3Q19
-velocity. So the norms must be computed from the discrete scalar product: $`b_k = n!\,c_s^{2n}/\mu`$ (order
-$`n`$, multiplicity $`\mu`$ of the component) holds up to $`k = 12`$, not for the combinations ($`b_{13} = 1/18`$,
+velocity. So the norms must be computed from the discrete scalar product: $`b_k = n!\,c_s^{2n}/\kappa`$ (order
+$`n`$, multiplicity $`\kappa`$ of the component) holds up to $`k = 12`$, not for the combinations ($`b_{13} = 1/18`$,
 where one cubic component with multiplicity 3 would have $`2/27`$). All the third-order modes are ghost modes.
 
 Each moment $`m_k = \sum_q e_k(\mathbf c_q)\, f_q`$ receives $`\phi_k r_k`$. The polynomials are evaluated on the
@@ -1048,7 +1048,7 @@ $`\langle\delta m_k^2\rangle = \mu\rho\, b_k`$: density $`\mu\rho`$, momentum $`
 (equipartition for the mass $`\rho`$ of the node). A stress mode relaxes as
 $`m_k \to (1 - \omega)\, m_k + \phi_k r_k`$, whose stationary variance is $`\mu\rho\, b_k`$ only if
 $`\phi_k^2 = \mu\rho\, b_k\,[1 - (1 - \omega)^2] = \mu\rho\, b_k\,\omega\,(2 - \omega)`$; a ghost mode is replaced
-by $`\phi_k r_k`$, so $`\phi_k^2 = \mu\rho\, b_k`$ (Dünweg, Schiller and Ladd, reference 19). The density and the
+by $`\phi_k r_k`$, so $`\phi_k^2 = \mu\rho\, b_k`$ (Dünweg, Schiller and Ladd [19]). The density and the
 momentum ($`k = 0\dots 3`$) receive nothing: by orthogonality $`\sum_q \xi_q = 0`$ and
 $`\sum_q \mathbf c_q\,\xi_q = 0`$, so the noise conserves the mass and the momentum of every node exactly, and the
 removal of the fluid momentum and the Mach number check are unchanged. They fluctuate through the stress, which
@@ -1074,7 +1074,7 @@ generator. The buffer of the random numbers grows to 64 bytes per node (and 64 o
 the Context is created: OpenMM's checkpoints write the buffer as it is but read it back with the size it has in the
 Context that loads them, so a Context created for a restart must have the full size before the first step (with
 OpenMM 8.3.1, a buffer grown only in the first step made the restart differ from the uninterrupted run; with 8.6.1
-it did not). The boundary nodes of regularized walls and open faces (section 1) draw normal numbers more for the
+it did not). The boundary nodes of regularized walls and open faces (section 1) draw more normal numbers for the
 random part of their rebuilt populations: on the Reference platform after those of the collision, in the order of the
 boundary nodes, fifteen each, and nineteen for the nodes of regularized walls and `DensityVelocity` faces (below,
 Walls and faces with a fluctuating fluid); on the other platforms four float4 per boundary node, or five when the
@@ -1093,10 +1093,10 @@ $`\tau = 1/2`$, through the nonlinear terms of the equilibrium: the thermal velo
 Reynolds number $`u_{\mathrm{th}}\,\Delta x/\nu`$, with $`u_{\mathrm{th}} = \sqrt{3k_BT}`$ in lattice units. On a
 $`64^3`$ lattice over $`10^5`$ steps (CUDA, mixed precision; the same in double precision and on the Reference
 platform) the Mach number exceeds the limit within a few thousand steps for $`\tau \le 0.501`$ at $`k_BT = 1/3000`$
-(the value of reference 17), $`\tau \le 0.5005`$ at $`k_BT = 10^{-4}`$ and $`\tau = 0.5001`$ at
+(the value of [17]), $`\tau \le 0.5005`$ at $`k_BT = 10^{-4}`$ and $`\tau = 0.5001`$ at
 $`k_BT = 1.3\cdot 10^{-5}`$ (water at $`\Delta x`$ = 0.5 nm and $`\Delta t`$ = 0.01 ps); above these values it is
 stable. The limit is a grid Reynolds number between about 50 and 100. The same initial thermal state without noise
-is unstable only at $`\tau`$ = 0.5001 and 0.5002 ($`k_BT = 1/3000`$), because its velocities decay. Reference 17
+is unstable only at $`\tau`$ = 0.5001 and 0.5002 ($`k_BT = 1/3000`$), because its velocities decay. Ref. [17]
 uses the D3Q27 lattice, which stays stable down to $`\tau = 0.5001`$ at $`k_BT = 1/3000`$; on D3Q19 the regularized
 collision has less margin. Close to the limit the fluctuations are also too large at long wavelengths
 (`docs/validation.md`, Fluctuating fluid). Molecular simulations of water have $`\tau \ge 0.52`$ and
@@ -1172,7 +1172,7 @@ drags, $`D = k_BT\,(1/\zeta + y_{\mathrm{centred}})`$ within 2%: the thermal flo
 self-mobility of the centred drag. With `setFluidFluctuations(true)` the centred drag is therefore the scheme to
 use, with the temperature of the half steps (`LBMTemperatureReporter`); the explicit drag is accurate only when
 $`\gamma\Delta t\, m/(2m_c)`$ is small. When a Context is created with fluid fluctuations, the explicit drag,
-coupled particles, the EM scheme, $`T > 0`$ and a friction that is not zero, a warning on stderr gives that bound
+coupled particles, the `EulerMaruyama` scheme, $`T > 0`$ and a friction that is not zero, a warning on stderr gives that bound
 for the heaviest coupled particle.
 
 **Walls.** The halfway bounce-back (section 1), done by the fluid nodes next to the walls, is a permutation of
@@ -1183,7 +1183,7 @@ and adds none of its own: in the language of kinetic theory its thermal accommod
 thermal energy with the fluid, and since the permutation keeps the equilibrium distribution of the populations, the
 fluctuations next to it are those of the bulk at every distance (`docs/validation.md`, Walls and open faces,
 Fluctuations next to the walls). A wall that forgot what arrives and emitted new fluctuations at a temperature of
-its own ($`\alpha = 1`$, as the diffuse re-emission of Maxwell, or a partial accommodation $`0 < \alpha < 1`$) would
+its own ($`\alpha = 1`$, like the diffuse re-emission of Maxwell, or a partial accommodation $`0 < \alpha < 1`$) would
 give the same equilibrium with the single temperature of the force. It would differ only in the correlations of the
 populations over the step from the fluid node to the wall and back, since the ghost modes relax with rate 1 in every
 collision, and it would matter only for walls at a temperature different from that of the fluid, which the force
@@ -1262,8 +1262,8 @@ Context is created: `DensityVelocity` faces, at equilibrium, and `Velocity` face
   gives a different run; a run restarted from the checkpoints is identical to the uninterrupted one; with the
   `NVE` scheme a fluctuating fluid sets particles at rest in motion.
 - Validation on an NVIDIA A100 (`docs/validation.md`, Fluctuating fluid and Stochastic tests): equilibrium spectra
-  of all 19 moments on $`64^3`$ nodes for $`\tau`$ from 0.505 to 100, with the protocol of reference 17 (for
-  $`\tau \ge 0.55`$ the ER per node within 0.5% of 1, and $`\mathrm{ER}(\lvert\mathbf k\rvert)`$ within 1.6% from
+  of all 19 moments on $`64^3`$ nodes for $`\tau`$ from 0.505 to 100, with the protocol of [17] (for
+  $`\tau \ge 0.55`$ the equilibration ratio ER (measured over expected variance) per node within 0.5% of 1, and $`\mathrm{ER}(\lvert\mathbf k\rvert)`$ within 1.6% from
   the fourth shell on); decay of the thermal shear and sound modes as in the deterministic model; stability near
   $`\tau = 1/2`$ (above); coupled particles with both drags (above).
 
@@ -1298,7 +1298,7 @@ only with the CMake option `OPENMM_LBM_MPI`; without it, or with one domain, not
   the fluid. Populations that leave through an open face are not exchanged either: the face node of the other
   side rebuilds them.
 - The sums of the removal of the fluid momentum and of the force on the walls are added on each rank and then in
-  rank order (`MPI_Allgather`), the Mach number is the largest over the ranks (`MPI_Allreduce`): the result is the
+  rank order (`MPI_Allgather`); the Mach number is the largest over the ranks (`MPI_Allreduce`): the result is the
   same on every rank and in every run with the same decomposition. `getWallForce()` and `getFluidMachNumber()`
   are therefore collective: every rank must call them.
 - Each rank draws its own random numbers (fluctuating fluid, rebuilt boundary nodes) from the generator of the
@@ -1501,7 +1501,7 @@ selected with `setInterpolationStencil()` (`internal/LBMStencils.h`, the same on
 
 | Stencil | Nodes | $`\phi(r)`$, with $`s = \lvert r\rvert`$, and 0 elsewhere | Kernel |
 |---|---|---|---|
-| `Trilinear` | $`2^3`$ | $`1 - s`$ for $`s < 1`$ | cloud in cell [27], used in [5] |
+| `Trilinear` | $`2^3`$ | $`1 - s`$ for $`s < 1`$ | cloud-in-cell [27], used in [5] |
 | `ThreePoint` | $`3^3`$ | $`\bigl(1 + \sqrt{1 - 3s^2}\bigr)/3`$ for $`s \le 1/2`$, $`\bigl(5 - 3s - \sqrt{1 - 3(1 - s)^2}\bigr)/6`$ for $`1/2 < s < 3/2`$ | Roma, Peskin and Berger [28, 30] |
 | `Keys` | $`4^3`$ | $`1 - 5s^2/2 + 3s^3/2`$ for $`s \le 1`$, $`2 - 4s + 5s^2/2 - s^3/2`$ for $`1 < s < 2`$ | cubic convolution with $`a = -1/2`$ [29] |
 
@@ -1646,7 +1646,7 @@ position and $`\tau`$ (Reference platform, a particle held almost at its place b
   remove it.
 - For two particles the same calculation (lattice of $`32^3`$ nodes, approximately corrected for the periodic
   images) gives at
-  six nodes of distance the same mutual mobility for every stencil and the nearest node within 5%, and within 5% of
+  a distance of six nodes the same mutual mobility for every stencil and the nearest node within 5%, and within 5% of
   the Oseen tensor for $`\tau \le 1.1`$; the stencils change the near field, where the nearest node gives a mobility
   that jumps from cell to cell.
 
@@ -1658,9 +1658,9 @@ wrapped), and a particle in the cell between node $`n - 1`$ and the end of the b
 belongs to node $`n - 1`$, also as the owner with the domain decomposition (the nearest node, which does not change,
 still gives node 0 for $`X/\Delta x \ge n - 1/2`$). A node that appears in several slots of a stencil along an axis,
 the last node near an open face or any node of a periodic axis shorter than the stencil, receives the sum of their
-weights in its first slot, and the other slots weight zero (`LBMStencils::axisWeights()`). The weights still sum to
+weights in its first slot, and the other slots have weight zero (`LBMStencils::axisWeights()`). The weights still sum to
 one and interpolation and spreading still use the same weights, so momentum is conserved and the
-fluctuation-dissipation argument below holds, with the weights of the distinct nodes; in particular the self weight
+fluctuation-dissipation argument above holds, with the weights of the distinct nodes; in particular the self weight
 $`\sum_j \xi_j^2`$ in the diagonal of the centred drag is that of the distinct nodes (summed slot by slot, the
 diagonal of a repeated node would miss the cross terms of its slots, which would change the preconditioner of the
 conjugate gradients but not the solution). What is lost near a face is the first moment: a linear field is no longer interpolated

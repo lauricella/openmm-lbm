@@ -43,7 +43,7 @@ system.addParticle(100.0)
 force = LBMForce()
 force.setGridSize(8, 8, 8)
 force.setFluidDensity(602.214*unit.dalton/unit.nanometer**3)          # water
-force.setKinematicViscosity(1.0035*unit.nanometer**2/unit.picosecond)  # water at 20 C
+force.setKinematicViscosity(1.0035*unit.nanometer**2/unit.picosecond)  # water at 20 °C
 force.setBodyAcceleration(mm.Vec3(0.05, 0, 0)*unit.nanometer/unit.picosecond**2)
 force.setFluidMomentumRemovalFrequency(0)  # keep the momentum given by the acceleration
 system.addForce(force)
@@ -83,7 +83,7 @@ lattice spacing $`\Delta x = L_x/n_x`$ must equal $`L_y/n_y`$ and $`L_z/n_z`$. H
 $`\Delta x = 4\ \mathrm{nm}/8 = 0.5\ \mathrm{nm}`$.
 
 **The fluid has a density and a kinematic viscosity.** The defaults are those of water:
-602.214 Da/nm³ (1 g/cm³) and 1.0035 nm²/ps (1.0035e-6 m²/s, water at 20 C).
+602.214 Da/nm³ (1 g/cm³) and 1.0035 nm²/ps (1.0035e-6 m²/s, water at 20 °C).
 
 **The integrator sets the lattice time step.** `LBMForce` requires a `VerletIntegrator`; any other integrator is
 rejected when the Context is created. The step size of the integrator is the lattice time step $`\Delta t`$, and it

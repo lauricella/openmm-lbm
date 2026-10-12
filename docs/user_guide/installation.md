@@ -54,7 +54,7 @@ interactive session ([section 10](#10-on-a-computing-cluster)).
 - `uname -m` prints `x86_64` on most computers.
 - If `nvidia-smi` prints `command not found`, there is no NVIDIA GPU (or no driver): you will use
   the `Reference` platform, and you can skip everything about CUDA below.
-- If it prints a table, look at its first line: it shows the driver version and `CUDA Version: X.Y`,
+- If it prints a table, look at its header: it shows the driver version and `CUDA Version: X.Y`,
   the newest CUDA version that your driver supports. Write it down: you need it in step 4. For
   example, on a node with an older driver:
 
@@ -264,8 +264,8 @@ python -m pytest
 
 The last line counts the tests, for example `77 passed, 33 skipped` on a computer without a GPU (the
 numbers depend on the platforms and packages available). "Skipped" tests are those of
-platforms that are not available on your computer: that is normal. "Failed" is not: see the next
-section.
+platforms that are not available on your computer: that is normal. "Failed" is not: see
+[section 11](#11-when-something-goes-wrong).
 
 ## 9. A first run
 
@@ -379,7 +379,7 @@ The steps are the same, with a few differences.
 | errors that mention NumPy and a folder `~/.local` | Python mixes in packages installed outside conda | `conda env config vars set PYTHONNOUSERSITE=1` and reactivate the environment |
 | CUDA: `Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)` | the driver supports an older CUDA than the OpenMM build | update the NVIDIA driver; on a cluster with data-centre GPUs use `cuda-compat` ([section 10](#10-on-a-computing-cluster)) |
 | `Segmentation fault` with the OpenCL platform on an NVIDIA GPU | `cuda-compat` in `LD_LIBRARY_PATH`, or the `pocl` package exposing a second OpenCL device | remove `cuda-compat` from `LD_LIBRARY_PATH` for OpenCL runs; set `export OCL_ICD_VENDORS=/etc/OpenCL/vendors` (in the job script or the session on the compute node, before Python) to use only NVIDIA's driver |
-| `cmake` warning `The linker flags (from LDFLAGS) contain ..., which holds another OpenMM library` | the active conda environment has another OpenMM than `OPENMM_DIR` | activate the environment of `OPENMM_DIR`, or configure in a new build folder without these flags ([section 12](#which-openmm-is-used)) |
+| `cmake` warning `The linker flags (from LDFLAGS) contain ..., which holds another OpenMM library` | the active conda environment has a different OpenMM from the one in `OPENMM_DIR` | activate the environment of `OPENMM_DIR`, or configure in a new build folder without these flags ([section 12](#which-openmm-is-used)) |
 | `make: *** No rule to make target 'PythonInstall'` | the Python module is not built: `cmake` printed why (`... the Python wrapper of openmm-lbm is not built.`) | install what is missing ([section 12](#what-is-built)) and run `cmake` again in a new build folder |
 | `ctest` runs fewer tests than expected (5 instead of 8 on a computer with an NVIDIA GPU) | a platform was not built: `cmake` printed why | install what is missing ([section 12](#what-is-built)), or ignore it if that platform is not needed |
 | a test marked `Failed` | a real problem | run that test alone with `ctest -R <name> --output-on-failure` and send the output to the developers |

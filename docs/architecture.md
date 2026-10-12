@@ -65,12 +65,12 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    the next step, computed on the current fluid without its reaction, as OpenMM does for every force. The random
    numbers of a step are drawn once, by the first evaluation that needs them, and reused by the step. Before the first
    step of the Context the coupling forces are zero. A repeated evaluation of a step (OpenMM repeats all the
-   evaluations of a step when it enlarges the neighbor list of a nonbonded force) is recognized because the step count
+   evaluations of a step when it enlarges the neighbour list of a nonbonded force) is recognized because the step count
    of the Context has not been incremented yet, and it adds the forces of the step again. `beginStep()` also reverses
    the velocity of a coupled particle whose nearest node is solid and that moves into the wall
    ($`\mathbf v\cdot\mathbf n > 0`$). Every platform does all of this. With the domain decomposition `beginStep()` also
    compares the copies of the particles over the ranks when due (the first lattice step, then with the period of the
-   Mach number check), the lattice step collides the frame of the block, starts the exchange of its populations,
+   Mach number check), and the lattice step collides the frame of the block, starts the exchange of its populations,
    collides the interior and then waits for the exchange. The coupling forces are downloaded after the coupling and
    summed over the ranks (`MPI_Allreduce`) and uploaded: with the nearest node in a lattice step once the collision of
    the interior is queued, so that the device collides while they travel (`startParticleForceSum()`,
@@ -131,8 +131,8 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    position of the node in the arrays of the block; a particle whose nearest node belongs to another rank gets no
    coupling force and the key $`(N_{\mathrm{stored}} + \mathrm{node})\,N_p + i`$, past every node of the block
    (`otherRankKey()`); `reflectParticles` reads the mask of the whole lattice, and only rank 0 counts the momentum given
-   to the walls (the other ranks compile with `SKIP_REFLECTION_MOMENTUM`); without it they reduce to the node index and
-   to the periodic wrap of the lattice. With solid nodes, the kernels are compiled with `HAS_SOLID_NODES` and read a
+   to the walls (the other ranks compile with `SKIP_REFLECTION_MOMENTUM`). Without the decomposition `STORAGE_INDEX` and
+   `neighborIndex()` reduce to the node index and to the periodic wrap of the lattice. With solid nodes, the kernels are compiled with `HAS_SOLID_NODES` and read a
    mask of the fluid nodes; without them they do not read it. With boundary nodes they are also compiled with
    `HAS_BOUNDARY_NODES` (the boundary nodes are fluid nodes in the mask); `OPEN_X`, `OPEN_Y` and `OPEN_Z` mark the axes
    with open faces, across which the bounce-back returns nothing; with the `BounceBack` wall scheme they are compiled
@@ -153,12 +153,13 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    returns true; with the centred drag the coupling kernels are then compiled with `HAS_FLOAT_FORCE_BUFFERS`, and
    `prepareCenteredDrag` gets the buffers and their number on first use, since OpenMM creates them after the forces are
    initialized. The post-computation does nothing if `LBMForce`'s force group is not requested, or if OpenMM has marked
-   the evaluation as invalid (neighbor list overflow): the repeated evaluation then does the step.
+   the evaluation as invalid (neighbour list overflow): the repeated evaluation then does the step.
 
    **With an interpolation stencil** (`setInterpolationStencil()`, `docs/theory.md` section 9) the coupling uses other kernels of `lbmCoupling.cc`, all under `#ifdef STENCIL_WIDTH` (2, 3 or 4 nodes
    per axis, `STENCIL_SIZE` per stencil), so that the programs of the nearest node do not change. Each slot $`e`$ of a
    stencil, $`e = i\cdot\mathrm{STENCIL\_SIZE} + \mathrm{slot}`$ for particle $`i`$, has its weight; each particle has
-   the first nodes of its stencil along the three axes and one sort key, $`\pi(b)\cdot N_p + i`$. Here $`b`$ is the
+   the first nodes of its stencil along the three axes and, with the three-point and `Keys` stencils, one sort key,
+   $`\pi(b)\cdot N_p + i`$ (the trilinear stencil keeps one key per slot, see below). Here $`b`$ is the
    brick of the lattice that holds the first node of its stencil: bricks of $`4^3`$ nodes (`BRICK_SIZE`), the last brick
    of an axis taking the rest of it, so that every brick has at least as many nodes as a stencil along an axis. $`\pi`$
    is the permutation of `particleKey()` (`BRICK_SCRAMBLE`), so that OpenMM's sort with buckets of equal width gets
@@ -168,10 +169,11 @@ the corresponding OpenMM platform is available. For example, `libOpenMMLBMCUDA` 
    particle order, counts the slots that fall on each node and writes the segments, and one thread per segment then
    writes its entries. Along
    the axes with open faces (`OPEN_X`, `OPEN_Y`, `OPEN_Z`) the nodes of a stencil stop at the last nodes, and a node in
-   several slots of an axis keeps the sum of their weights in its first slot (`stencilAxis()`, as
+   several slots of an axis keeps the sum of their weights in its first slot (`stencilAxis()`, as in
    `internal/LBMStencils.h` on the Reference platform); such slots are entries of the same node. Until version 0.5.1
-   every slot had a sort key, and the segments were those of the sorted keys; the sums, and so the results, are the
-   same bit for bit.
+   every slot of these stencils had a sort key, and the segments were those of the sorted keys; the sums run in the
+   same order, and the results are the same bit for bit, except rounding differences of the three-point stencil with
+   the explicit drag on CUDA (CHANGELOG, 0.6.0).
 
    | Kernel | Threads | Reads | Writes |
    |---|---|---|---|

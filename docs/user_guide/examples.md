@@ -114,7 +114,7 @@ Notes:
   $`H = (n_y - 2)\Delta x = 10`$ nm wide.
 - **Agreement with the parabola.** The profile has exactly the curvature of the parabola. The residual difference of
   0.17% is a uniform slip of the bounce-back scheme, which depends on $`\tau`$ and vanishes at $`\tau = 7/8`$. With
-  this slip included, the profile matches the exact solution of the scheme to 1e-9 (see
+  this slip included, the profile matches the exact solution of the scheme to 3e-9 (see
   [theory.md](../theory.md#solid-nodes-and-walls)).
 - **Periodic directions.** The walls are planes of solid nodes. In x and z the lattice stays periodic,
   so the channel is infinite along the flow.
@@ -196,7 +196,7 @@ Notes:
 - **Momentum.** The momentum lost by the particle is in the fluid: $`p_{\mathrm{total}}/p_0 = 1`$ to the rounding of
   the sum over the populations. The removal of the fluid momentum must be off, otherwise the plugin would subtract
   it.
-- **Long times.** Particle and fluid end up moving together at $`P/(m + M_{\mathrm{fluid}})`$,
+- **Long times.** Particle and fluid end up moving together at $`p_0/(m + M_{\mathrm{fluid}})`$,
   $`3\times10^{-4}\,v_0`$ here.
 
 ## Temperature of coupled particles
@@ -304,8 +304,9 @@ Notes:
   report step; the reporter above computes it one step earlier, from steps $`n - 1`$ and $`n`$.
 - **Centred drag.** With `setDragScheme(LBMForce.Centered)` the half-step temperature is the right one; for a
   particle in a fluid at rest the full-step one is lower by $`1/(1 + \gamma\Delta t/2)`$, and the particles are
-  colder than with the explicit drag ([choosing the drag](lattice.md#choosing-the-drag)). On this system the means
-  over the same reports are 292 K and 293 K, equal within the statistical error.
+  colder than with the explicit drag ([choosing the drag](lattice.md#choosing-the-drag)). On this system the centred
+  drag gives 275 K at half steps and 263 K at full steps over the same reports, against 293 K at full steps with the
+  explicit drag.
 - **Using the reporter.** It works with any Simulation: pass the indices of the coupled particles. It
   stops one step before each report to record the velocities.
 
@@ -589,7 +590,7 @@ Notes:
   `LBMForce`, which is the thermostat of the coupled particles.
 - **Initial velocities.** They come from NumPy here because `setVelocitiesToTemperature()` gives
   different velocities in different OpenMM versions; either is fine in practice.
-- **Temperature.** The temperature column of `StateDataReporter` is that of the full step, as in the
+- **Temperature.** With `temperature=True`, the temperature column of `StateDataReporter` is that of the full step, as in the
   [temperature example](#temperature-of-coupled-particles).
 - **Reporters.** A reporter can read the fluid with any of the methods of `LBMForce` that take the
   Context; none of them advances the fluid.
@@ -667,7 +668,7 @@ Notes:
 
 A fluid flows from high to low pressure. In the lattice Boltzmann model the pressure is $`p = c_s^2\rho`$, with
 $`c_s^2 = \Delta x^2/(3\Delta t^2)`$, so two open faces at different densities drive a flow. Here the duct runs
-along $`y`$ and has square cross-section: no-slip walls perpendicular to $`x`$ and to $`z`$ (solid nodes), and the
+along $`y`$ and has a square cross-section: no-slip walls perpendicular to $`x`$ and to $`z`$ (solid nodes), and the
 faces $`y = 0`$ and $`y = (n_y - 1)\Delta x`$ at the densities $`1.01\rho_0`$ and $`\rho_0`$. The script compares
 the velocity in the middle of the duct with the analytical solution for an incompressible fluid in a rectangular
 duct, with the pressure gradient measured in the middle.
@@ -755,7 +756,7 @@ Notes:
   that of a duct somewhat shorter than the 8.5 nm between those points.
 - **Accuracy.** The deviation is the error of the bounce-back walls on a duct only 7 nodes wide (it falls as
   $`1/H^2`$ with the width $`H`$ in nodes, and it vanishes at $`\tau = 7/8`$; here $`\tau = 1.1`$), plus the
-  compressibility of the fluid: the density changes by 1 % along the duct, and so does the velocity, since
+  compressibility of the fluid: the density changes by 1% along the duct, and so does the velocity, since
   $`\rho u`$ is the same in every cross-section. Keep the density difference small (a few percent at most).
 - **Walls with Density faces.** With bounce-back walls the lattice keeps a spurious "staggered" motion, an
   oscillation from one node to the next and from one step to the next, which the `Density` faces damp

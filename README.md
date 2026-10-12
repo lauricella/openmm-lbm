@@ -31,7 +31,7 @@ does it step by step from nothing, for users new to conda and OpenMM. In short, 
 conda-forge:
 
 ```bash
-conda create -n lbm -c conda-forge openmm=8.6 cmake make swig numpy cxx-compiler pytest
+conda create -n lbm -c conda-forge openmm=8.6.1 cmake make swig=4.5.1 numpy cxx-compiler pytest
 conda activate lbm
 # optional: the CUDA platform needs nvcc (for example conda-forge cuda-nvcc, matching the
 # CUDA version of OpenMM); the OpenCL platform needs ocl-icd and the OpenCL headers.
@@ -46,7 +46,7 @@ CMake builds every GPU platform (`LBM_BUILD_CUDA_LIB`, `LBM_BUILD_OPENCL_LIB`, `
 the OpenMM in `OPENMM_DIR` has (its header and its library) and the system can compile, and the Python wrapper
 (`LBM_BUILD_PYTHON_WRAPPERS`) if SWIG and Python with the OpenMM module, NumPy, setuptools and pip are
 installed. It says why it leaves a part out, and ends with the list of what it builds, for example
-`-- openmm-lbm 0.6.0: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`. An option set to `ON`
+`-- openmm-lbm 0.6.1: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`. An option set to `ON`
 for a part that cannot be built stops `cmake` with an error. CMake also prints the version of OpenMM it found
 and stops with an error if it is older than 8.3 (it warns if it is newer than 8.6, the newest tested version).
 All the checks, options and messages are in

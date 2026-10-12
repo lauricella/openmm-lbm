@@ -54,7 +54,7 @@ exchange from GPU to GPU within a node the library must be able to read the memo
 as Open MPI with UCX built with CUDA); without it the populations go through the host, which works but is slower.
 
 ```bash
-cmake .. -DOPENMM_DIR=$CONDA_PREFIX -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX -DOPENMM_LBM_MPI=ON
+cmake ~/src/openmm-lbm -DOPENMM_DIR=$CONDA_PREFIX -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX -DOPENMM_LBM_MPI=ON
 ```
 
 The summary at the end of `cmake` ends with `MPI: yes (MPI 3.1)` or similar. After `make install` and

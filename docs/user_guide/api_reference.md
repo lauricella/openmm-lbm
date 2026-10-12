@@ -126,7 +126,7 @@ Some calls are collective with more than one domain and must be made by every ra
 creation of the Context; with coupled particles every evaluation of the forces, `getState(getForces=True)` and also
 `getState(getEnergy=True)`, since the `VerletIntegrator` needs the forces for the kinetic energy; `getWallForce()`,
 `getFluidMachNumber()`, `setFluidState()`, the calls with `gather`, `saveCheckpointFile()`, `loadCheckpointFile()`
-and `writeFluidFile()`. So must the reporters that make these calls: OpenMM's `StateDataReporter` with energies or
+and `writeFluidFile()`. Every rank must also have the reporters that make these calls: OpenMM's `StateDataReporter` with energies or
 the temperature and `CheckpointReporter`, `LBMVTKReporter`, `LBMCheckpointReporter`, and `LBMTemperatureReporter`
 with the explicit drag (it asks the State for the forces). Give such a reporter a file only on rank 0 (for example
 `os.devnull` on the other ranks); [running on several GPUs](parallel.md) has an example.
@@ -167,7 +167,7 @@ print(LBMForce.getMPIRank(), LBMForce.getMPISize())   # 0 1 in one process
 With more than one domain, whether the copies of the particles are compared over
 the MPI ranks; `True` by default. A check computes a hash of the positions and velocities of all the particles, about
 7 ns per particle (0.7 ms for $`10^5`$ particles on one core), and compares it over the ranks with one small
-`MPI_Allreduce`; at the default period of 100 steps it costs well under 1 % of a step. Turn it off only to time runs
+`MPI_Allreduce`; at the default period of 100 steps it costs well under 1% of a step. Turn it off only to time runs
 whose copies are known to be identical, since copies that differ give wrong results without any other sign. With one
 domain it does nothing. It is serialized with the force.
 
@@ -193,7 +193,7 @@ returned by `getFluidFields()`. A density in g/cm³ must be multiplied by `unit.
 
 ### `setKinematicViscosity(viscosity)`, `getKinematicViscosity()`
 
-Kinematic viscosity $`\nu`$ of the fluid, in nm²/ps. The default 1.0035 nm²/ps is water at 20 C. It must be
+Kinematic viscosity $`\nu`$ of the fluid, in nm²/ps. The default 1.0035 nm²/ps is water at 20 °C. It must be
 positive. With the lattice spacing $`\Delta x`$ and the time step $`\Delta t`$ it fixes the relaxation time
 $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$; a warning is printed if $`\tau`$ is outside [0.505, 2] (see
 [relaxation time](lattice.md#relaxation-time)).
@@ -233,7 +233,7 @@ Use 0 for flows driven by `setBodyAcceleration()`.
 ### `setMachCheckFrequency(frequency)`, `getMachCheckFrequency()`
 
 Every `frequency` lattice steps the plugin computes the largest Mach number of the fluid,
-$`\mathrm{Ma} = \max\lvert\mathbf u\rvert/c_s`$ over the fluid nodes. If it exceeds the limit, the step raises an
+$`\mathrm{Ma} = \max\lvert\mathbf j/\rho\rvert/c_s`$ over the fluid nodes. If it exceeds the limit, the step raises an
 exception that reports the value and the step. The default is 100; 0 disables the check. The value must not be
 negative. Steps are numbered by the step count of the Context, as for the momentum removal.
 
@@ -264,6 +264,15 @@ neighbours. See [`setWallScheme()`](#setwallschemescheme-getwallscheme) for the 
 
 `getSolidNodes()` returns the list of indices.
 
+```python
+import numpy as np
+
+nx, ny, nz = force.getGridSize()
+k, j, i = np.meshgrid(np.arange(nz), np.arange(ny), np.arange(nx), indexing='ij')
+index = i + nx*(j + ny*k)
+force.setSolidNodes(index[(j == 0) | (j == ny - 1)])     # walls on the planes j = 0 and j = ny-1
+```
+
 ### `setWallScheme(scheme)`, `getWallScheme()`
 
 How the fluid meets the solid nodes: `LBMForce.BounceBack` (the default) or `LBMForce.Regularized`. Both
@@ -275,7 +284,7 @@ give no-slip walls, accurate to second order in the lattice spacing, and conserv
 | where the wall is | halfway between the solid node and the first fluid node | on the solid nodes |
 | channel between the solid planes $`j = 0`$ and $`j = n_y - 1`$ | walls at $`y = \Delta x/2`$ and $`(n_y - 3/2)\Delta x`$ | walls at $`y = 0`$ and $`(n_y - 1)\Delta x`$ |
 | exact Poiseuille flow at | $`\tau = 7/8`$ | $`\tau = 1`$ |
-| with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | exact thermal equilibrium next to the wall for $`0.586 \le \tau \le 3.41`$ (version 0.5.0; before, the momentum along the wall of the first node was 3 to 5 % low) |
+| with fluid fluctuations | exact thermal equilibrium next to the wall: the wall returns the fluctuations it receives (thermal accommodation zero, [theory.md](../theory.md#7-fluctuating-fluid-implemented-on-all-platforms), Walls) | exact thermal equilibrium next to the wall for $`0.586 \le \tau \le 3.41`$ (version 0.5.0; before, the momentum along the wall of the first node was 3 to 5% low) |
 | platforms | all | all |
 
 If you do not know which one to use, keep the default. The `Regularized` scheme is the thread-safe boundary
@@ -309,20 +318,11 @@ is conserved. In a steady flow driven by a body acceleration $`\mathbf g`$ it eq
 the fluid. It is the total over all solid nodes: the force on each wall separately is not available. It does not
 advance the fluid.
 
-```python
-import numpy as np
-
-nx, ny, nz = force.getGridSize()
-k, j, i = np.meshgrid(np.arange(nz), np.arange(ny), np.arange(nx), indexing='ij')
-index = i + nx*(j + ny*k)
-force.setSolidNodes(index[(j == 0) | (j == ny - 1)])     # walls on the planes j = 0 and j = ny-1
-```
-
 ## Open faces
 
 By default the fluid fills a periodic box: what leaves through a face comes back through the opposite face.
 An **open face** instead holds the fluid on it at a velocity or at a density that you choose. With open faces
-you can build inlets and outlets, moving plates, flows driven by a pressure difference, on every platform.
+you can build inlets and outlets, moving plates and flows driven by a pressure difference, on every platform.
 The theory is in
 [theory.md](../theory.md#open-faces), and two complete scripts are in the examples:
 [Couette flow](examples.md#couette-flow-between-two-open-faces) and
@@ -381,7 +381,7 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
   $`k = n_z - 1`$, are ordinary fluid nodes. The populations that come from beyond the face are those of fluid with
   the velocity of a `Velocity` face, the density of a `Density` face, or both for a `DensityVelocity` face, placed
   one node outside the box: the velocity or the density of the face holds there, at $`k = -1`$ and $`k = n_z`$. A Couette flow between two
-  `Velocity` faces is $`u(z) = U(z + 1)/(n_z + 1)`$. The grid needs at least 3 nodes along an open axis.
+  `Velocity` faces is $`u(k) = U(k + 1)/(n_z + 1)`$. The grid needs at least 3 nodes along an open axis.
 - **Edges and corners.** A node on several open faces takes the velocity of its first face that sets one
   (`Velocity` or `DensityVelocity`) in the order XMin, XMax, YMin, YMax, ZMin, ZMax, and also its density if it is
   a `DensityVelocity` face; if all its faces are `Density` faces, it takes the density of the first one and the
@@ -393,7 +393,7 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
   opposite side. Keep coupled particles away from the open faces. With an interpolation stencil the stencil stops at
   the last nodes ([interpolation.md](interpolation.md#4-what-the-plugin-does-with-the-weights)).
 - **Fluctuating fluid.** `Density` faces cannot be used with fluid fluctuations: since version 0.5.0 they are an
-  error when the Context is created. Next to them the fluid is not at equilibrium: its velocity across the face
+  error when the Context is created. Next to them the fluid was not at equilibrium: its velocity across the face
   fluctuated more than at the set temperature (+55% on the plane of the face, +6% on the next plane, about +1% four
   planes in), the mean velocity of the planes next to the face was far above equilibrium, and coupled particles were
   up to 8% hotter within four nodes ([validation](../validation.md), Interpolation stencils, Temperature near open
@@ -407,7 +407,7 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
 - **Keep the flow slow and the density differences small**: a few percent at most, so that the fluid stays
   nearly incompressible and the Mach number low.
 - **Inlets.** Prefer a `Velocity` inlet with a `Density` outlet. A `Density` face through which the fluid enters can
-  become unstable at small $`\tau`$: with a difference of density of 1 % it was stable at $`\tau \ge 0.6`$ and
+  become unstable at small $`\tau`$: with a difference of density of 1% it was stable at $`\tau \ge 0.6`$ and
   unstable at $`\tau \le 0.55`$ ([theory](../theory.md#open-faces)).
 - **Next to the faces** the flow enters and leaves, so in a duct driven by two `Density` faces the pressure
   gradient in the middle is somewhat larger than the difference of the faces divided by the length.
@@ -476,7 +476,8 @@ Scheme of the coupling:
 - `LBMForce.EulerMaruyama`, the default: friction and random force at the temperature of
   `setTemperature()`;
 - `LBMForce.NVE`: friction only, without random force whatever the temperature, so particles and fluid
-  exchange momentum through the drag with no thermostat.
+  exchange momentum through the drag with no thermostat other than the fluctuations of the fluid, when they are
+  switched on.
 
 The total momentum is conserved with both schemes; the kinetic energy is dissipated by the drag and by
 the viscosity of the fluid ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)).
@@ -653,7 +654,7 @@ simulations with different seeds have different random forces. On the Reference 
 force has its own generator, so the same seed reproduces a simulation. On the CUDA, OpenCL and HIP
 platforms it uses OpenMM's generator, which has a single seed per Context: a component that uses it with a
 different seed, such as an `AndersenThermostat`, makes OpenMM stop with an error, and the two seeds must be
-set equal. On a restart the seed does not matter: OpenMM checkpoints contain OpenMM's generator, and
+set equal. On a restart with the same decomposition the seed does not matter: OpenMM checkpoints contain OpenMM's generator, and
 `createCheckpoint()` the generator of the Reference platform ([checkpoints](#checkpoints)).
 
 ## Reading and writing the fluid of a Context
@@ -912,7 +913,7 @@ type, velocity and density of each face, coupled particles, domain decomposition
 particles, exchange of the halo of the density and of the velocity, force group and name. The fluid
 of a Context is not part of it. The XML has version 9. Older XML still loads: versions 1 to 3 (written by version
 0.1.0) with the explicit drag, versions 1 to 4 (versions 0.1 and 0.2 of the plugin) without fluid fluctuations,
-versions 1 to 5 with the `BounceBack` wall scheme, versions 1 to 6 with periodic faces and versions 1 to 7 (version
+versions 1 to 5 with the `BounceBack` wall scheme, versions 1 to 6 with periodic faces, versions 1 to 7 (version
 0.3 of the plugin) with one domain and the check of the copies on, and versions 1 to 8 (version 0.4) with the
 nearest node. Older versions of the plugin cannot
 read newer XML. Import `openmmlbm` before

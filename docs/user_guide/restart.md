@@ -6,8 +6,8 @@ save the complete state of a run with a lattice Boltzmann fluid and continue it 
 never stopped.
 
 If you are in a hurry: add an `openmmlbm.LBMCheckpointReporter` to your `Simulation`
-([first section](#the-simplest-way-a-reporter)), and to continue build the same `Simulation` again and call
-`openmmlbm.loadCheckpoint()`. The script of the [third section](#one-script-for-the-first-run-and-every-restart)
+([second section](#the-simplest-way-a-reporter)), and to continue build the same `Simulation` again and call
+`openmmlbm.loadCheckpoint()`. The script of the [fifth section](#one-script-for-the-first-run-and-every-restart)
 does both and can be copied as it is.
 
 ## What has to be saved
@@ -273,7 +273,7 @@ dependency: `sbatch --dependency=afterany:<number of the previous job> job.sh`.
   different computer or platform, see [moving a run to another platform](#moving-a-run-to-another-platform).
 - **Build the same System.** Same particles in the same order, same forces, same `LBMForce` parameters and
   grid. `loadCheckpoint()` refuses a checkpoint written for a different grid, number of coupled particles,
-  drag scheme, wall scheme, types of the faces (`setFaceBoundary()`) or switch of the fluid fluctuations, but
+  drag scheme, interpolation stencil, wall scheme, types of the faces (`setFaceBoundary()`) or switch of the fluid fluctuations, but
   it cannot check everything else: a different friction or viscosity, or different velocities and densities
   of the faces, would simply be used from then on. With the same decomposition the random number seed of the
   script does not matter on a restart: the state of the generator comes from the checkpoint (with another

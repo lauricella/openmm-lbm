@@ -167,8 +167,8 @@ Mean temperature over 18000 steps: full step 297.6 K, half step 299.1 K
 Free bead in a fluid at rest, explicit drag: full step 300.0 K, half step T/(1 - gamma dt/2) = 301.5 K
 ```
 
-(on an A100 GPU; another platform gives slightly different numbers, because the random numbers are
-rounded differently.) The full-step temperature is about 1% below 300 K: the fluid itself has no
+(on an A100 GPU; another platform gives slightly different numbers, because the random numbers come
+from another generator (Reference) or are rounded differently.) The full-step temperature is about 1% below 300 K: the fluid itself has no
 thermal fluctuations in this example (they are off by default, `setFluidFluctuations()`), and it takes part
 of the momentum of the beads.
 
@@ -236,6 +236,10 @@ Exercises:
 1. Open `sod1_1ns_temperature.txt`: is the protein at 298 K?
 2. Run the same with `--no-lb` (no fluid, Langevin integrator) and compare the diffusion coefficients.
    A run of 1 ns gives only a rough value; the SOD1 presets run for 50 to 200 ns.
+3. Run it again with a fluctuating fluid, which needs the centred drag: add `--drag Centered --fluid-fluctuations
+   --output sod1_1ns_fluct`. With the centred drag the temperature of the beads is the half-step column of
+   `sod1_1ns_fluct_temperature.txt`; the temperature of the fluid is in `sod1_1ns_fluct_fluid_temperature.txt`. Both
+   should be close to 298 K, and the end of the run prints their means.
 
 ## 8. Lesson 6: a long run in several pieces
 
