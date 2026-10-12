@@ -34,7 +34,7 @@ T, production.  Files written, with the prefix given by --output (default <prese
                              full-step one is right for the explicit drag, the half-step one for the
                              centred drag)
   <prefix>_fluid_temperature.txt
-                             with --fluid-fluctuations, the temperature of the fluid at every report, from the
+                             with --fluid-fluctuations, the temperature of the fluid every 10 reports, from the
                              velocities of the nodes (FluidTemperatureReporter below): it shows that the fluid is
                              at the temperature of the run
   <prefix>_com.txt           time (ps) and centre of mass x y z (nm), not wrapped into the box: the
@@ -102,7 +102,7 @@ def parse_arguments():
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA, OpenCL and HIP (default mixed)')
     parser.add_argument('--output', help='prefix of the output files (default <preset>_lb_on, <preset>_lb_on_centered '
-                        'with --drag Centered, or <preset>_lb_off)')
+                        'with --drag Centered, then _fluct with --fluid-fluctuations, or <preset>_lb_off)')
     parser.add_argument('--checkpoint', type=int,
                         help='steps between checkpoints in <prefix>.chk (default 100 reports, 0 = none)')
     parser.add_argument('--vtk', type=int, default=0,
@@ -200,7 +200,8 @@ class FluidTemperatureReporter:
     At equilibrium the fluid of each cell, of mass m = rho dx^3, moves with the velocity u of its node, and every
     component of its momentum carries kB T/2 (docs/theory.md, section 7): T = <m (u - <u>)^2>/kB, averaged over the
     fluid nodes and the three components, with the mean velocity of the fluid subtracted.  Without fluid
-    fluctuations the fluid is not thermal and this temperature stays near zero.
+    fluctuations the fluid is not thermal and this temperature stays near zero.  Reading the fields of the whole lattice
+    takes time (0.7 s for 60^3 nodes), so the script reports it every 10 reports.
     """
 
     def __init__(self, file, reportInterval, force, spacing, append=False):
@@ -322,7 +323,7 @@ def main():
                                                             append))
     simulation.reporters.append(CentreOfMassReporter(args.output + '_com.txt', args.report, masses, append))
     if not args.no_lb and args.fluid_fluctuations:
-        simulation.reporters.append(FluidTemperatureReporter(args.output + '_fluid_temperature.txt', args.report,
+        simulation.reporters.append(FluidTemperatureReporter(args.output + '_fluid_temperature.txt', 10*args.report,
                                                              force, args.spacing, append))
     if args.checkpoint > 0:
         if args.no_lb:
@@ -345,7 +346,8 @@ def main():
               'half' if args.drag == 'Centered' else 'full'))
     if not args.no_lb and args.fluid_fluctuations:
         fluid = np.loadtxt(args.output + '_fluid_temperature.txt', ndmin=2)
-        print('Mean temperature of the fluid over %d reports: %.1f K' % (len(fluid), fluid[:, 1].mean()))
+        if len(fluid) > 0:
+            print('Mean temperature of the fluid over %d values: %.1f K' % (len(fluid), fluid[:, 1].mean()))
     print('Files written with prefix', args.output)
 
 

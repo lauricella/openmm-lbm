@@ -103,12 +103,13 @@ def test_cocomo2_parameters():
 def test_diffusion_restart(tmp_path, fluctuations):
     """A run split in two with --checkpoint and --restart gives the same output as an uninterrupted run."""
     script = os.path.join(EXAMPLES, 'cocomo', 'diffusion.py')
-    common = [sys.executable, script, '--platform', 'Reference', '--preset', 'smoke', '--box', '10', '--report', '10',
-              '--checkpoint', '20']
+    common = [sys.executable, script, '--platform', 'Reference', '--preset', 'smoke', '--box', '10', '--checkpoint', '20']
     suffixes = ['_com.txt', '_temperature.txt']
-    if fluctuations:
-        common += ['--drag', 'Centered', '--fluid-fluctuations']
+    if fluctuations:                                     # the fluid temperature every 10 reports: at 20, 40, 60
+        common += ['--report', '2', '--drag', 'Centered', '--fluid-fluctuations']
         suffixes.append('_fluid_temperature.txt')
+    else:
+        common += ['--report', '10']
     def run(arguments):
         result = subprocess.run(common + arguments, cwd=tmp_path, capture_output=True, text=True, timeout=600)
         assert result.returncode == 0, result.stdout + result.stderr
@@ -121,12 +122,12 @@ def test_diffusion_restart(tmp_path, fluctuations):
 
 
 def test_diffusion_fluid_temperature(tmp_path):
-    """With --fluid-fluctuations the fluid is at the temperature of the run: the mean of 10 reports on 20^3 nodes
+    """With --fluid-fluctuations the fluid is at the temperature of the run: the mean of 10 values on 20^3 nodes
     is within 2% of 298 K (the statistical error is about 1 K)."""
     import numpy as np
     script = os.path.join(EXAMPLES, 'cocomo', 'diffusion.py')
     command = [sys.executable, script, '--platform', 'Reference', '--preset', 'smoke', '--box', '10', '--steps', '200',
-               '--report', '20', '--drag', 'Centered', '--fluid-fluctuations', '--output', 'fluct']
+               '--report', '2', '--drag', 'Centered', '--fluid-fluctuations', '--output', 'fluct']
     result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
     fluid = np.loadtxt(tmp_path/'fluct_fluid_temperature.txt', ndmin=2)
