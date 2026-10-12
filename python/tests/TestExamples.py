@@ -99,17 +99,36 @@ def test_cocomo2_parameters():
     assert abs(sum(system.getParticleMass(i)._value for i in range(110)) - sum(cocomo2.RESIDUES[n][0] for n in names)) < 1e-9
 
 
-def test_diffusion_restart(tmp_path):
+@pytest.mark.parametrize('fluctuations', [False, True], ids=['still fluid', 'fluctuating fluid'])
+def test_diffusion_restart(tmp_path, fluctuations):
     """A run split in two with --checkpoint and --restart gives the same output as an uninterrupted run."""
     script = os.path.join(EXAMPLES, 'cocomo', 'diffusion.py')
     common = [sys.executable, script, '--platform', 'Reference', '--preset', 'smoke', '--box', '10', '--report', '10',
               '--checkpoint', '20']
+    suffixes = ['_com.txt', '_temperature.txt']
+    if fluctuations:
+        common += ['--drag', 'Centered', '--fluid-fluctuations']
+        suffixes.append('_fluid_temperature.txt')
     def run(arguments):
         result = subprocess.run(common + arguments, cwd=tmp_path, capture_output=True, text=True, timeout=600)
         assert result.returncode == 0, result.stdout + result.stderr
     run(['--steps', '60', '--output', 'whole'])
     run(['--steps', '30', '--output', 'split'])          # stops 10 steps after the checkpoint at step 20
     run(['--steps', '60', '--output', 'split', '--restart'])
-    for suffix in ('_com.txt', '_temperature.txt'):
+    for suffix in suffixes:
         assert (tmp_path/('whole' + suffix)).read_text() == (tmp_path/('split' + suffix)).read_text()
     assert (tmp_path/'split_20.dcd').exists()
+
+
+def test_diffusion_fluid_temperature(tmp_path):
+    """With --fluid-fluctuations the fluid is at the temperature of the run: the mean of 10 reports on 20^3 nodes
+    is within 2% of 298 K (the statistical error is about 1 K)."""
+    import numpy as np
+    script = os.path.join(EXAMPLES, 'cocomo', 'diffusion.py')
+    command = [sys.executable, script, '--platform', 'Reference', '--preset', 'smoke', '--box', '10', '--steps', '200',
+               '--report', '20', '--drag', 'Centered', '--fluid-fluctuations', '--output', 'fluct']
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    fluid = np.loadtxt(tmp_path/'fluct_fluid_temperature.txt', ndmin=2)
+    assert len(fluid) == 10
+    assert abs(fluid[:, 1].mean() - 298) < 0.02*298

@@ -33,6 +33,10 @@ T, production.  Files written, with the prefix given by --output (default <prese
   <prefix>_temperature.txt   temperature of the beads from full-step and from half-step velocities (the
                              full-step one is right for the explicit drag, the half-step one for the
                              centred drag)
+  <prefix>_fluid_temperature.txt
+                             with --fluid-fluctuations, the temperature of the fluid at every report, from the
+                             velocities of the nodes (FluidTemperatureReporter below): it shows that the fluid is
+                             at the temperature of the run
   <prefix>_com.txt           time (ps) and centre of mass x y z (nm), not wrapped into the box: the
                              input of msd.py, which computes the diffusion coefficient
   <prefix>_final.xml, <prefix>_fluid.npz   final state of the particles and of the fluid
@@ -190,6 +194,38 @@ class CentreOfMassReporter:
               flush=True)
 
 
+class FluidTemperatureReporter:
+    """Temperature of a fluctuating fluid, from the velocities of its nodes (LBMForce.getFluidFields).
+
+    At equilibrium the fluid of each cell, of mass m = rho dx^3, moves with the velocity u of its node, and every
+    component of its momentum carries kB T/2 (docs/theory.md, section 7): T = <m (u - <u>)^2>/kB, averaged over the
+    fluid nodes and the three components, with the mean velocity of the fluid subtracted.  Without fluid
+    fluctuations the fluid is not thermal and this temperature stays near zero.
+    """
+
+    def __init__(self, file, reportInterval, force, spacing, append=False):
+        self._out = open(file, 'a' if append else 'w')
+        self._reportInterval = reportInterval
+        self._force = force
+        self._cellVolume = spacing**3
+        if not append:
+            print('# step, temperature of the fluid (K)', file=self._out)
+
+    def describeNextReport(self, simulation):
+        steps = self._reportInterval - simulation.currentStep%self._reportInterval
+        return {'steps': steps, 'periodic': None, 'include': []}
+
+    def report(self, simulation, state):
+        density, velocity = self._force.getFluidFields(simulation.context)
+        rho = np.array(density.value_in_unit(unit.dalton/unit.nanometer**3))
+        u = np.array(velocity.value_in_unit(unit.nanometer/unit.picosecond))
+        fluid = rho > 0                   # solid nodes have zero density
+        du = u[fluid] - u[fluid].mean(axis=0)
+        kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole/unit.kelvin)
+        temperature = (rho[fluid, None]*self._cellVolume*du**2).mean()/kB     # Da nm^2/ps^2 = kJ/mol
+        print('%d %.2f' % (simulation.currentStep, temperature), file=self._out, flush=True)
+
+
 def truncate(file, lastValue, column=0):
     """Remove from a text file of reports the lines whose first column is beyond lastValue."""
     if not os.path.exists(file):
@@ -275,6 +311,7 @@ def main():
         time = simulation.context.getTime().value_in_unit(unit.picosecond)
         truncate(args.output + '.log', step)
         truncate(args.output + '_temperature.txt', step)
+        truncate(args.output + '_fluid_temperature.txt', step)
         truncate(args.output + '_com.txt', time)
         dcdFile = '%s_%d.dcd' % (args.output, step)
     simulation.reporters.append(app.DCDReporter(dcdFile, args.report))
@@ -284,6 +321,9 @@ def main():
     simulation.reporters.append(FullStepTemperatureReporter(args.output + '_temperature.txt', args.report, masses,
                                                             append))
     simulation.reporters.append(CentreOfMassReporter(args.output + '_com.txt', args.report, masses, append))
+    if not args.no_lb and args.fluid_fluctuations:
+        simulation.reporters.append(FluidTemperatureReporter(args.output + '_fluid_temperature.txt', args.report,
+                                                             force, args.spacing, append))
     if args.checkpoint > 0:
         if args.no_lb:
             simulation.reporters.append(app.CheckpointReporter(checkpointFile, args.checkpoint))
@@ -303,6 +343,9 @@ def main():
     if not args.no_lb:
         print('With the %s drag the %s-step temperature is the right one' % (args.drag.lower(),
               'half' if args.drag == 'Centered' else 'full'))
+    if not args.no_lb and args.fluid_fluctuations:
+        fluid = np.loadtxt(args.output + '_fluid_temperature.txt', ndmin=2)
+        print('Mean temperature of the fluid over %d reports: %.1f K' % (len(fluid), fluid[:, 1].mean()))
     print('Files written with prefix', args.output)
 
 
