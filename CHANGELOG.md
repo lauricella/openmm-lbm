@@ -3,7 +3,10 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.6.3 (2026-10-13)
+
+The viscosity of the SOD1 examples described as what it is, five times that of water, and the thermalization and the
+diffusion validated at the viscosity of water. The C++ code of the plugin is that of version 0.6.0.
 
 ### Documentation
 - The viscosity of the SOD1 presets of `examples/cocomo/diffusion.py`, 5.0175 nm²/ps, is described as what it is,

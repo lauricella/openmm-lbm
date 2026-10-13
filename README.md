@@ -3,21 +3,22 @@ OpenMM plugin coupling molecular dynamics to a thread-safe lattice Boltzmann flu
 forcing) for coarse-grained simulations with hydrodynamics. Particles exchange friction and thermal noise with the
 fluid. Native OpenMM plugin with Reference, CUDA, OpenCL and HIP platforms.
 
-**Version 0.6.2 (2026-10-12).** The fluid, solid walls (bounce-back or regularized), open faces with an imposed
+**Version 0.6.3 (2026-10-13).** The fluid, solid walls (bounce-back or regularized), open faces with an imposed
 velocity, density or both, thermal fluctuations of the fluid and the particle-fluid coupling, with the explicit or the
 centred drag, at the nearest node or through an interpolation stencil, run on all platforms (Reference, CUDA, OpenCL,
 HIP), with one domain or with the lattice divided over MPI ranks, one GPU per rank ([running on several
 GPUs](docs/user_guide/parallel.md)); the platforms agree with each other, and the explicit drag at the nearest node
-with the reference CUDA library of the DragOpenMM project. Version 0.6.2 adds the temperature of the fluctuating fluid
-to the diffusion example, takes the temperature of the beads in the examples from the reporter of the plugin and
-proofreads the documentation, and version 0.6.1 corrects the description of the Guo forcing in `docs/theory.md`, both
-with the C++ code of version 0.6.0. Version 0.6.0 makes the coupling through the three-point and Keys stencils faster
-on the GPUs (up to 41% shorter steps with many particles), and version 0.5.1 the domain decomposition with coupled
-particles, both with the same results (in one case on CUDA up to rounding, see the CHANGELOG). New in version 0.5.0:
-the interpolation stencils of the coupling, trilinear, three-point and Keys (`setInterpolationStencil()`, [step by
-step](docs/user_guide/interpolation.md)); open faces with both the density and the velocity imposed
-(`DensityVelocity`); with a fluctuating fluid, regularized walls and `DensityVelocity` faces exactly at equilibrium,
-while `Density` faces are refused; see the [CHANGELOG](CHANGELOG.md), the [user
+with the reference CUDA library of the DragOpenMM project. Version 0.6.3 describes the viscosity of the SOD1 examples
+(five times that of water) and validates them at the viscosity of water, version 0.6.2 adds the temperature of the
+fluctuating fluid to the diffusion example, takes the temperature of the beads in the examples from the reporter of
+the plugin and proofreads the documentation, and version 0.6.1 corrects the description of the Guo forcing in
+`docs/theory.md`, all with the C++ code of version 0.6.0. Version 0.6.0 makes the coupling through the three-point
+and Keys stencils faster on the GPUs (up to 41% shorter steps with many particles), and version 0.5.1 the domain
+decomposition with coupled particles, both with the same results (in one case on CUDA up to rounding, see the
+CHANGELOG). New in version 0.5.0: the interpolation stencils of the coupling, trilinear, three-point and Keys
+(`setInterpolationStencil()`, [step by step](docs/user_guide/interpolation.md)); open faces with both the density
+and the velocity imposed (`DensityVelocity`); with a fluctuating fluid, regularized walls and `DensityVelocity` faces
+exactly at equilibrium, while `Density` faces are refused; see the [CHANGELOG](CHANGELOG.md), the [user
 guide](docs/user_guide/README.md#what-works-in-this-version) and `docs/validation.md`.
 
 ## Requirements
@@ -48,7 +49,7 @@ CMake builds every GPU platform (`LBM_BUILD_CUDA_LIB`, `LBM_BUILD_OPENCL_LIB`, `
 the OpenMM in `OPENMM_DIR` has (its header and its library) and the system can compile, and the Python wrapper
 (`LBM_BUILD_PYTHON_WRAPPERS`) if SWIG and Python with the OpenMM module, NumPy, setuptools and pip are
 installed. It says why it leaves a part out, and ends with the list of what it builds, for example
-`-- openmm-lbm 0.6.2: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`. An option set to `ON`
+`-- openmm-lbm 0.6.3: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`. An option set to `ON`
 for a part that cannot be built stops `cmake` with an error. CMake also prints the version of OpenMM it found
 and stops with an error if it is older than 8.3 (it warns if it is newer than 8.6, the newest tested version).
 All the checks, options and messages are in
