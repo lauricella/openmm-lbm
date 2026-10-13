@@ -3,6 +3,24 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Documentation
+- The viscosity of the SOD1 presets of `examples/cocomo/diffusion.py`, 5.0175 nm²/ps, is described as what it is,
+  five times the viscosity of water at 20 °C, chosen to reproduce the runs of the DragOpenMM project: `docs/theory.md`
+  called it a water-like fluid and the tutorial a protein in water. The script, `examples/README.md` and the API
+  reference say how to pass the viscosity of water (0.893 nm²/ps at 25 °C, 0.696 nm²/ps at 37 °C), in physical units,
+  which the plugin converts to the relaxation time.
+- `docs/validation.md`, Temperature of SOD1 with a fluctuating fluid: the same runs at the viscosity of water, at 298 K
+  and 310 K. The centred drag with the fluctuating fluid gives the set temperature to the beads and to the fluid, as
+  at five times the viscosity, and the protein diffuses 3 to 6 times faster (11 to 22 Å²/ns). Without fluid
+  fluctuations the beads are colder (19.5% below the set temperature with the centred drag, 6.5 to 7% with the
+  explicit drag) and the diffusion coefficient is about twice $`k_BT/(M\gamma)`$.
+- `docs/validation.md`, Stochastic tests T2, T6, T7: T2 and T6 with the fluctuating fluid at the viscosity of water
+  ($`\tau`$ = 0.56 to 0.74), with the self-mobilities of both drags at $`\tau = 0.62`$. The centred drag gives the set
+  temperature and the Einstein relation with its own self-mobility within 2.7%, as at $`\tau = 1.10`$; the
+  hydrodynamic contribution to the diffusion coefficient is 2.9 times its value at five times the viscosity.
+
 ## 0.6.2 (2026-10-12)
 
 The temperature of the fluctuating fluid in the diffusion example, its validation on SOD1 at 298 K and 310 K, the

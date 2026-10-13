@@ -207,7 +207,9 @@ Exercises:
 ## 7. Lesson 5: a protein in the fluid (`cocomo/diffusion.py`)
 
 The last example is a real application: the protein SOD1, with one bead per amino acid (the COCOMO2
-model), diffusing in water. Besides `LBMForce`, the System now contains the forces of the protein model:
+model), diffusing in a fluid with the density of water. The presets reproduce the runs of the DragOpenMM project,
+whose fluid is five times as viscous as water at 20 °C ($`\nu = 5.0175`$ nm²/ps); `--viscosity 0.893` gives water at
+25 °C. Besides `LBMForce`, the System now contains the forces of the protein model:
 springs along the chain, angles, an elastic network that keeps the protein folded, and nonbonded
 interactions between the beads. Read `examples/cocomo/cocomo2.py` to see how a model is built from
 standard OpenMM forces (`HarmonicBondForce`, `HarmonicAngleForce`, `CustomNonbondedForce`).

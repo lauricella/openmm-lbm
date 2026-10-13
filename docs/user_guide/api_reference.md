@@ -31,7 +31,7 @@ return `Quantity` objects where the quantity has units.
 |---|---|---|---|
 | `setGridSize(nx, ny, nz)` | nodes | none, required | no |
 | `setFluidDensity(density)` | Da/nm³ | 602.214 (water) | no |
-| `setKinematicViscosity(viscosity)` | nm²/ps | 1.0035 (water) | no |
+| `setKinematicViscosity(viscosity)` | nm²/ps | 1.0035 (water at 20 °C) | no |
 | `setBodyAcceleration(acceleration)` | nm/ps² | (0, 0, 0) | yes |
 | `setInitialFluidVelocity(velocity)` | nm/ps | (0, 0, 0) | used only at creation |
 | `setFluidMomentumRemovalFrequency(frequency)` | steps | 1 | yes |
@@ -193,7 +193,8 @@ returned by `getFluidFields()`. A density in g/cm³ must be multiplied by `unit.
 
 ### `setKinematicViscosity(viscosity)`, `getKinematicViscosity()`
 
-Kinematic viscosity $`\nu`$ of the fluid, in nm²/ps. The default 1.0035 nm²/ps is water at 20 °C. It must be
+Kinematic viscosity $`\nu`$ of the fluid, in nm²/ps: the physical value, which the plugin converts to lattice units.
+The default 1.0035 nm²/ps is water at 20 °C; water is 0.893 nm²/ps at 25 °C and 0.696 nm²/ps at 37 °C. It must be
 positive. With the lattice spacing $`\Delta x`$ and the time step $`\Delta t`$ it fixes the relaxation time
 $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$; a warning is printed if $`\tau`$ is outside [0.505, 2] (see
 [relaxation time](lattice.md#relaxation-time)).

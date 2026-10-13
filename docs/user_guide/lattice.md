@@ -14,7 +14,7 @@ examples. The rest of this page explains each of them.
 | Lattice spacing $`\Delta x`$ | 0.5 nm | about the size of a residue bead. Each bead is coupled to its nearest node |
 | Time step $`\Delta t`$ | 0.01 ps (10 fs) | the time step of the coarse-grained model; it is also the lattice time step |
 | Box | a whole number of $`\Delta x`$ along each side; at least 3 times the size of the protein and 2 times the cutoff of the nonbonded forces | the box is periodic: a protein feels its images through the fluid |
-| Kinematic viscosity | 1.0035 nm²/ps (water, $`\tau = 0.62`$ with the values above), or larger | $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$ must stay between about 0.505 and 2, and below about 1.7 with coupled particles and the explicit drag ([relaxation time](#relaxation-time)) |
+| Kinematic viscosity | that of water at the temperature of the run: 1.0035 nm²/ps at 20 °C ($`\tau = 0.62`$ with the values above), 0.893 nm²/ps at 25 °C, 0.696 nm²/ps at 37 °C; or larger | $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$ must stay between about 0.505 and 2, and below about 1.7 with coupled particles and the explicit drag ([relaxation time](#relaxation-time)) |
 | Friction | 5 to 10 /ps, so that $`\text{friction}\times\Delta t = 0.05`$ to 0.1 | with the explicit drag (the default) $`\text{friction}\times\Delta t`$ must be below 1 (warning) and below 2 (stability), at 0.1 or below it is accurate; for larger values use the centred drag ([choosing the drag](#choosing-the-drag)) |
 | Temperature | that of the simulation, e.g. 298 K | the fluid is the thermostat of the coupled particles: no other thermostat |
 | Integrator | `VerletIntegrator(dt)` | friction and random force are part of `LBMForce` |
@@ -144,7 +144,7 @@ to the stability limit, and at large $`\tau`$ the error on the position of walls
 Since $`\Delta t`$ is the time step of the molecular dynamics, the viscosity and the resolution are coupled:
 $`\tau - \tfrac12 = 3\nu\Delta t/\Delta x^2`$. With $`\Delta t = 0.01`$ ps:
 
-| $`\Delta x`$ | water, $`\nu = 1.0035`$ nm²/ps | 5 × water |
+| $`\Delta x`$ | water at 20 °C, $`\nu = 1.0035`$ nm²/ps | 5 × water |
 |---|---|---|
 | 0.5 nm | $`\tau = 0.62`$ | $`\tau = 1.10`$ |
 | 0.25 nm | $`\tau = 0.98`$ | $`\tau = 2.91`$ |

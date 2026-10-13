@@ -818,7 +818,8 @@ F_{\mathrm{lattice}} = -\gamma_{\mathrm{lattice}}\, m_{\mathrm{lattice}}\,
 This is the physical force times $`\Delta t^2/(m_c\,\Delta x)`$, as it must be. Forces return to OpenMM multiplied
 by $`m_c\,\Delta x/\Delta t^2`$, in Da nm/ps² = kJ/mol/nm.
 
-**Example** (water-like fluid used for the SOD1 runs):
+**Example** (the fluid of the SOD1 runs of `examples/cocomo/diffusion.py`: the density of water and five times its
+viscosity at 20 °C):
 
 - $`\rho_0`$ = 602.2 Da/nm³, $`\nu`$ = 5.0175 nm²/ps, box 15 nm with 30 nodes, $`\Delta t`$ = 0.01 ps;
 - this gives $`\Delta x`$ = 0.5 nm, $`m_c`$ = 75.275 Da and $`\tau = 1.1021`$;
@@ -840,7 +841,7 @@ parameter, chosen to keep the Mach number small [7]. Here the fluid advances onc
 $`\Delta t`$ is the step size of OpenMM. Viscosity and resolution are therefore coupled:
 $`\tau - 1/2 = 3\nu\,\Delta t/\Delta x^2`$. With $`\Delta t`$ = 0.01 ps:
 
-| $`\Delta x`$ | water, $`\nu`$ = 1.0035 nm²/ps | 5 × water |
+| $`\Delta x`$ | water at 20 °C, $`\nu`$ = 1.0035 nm²/ps | 5 × water |
 |---|---|---|
 | 0.5 nm | $`\tau = 0.62`$ | $`\tau = 1.10`$ |
 | 0.25 nm | $`\tau = 0.98`$ | $`\tau = 2.91`$ |

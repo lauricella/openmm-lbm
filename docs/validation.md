@@ -1614,7 +1614,7 @@ were regenerated with the Euler-Maruyama scheme for this comparison ($`v_1/v_0 =
 
 The thermalization of a protein and of the fluid, with the parameters of the preset `sod1-g30`: SOD1 in COCOMO2
 (110 beads), box of 30 nm ($`60^3`$ nodes), friction 30/ps, $`\Delta t`$ = 10 fs, $`\nu = 5.0175`$ nm²/ps
-($`\tau = 1.10`$), removal of the fluid momentum at every step; reports every 1000 steps, CUDA in mixed precision,
+(five times the viscosity of water at 20 °C, $`\tau = 1.10`$), removal of the fluid momentum at every step; reports every 1000 steps, CUDA in mixed precision,
 OpenMM 8.6.1, version 0.6.1 of the plugin, one A100 per run, 20 ns per run. The rows with seeds 1 and 2 give the
 beads of these runs and the fluid of their reruns with the fluid temperature written at every report, stopped after
 16 ns; the run at 310 K, with the fluid temperature, stopped after 16.5 ns. Temperature of the beads: the one that the
@@ -1646,6 +1646,39 @@ Temperature of the fluid: the mean of `<prefix>_fluid_temperature.txt`
   tutorial) gives 297.8 ± 2.3 K for the beads and 298.1 K for the fluid.
 - Writing the fluid temperature does not change the run: the temperatures of the beads of the rerun with seed 1 are
   identical, report by report, to those of the run without it.
+
+**At the viscosity of water.** The same runs with the viscosity of water at the temperature of the run,
+`--viscosity 0.893` at 298 K (water at 25 °C, $`\tau = 0.61`$) and `--viscosity 0.696` at 310 K (water at 37 °C,
+$`\tau = 0.58`$), version 0.6.2 of the plugin, 20 ns per run: the temperature of the beads from
+`<prefix>_temperature.txt` (`openmmlbm.LBMTemperatureReporter`), the temperature of the fluid from
+`<prefix>_fluid_temperature.txt` (every 10 reports) or, without fluid fluctuations, from 10 VTK files. $`D`$ is the
+apparent diffusion coefficient of the centre of mass from the fit of `msd.py` (lag times from 0.2 to 1.8 ns); in
+brackets the value of the run with the same seed at five times the viscosity, above.
+
+| drag | fluid fluctuations | $`T`$ (K) | beads (K) | fluid (K) | $`D`$ (Å²/ns) |
+|---|---|---|---|---|---|
+| centred | yes, seed 1 | 298 | 298.8 ± 0.3 | 298.07 | 13.7 (2.8) |
+| centred | yes, seed 2 | 298 | 297.9 ± 0.4 | 298.04 | 11.4 (3.9) |
+| centred | yes, seed 1 | 310 | 310.7 ± 0.5 | 310.08 | 17.7 (2.8) |
+| centred | yes, seed 2 | 310 | 310.7 ± 0.4 | 310.05 | 22.3 |
+| centred | no | 298 | 240.0 ± 0.6 | 0.03 (VTK) | 1.4 (0.96) |
+| explicit | yes | 298 | 348.8 ± 0.4 | 298.10 | 17.5 (3.0) |
+| explicit | no | 298 | 278.7 ± 0.8 | 0.05 (VTK) | 1.7 (1.03) |
+| explicit | no | 310 | 288.7 ± 0.7 | 0.06 (VTK) | 1.5 (1.05) |
+
+- **Centred drag with the fluctuating fluid**: the beads are at the set temperature within 0.3% at 298 K and at
+  310 K, and the fluid within 0.1 K, as at five times the viscosity.
+- **Diffusion with the fluctuating fluid**: the protein diffuses 3 to 6 times faster than at five times the
+  viscosity, 11 to 22 Å²/ns against $`k_BT/(M\,\text{friction})`$ = 0.75 Å²/ns at 298 K: the hydrodynamic
+  contribution grows as the viscosity falls, though not as $`1/\nu`$ (section Stochastic tests T2, T6, T7, at the
+  viscosity of water). One run of 20 ns gives $`D`$ only within 20 to 30%: 11.4 and 13.7 Å²/ns with two seeds at
+  298 K, 17.7 and 22.3 Å²/ns at 310 K.
+- **Without fluid fluctuations** the beads are colder than at five times the viscosity: 19.5% below $`T`$ with the
+  centred drag and 6.5 to 7% with the explicit drag, against 16% and 0.7%. The diffusion coefficient, 1.4 to 1.7 Å²/ns, is
+  1.9 to 2.3 times $`k_BT/(M\,\text{friction})`$, against 1.3 to 1.4 times at five times the viscosity: for a
+  protein the viscosity changes the diffusion coefficient even without fluid fluctuations, while for free particles
+  it is $`k_BT/(m\gamma)`$ (T6, below).
+- **Explicit drag with the fluctuating fluid**: the beads are 17% too hot (20% at five times the viscosity).
 
 ## Many proteins: 64 copies of SOD1 (CUDA, NVIDIA A100)
 
@@ -1801,6 +1834,43 @@ $`L`$ = 16 nm):
 
 With the centred drag and the fluctuating fluid the fluctuation-dissipation theorem holds for the dynamics as
 well: the velocity autocorrelation equals the response to a kick.
+
+**With the fluctuating fluid at the viscosity of water** (version 0.6.2 of the plugin): the same cases, seeds and
+protocol with $`\nu = 1.0035`$ nm²/ps, water at 20 °C, instead of five times this value, so that $`\tau`$ = 0.56,
+0.62 and 0.74 at $`\Delta t`$ = 5, 10 and 20 fs. The self-mobilities at $`\tau = 0.62`$ come from the protocol of
+`docs/theory.md` (section 2, Self-mobility and relaxation time; Reference platform, $`m`$ = 1000 Da, $`\gamma`$ =
+5/ps): $`y\,\eta\,\Delta x`$ = 0.0609 (explicit) and 0.0809 (centred) at $`L`$ = 8 nm, the values of that section,
+and 0.0658 and 0.0858 at $`L`$ = 16 nm; the difference of the two drags is $`\Delta t/(2m_c)`$ within 0.3%.
+
+T2, mean temperatures in K, explicit at full steps and centred at half steps (statistical error about 0.5 K):
+
+| $`\Delta t`$ (ps) | $`\tau`$ | $`\gamma`$ (1/ps) | explicit | centred |
+|---|---|---|---|---|
+| 0.005 | 0.56 | 1 | 299.2 | 298.1 |
+| 0.005 | 0.56 | 5 | 304.6 | 299.9 |
+| 0.005 | 0.56 | 10 | 307.9 | 299.3 |
+| 0.01 | 0.62 | 1 | 301.9 | 299.8 |
+| 0.01 | 0.62 | 5 | 308.2 | 299.2 |
+| 0.01 | 0.62 | 10 | 316.4 | 299.5 |
+| 0.02 | 0.74 | 1 | 306.3 | 302.7 |
+| 0.02 | 0.74 | 5 | 319.2 | 300.6 |
+| 0.02 | 0.74 | 10 | 336.1 | 300.1 |
+
+T6, $`L`$ = 16 nm except the last row:
+
+| $`\gamma`$ (1/ps) | $`L`$ (nm) | $`D/(k_BT/m\gamma)`$, MSD, explicit / centred | $`D/(k_BT\,(1/\zeta + y_{\mathrm{centred}}))`$, explicit / centred | full-step $`T`$, explicit | half-step $`T`$, centred |
+|---|---|---|---|---|---|
+| 1 | 16 | 1.292 / 1.292 | 1.006 / 1.006 | 316.0 K | 299.2 K |
+| 5 | 16 | 2.366 / 2.355 | 0.978 / 0.973 | 361.2 K | 299.7 K |
+| 10 | 16 | 3.743 / 3.833 | 0.975 / 0.998 | 404.0 K | 300.2 K |
+| 5 | 8 | 2.334 / 2.296 | 0.998 / 0.982 | 360.9 K | 299.2 K |
+
+The centred drag gives the set temperature and the Einstein relation with its own self-mobility, within 2.7%, as at
+$`\tau = 1.10`$. The hydrodynamic contribution to the diffusion coefficient, $`k_BT\,y_{\mathrm{centred}}`$ = 7.1e-4
+nm²/ps at $`L`$ = 16 nm, is 2.9 times its value at five times the viscosity, not 5 times: $`y\,\eta\,\Delta x`$
+depends on $`\tau`$ (`docs/theory.md`, section 2). The full-step temperature of the explicit drag agrees with
+$`T\,(1 + \gamma\Delta t\,m/(2m_c(1 + \zeta y_{\mathrm{explicit}})))`$ within 0.3% in T2 at $`\Delta t`$ = 10 fs
+and in T6 at $`\gamma`$ = 1/ps, and is 3 to 4% above it at $`\gamma`$ = 5/ps and 11% at $`\gamma`$ = 10/ps.
 
 **SOD1 with the fluctuating fluid** (`examples/cocomo/diffusion.py --fluid-fluctuations`, presets `sod1`:
 friction 10/ps, box 15 nm, 200 ns, and `sod1-g30`: friction 30/ps, box 30 nm, 50 ns; one run each, seed 1, the

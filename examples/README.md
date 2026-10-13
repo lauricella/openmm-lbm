@@ -104,17 +104,19 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
                                                          # fluctuating fluid, 50 ns, about 20 minutes on an A100
 # with --drag Centered the prefix of the files is sod1_lb_on_centered
 # with a fluctuating fluid use the centred drag: --drag Centered --fluid-fluctuations (prefix sod1_lb_on_centered_fluct)
+# for water instead of five times its viscosity add --viscosity 0.893 (298 K) or --viscosity 0.696 --temperature 310
 # --vtk 10000 writes the fluid and the beads every 10000 steps for ParaView: open sod1_lb_on.pvd
 ```
 
 - `--preset sod1` reproduces the runs of the DragOpenMM project with the folded protein SOD1 (box 15 nm, friction
-  10/ps, 298 K, $`\Delta t`$ 10 fs, $`\nu = 5.0175`$ nm²/ps, removal of the fluid momentum at every step);
+  10/ps, 298 K, $`\Delta t`$ 10 fs, $`\nu = 5.0175`$ nm²/ps, five times the viscosity of water at 20 °C, removal of the
+  fluid momentum at every step);
   `--preset sod1-g30` a larger box (30 nm) with friction 30/ps for 50 ns.
 - `--preset rlp` is an intrinsically disordered protein of 166 residues, without elastic network (box 20 nm,
-  friction 100/ps, $`\Delta t`$ 2 fs, $`\nu = 1.0035`$ nm²/ps, 10 ns), from the thermal-diffusion example of the
-  DragOpenMM plugin. Its full-step temperature stays at about 260 K, 13% below 298 K: with this large friction the
-  fluid, which has no thermal fluctuations of its own without `--fluid-fluctuations`, takes a large part of the
-  momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin gives the same value.
+  friction 100/ps, $`\Delta t`$ 2 fs, $`\nu = 1.0035`$ nm²/ps, water at 20 °C, 10 ns), from the thermal-diffusion
+  example of the DragOpenMM plugin. Its full-step temperature stays at about 260 K, 13% below 298 K: with this large
+  friction the fluid, which has no thermal fluctuations of its own without `--fluid-fluctuations`, takes a large part
+  of the momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin gives the same value.
 - The script writes the trajectory (DCD), the energies (OpenMM's log), the temperature of the beads and the centre
   of mass of the protein, not wrapped into the box, which `msd.py` reads.
 - **Temperature.** `<prefix>_temperature.txt` (step, time in ps, temperature in K) is written by the reporter of the
@@ -127,6 +129,13 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
   fluctuating fluid keep the beads and the fluid at the set temperature, at 298 K and with `--temperature 310`;
   without fluctuations the fluid is cold and the beads are 16% below $`T`$ with the centred drag, 0.7% with the
   explicit one; the explicit drag with a fluctuating fluid makes them 20% too hot (numbers in
+  [validation.md](../docs/validation.md#temperature-of-sod1-with-a-fluctuating-fluid-examplescocomodiffusionpy-cuda-nvidia-a100)).
+- **Viscosity.** The presets `sod1` and `sod1-g30` use five times the viscosity of water, as the runs of the
+  DragOpenMM project. For a protein in water pass the viscosity of water at the temperature of the run, in nm²/ps:
+  `--viscosity 0.893` at 298 K, `--viscosity 0.696 --temperature 310` at 310 K; the plugin converts it to the
+  relaxation time. With the preset `sod1-g30`, the centred drag and the fluctuating fluid the temperatures are right
+  at this viscosity as well, and the protein diffuses 3 to 6 times faster: 11 to 22 Å²/ns instead of 3 to 4 Å²/ns
+  (runs of 20 ns, numbers in
   [validation.md](../docs/validation.md#temperature-of-sod1-with-a-fluctuating-fluid-examplescocomodiffusionpy-cuda-nvidia-a100)).
 - **Long runs.** Every `--checkpoint` steps (default: every 100 reports) the script saves the whole run,
   fluid included, in `<prefix>.chk`. If the run stops, for example at the time limit of a job, the same
