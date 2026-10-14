@@ -3,12 +3,19 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.6.4 (2026-10-14)
+
+The units of the output files written in the user guide and in the diffusion example. The C++ code of the plugin is
+that of version 0.6.0.
 
 ### Documentation
 - `examples/cocomo/diffusion.py` and `examples/README.md` give the units of the trajectory: the DCD file has the
   positions in Å, as in every DCD file, wrapped into the box; the centre of mass in `<prefix>_com.txt`, which
   `msd.py` reads, is in nm and not wrapped.
+- `docs/user_guide/getting_started.md`, Units: the units of the output files. Those of the plugin are in OpenMM units
+  (the particles of `LBMVTKReporter` in nm); the DCD and PDB files of OpenMM's reporters have the positions and the box
+  in Å, and these reporters wrap each molecule into the periodic box. The API reference of `LBMVTKReporter` points
+  there.
 
 ## 0.6.3 (2026-10-13)
 
