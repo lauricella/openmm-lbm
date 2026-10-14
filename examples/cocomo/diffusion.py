@@ -28,7 +28,8 @@ every step.  For a protein in water pass the viscosity of water at the temperatu
 The protocol is that of the original scripts: velocities at T, energy minimization, new velocities at
 T, production.  Files written, with the prefix given by --output (default <preset>_lb_on, <preset>_lb_on_centered with
 --drag Centered, <preset>_lb_on_fluct with --fluid-fluctuations, or <preset>_lb_off):
-  <prefix>.dcd               trajectory (DCD), every --report steps
+  <prefix>.dcd               trajectory (DCD), every --report steps, written by OpenMM's DCDReporter: positions
+                             in Angstrom, as in every DCD file, each molecule wrapped into the box as a whole
   <prefix>.log               step, time, potential energy, speed (OpenMM's StateDataReporter)
   <prefix>_temperature.txt   step, time (ps) and temperature of the beads, written by the plugin's
                              openmmlbm.LBMTemperatureReporter, which gives the right temperature for the drag scheme

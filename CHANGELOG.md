@@ -3,6 +3,13 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Documentation
+- `examples/cocomo/diffusion.py` and `examples/README.md` give the units of the trajectory: the DCD file has the
+  positions in Å, as in every DCD file, wrapped into the box; the centre of mass in `<prefix>_com.txt`, which
+  `msd.py` reads, is in nm and not wrapped.
+
 ## 0.6.3 (2026-10-13)
 
 The viscosity of the SOD1 examples described as what it is, five times that of water, and the thermalization and the

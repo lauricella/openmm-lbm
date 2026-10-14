@@ -117,8 +117,9 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
   example of the DragOpenMM plugin. Its full-step temperature stays at about 260 K, 13% below 298 K: with this large
   friction the fluid, which has no thermal fluctuations of its own without `--fluid-fluctuations`, takes a large part
   of the momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin gives the same value.
-- The script writes the trajectory (DCD), the energies (OpenMM's log), the temperature of the beads and the centre
-  of mass of the protein, not wrapped into the box, which `msd.py` reads.
+- The script writes the trajectory (DCD, positions in Å as in every DCD file, wrapped into the box), the energies
+  (OpenMM's log), the temperature of the beads and the centre of mass of the protein (`<prefix>_com.txt`, in nm, not
+  wrapped into the box), which `msd.py` reads.
 - **Temperature.** `<prefix>_temperature.txt` (step, time in ps, temperature in K) is written by the reporter of the
   plugin, `openmmlbm.LBMTemperatureReporter`, which gives the right temperature for the drag scheme
   ([theory.md](../docs/theory.md), section 2, Which velocity has the right temperature); with `--no-lb` by OpenMM. The
