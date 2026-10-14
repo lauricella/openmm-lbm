@@ -146,6 +146,17 @@ force.setFluidDensity(1.0*unit.gram/unit.centimeter**3*unit.AVOGADRO_CONSTANT_NA
 print(force.getFluidDensity())    # 602.214... Da/nm^3
 ```
 
+**Units of the output files.** The files written by the plugin are in OpenMM units: the particles of
+[`LBMVTKReporter`](api_reference.md#openmmlbmlbmvtkreporterprefix-reportinterval-force) have their positions in nm, the
+fluid is in Da/nm³ and nm/ps, and
+[`LBMTemperatureReporter`](api_reference.md#openmmlbmlbmtemperaturereporterfile-reportinterval-force) writes the time in
+ps. The files written by the reporters of OpenMM follow their formats: a DCD file (`app.DCDReporter`) and a PDB file
+(`app.PDBReporter`) have the positions and the box in Å, ten times the values in nm, as the programs that read them
+(VMD, MDAnalysis) expect. These reporters, and `LBMVTKReporter`, wrap each molecule into the periodic box when the
+System is periodic; a diffusion coefficient needs positions that are not wrapped (or unwrapped afterwards), such as
+the centre of mass that [`examples/cocomo/diffusion.py`](../../examples/cocomo/diffusion.py) writes in nm
+(`<prefix>_com.txt`).
+
 ## Platforms
 
 The fluid, the solid nodes with both wall schemes, the open faces and the coupling of the particles run on

@@ -556,9 +556,10 @@ reporter = LBMTemperatureReporter('temperature.txt', 1000, force)
 
 ### `openmmlbm.LBMVTKReporter(prefix, reportInterval, force)`
 
-A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps, the fluid of `force` and the
-particles of the System in VTK files, which ParaView and VisIt read. Everything is in OpenMM units, and the files
-of one report have the step in their name, written with 10 digits (for example `run_density_0000001000.vti`):
+A reporter for `openmm.app.Simulation` that writes, every `reportInterval` steps, the fluid of `force` and the particles
+of the System in VTK files, which ParaView and VisIt read. Everything is in OpenMM units (positions in nm, while a DCD
+file of OpenMM has them in Å, see [Units](getting_started.md#units)), and the files of one report have the step in their
+name, written with 10 digits (for example `run_density_0000001000.vti`):
 
 | File | Content |
 |---|---|
