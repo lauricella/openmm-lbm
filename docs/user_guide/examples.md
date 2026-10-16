@@ -46,6 +46,7 @@ system.addParticle(1.0)               # OpenMM needs at least one particle; it i
 force = LBMForce()
 force.setGridSize(nx, ny, nz)
 force.setKinematicViscosity(nu)
+force.setTemperature(0.0)                      # K: no thermal noise
 force.setBodyAcceleration(mm.Vec3(g, 0, 0))
 force.setFluidMomentumRemovalFrequency(0)      # keep the momentum given by the body force
 
@@ -283,6 +284,8 @@ system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 4, 0), mm.Vec3(
 system.addParticle(100.0)
 force = LBMForce()
 force.setGridSize(8, 8, 8)
+force.setKinematicViscosity(1.0035)             # nm^2/ps, water at 20 °C
+force.setTemperature(0.0)                       # K: no thermal noise
 force.setFluidMomentumRemovalFrequency(0)
 force.setBodyAcceleration(mm.Vec3(5.0, 0, 0))   # far too strong: the fluid speeds up without limit
 force.setMachCheckFrequency(50)                 # check every 50 steps instead of 100
@@ -345,6 +348,8 @@ def create_context():
     system.addParticle(100.0)
     force = LBMForce()
     force.setGridSize(8, 8, 8)
+    force.setKinematicViscosity(1.0035)        # nm^2/ps, water at 20 °C
+    force.setTemperature(0.0)                  # K: no thermal noise
     force.setBodyAcceleration(mm.Vec3(0.05, 0.02, 0))
     force.setFluidMomentumRemovalFrequency(10)
     system.addForce(force)
@@ -410,6 +415,7 @@ system.addParticle(100.0)
 force = LBMForce()
 force.setGridSize(8, 8, 8)
 force.setKinematicViscosity(5.0)
+force.setTemperature(300.0)                     # K
 force.setSolidNodes(range(64))                  # the plane k = 0
 force.addParticle(0)
 system.addForce(force)
@@ -495,6 +501,7 @@ system.addForce(bonds)
 
 force = LBMForce()
 force.setGridSize(10, 10, 10)                       # dx = 0.5 nm
+force.setKinematicViscosity(1.0035)                 # nm^2/ps, water at 20 °C
 force.setFriction(5.0)
 force.setTemperature(300.0)
 force.setRandomNumberSeed(1)                       # a fixed seed makes the run reproducible
@@ -578,6 +585,8 @@ system.addParticle(1.0)                       # OpenMM needs a particle; it is n
 
 force = LBMForce()
 force.setGridSize(nx, ny, nz)
+force.setKinematicViscosity(1.0035)           # nm^2/ps, water at 20 °C
+force.setTemperature(0.0)                     # K: no thermal noise
 force.setFluidMomentumRemovalFrequency(0)     # required with open faces
 U = 0.5                                       # nm/ps
 force.setFaceBoundary(LBMForce.ZMin, LBMForce.Velocity)    # the bottom face: fluid at rest
@@ -648,6 +657,7 @@ force = LBMForce()
 force.setGridSize(nx, ny, nz)
 force.setFluidDensity(rho0)
 force.setKinematicViscosity(nu)
+force.setTemperature(0.0)                     # K: no thermal noise
 force.setFluidMomentumRemovalFrequency(0)     # required with open faces
 
 # The walls: the solid planes i = 0 and k = 0.  The box is periodic in x and z, so each plane bounds the duct on

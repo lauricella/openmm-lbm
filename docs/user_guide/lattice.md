@@ -7,7 +7,10 @@ where the model is accurate. The model itself is described in [theory.md](../the
 ## Quick recipe
 
 For coarse-grained proteins in water, with one bead per residue, these choices work and are those of the
-examples. The rest of this page explains each of them.
+examples. The rest of this page explains each of them. The two physical inputs to give in every script are the
+kinematic viscosity, in nm²/ps, and the temperature, in K; the parameters of the lattice, the relaxation time
+$`\tau`$ and $`k_BT`$ in lattice units, follow from them with the lattice spacing and the time step, and the
+plugin prints them.
 
 | Parameter | Typical choice | Why, and the limits |
 |---|---|---|
@@ -16,7 +19,7 @@ examples. The rest of this page explains each of them.
 | Box | a whole number of $`\Delta x`$ along each side; at least 3 times the size of the protein and 2 times the cutoff of the nonbonded forces | the box is periodic: a protein feels its images through the fluid |
 | Kinematic viscosity | that of water at the temperature of the run: 1.0035 nm²/ps at 20 °C ($`\tau = 0.62`$ with the values above), 0.893 nm²/ps at 25 °C, 0.696 nm²/ps at 37 °C; or larger | $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$ must stay between about 0.505 and 2, and below about 1.7 with coupled particles and the explicit drag ([relaxation time](#relaxation-time)) |
 | Friction | 5 to 10 /ps, so that $`\text{friction}\times\Delta t = 0.05`$ to 0.1 | with the explicit drag (the default) $`\text{friction}\times\Delta t`$ must be below 1 (warning) and below 2 (stability), at 0.1 or below it is accurate; for larger values use the centred drag ([choosing the drag](#choosing-the-drag)) |
-| Temperature | that of the simulation, e.g. 298 K | the fluid is the thermostat of the coupled particles: no other thermostat |
+| Temperature | that of the simulation, e.g. 298 K; 0 K for a run without noise | the fluid is the thermostat of the coupled particles: no other thermostat. Always set it: the default is 300 K. At 0 K there is no random force and no fluctuation, while the drag stays |
 | Integrator | `VerletIntegrator(dt)` | friction and random force are part of `LBMForce` |
 | Removal of the fluid momentum | every step (the default) | keeps the system at rest; set 0 for flows driven by a body force, and with open faces |
 | Fluid fluctuations | off (the default), or on with the centred drag | with them $`k_BT\,\Delta t^2/(m_c\Delta x^2)`$ must stay small: $`1.3 \cdot 10^{-5}`$ for water at 300 K with the values above, against the 1/3000 validated; with $`\Delta x = 0.25`$ nm it is $`4.2 \cdot 10^{-4}`$, above it, and the Context warns ([relaxation time](#relaxation-time)) |
@@ -78,6 +81,8 @@ system.setDefaultPeriodicBoxVectors(mm.Vec3(4, 0, 0), mm.Vec3(0, 3, 0), mm.Vec3(
 system.addParticle(1.0)
 force = LBMForce()
 force.setGridSize(nx, ny, nz)
+force.setKinematicViscosity(1.0035)             # nm^2/ps, water at 20 °C
+force.setTemperature(0.0)                       # K: no thermal noise
 force.setInitialFluidVelocity(mm.Vec3(0.1, 0, 0))
 system.addForce(force)
 context = mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
@@ -130,7 +135,9 @@ density $`\rho_0`$ (`setFluidDensity()`). The most useful ones are listed below;
 
 ## Relaxation time
 
-The kinematic viscosity $`\nu`$ enters the model through the relaxation time
+The relaxation time is not an input: give the kinematic viscosity $`\nu`$ of the fluid, in nm²/ps, with
+`setKinematicViscosity()`, and the plugin computes the relaxation time from it. The viscosity enters the model
+through
 
 ```math
 \tau = \frac{3\nu\Delta t}{\Delta x^2} + \frac12,
@@ -162,9 +169,10 @@ for dx in (1.0, 0.5, 0.25):
         print('dx = %.2f nm  dt = %.3f ps  tau = %.3f' % (dx, dt, relaxation_time(1.0035, dx, dt)))
 ```
 
-If $`\tau`$ is too close to 1/2, increase $`\Delta t`$ or the viscosity, or decrease $`\Delta x`$. If $`\tau`$ is
-too large, do the opposite. Coarse-grained models often use a viscosity larger than that of water, which also moves
-$`\tau`$ up. Inside a Context, `getLatticeParametersInContext(context)` returns $`\Delta x`$, $`\Delta t`$ and
+If $`\tau`$ is too close to 1/2, increase $`\Delta t`$ or decrease $`\Delta x`$; if it is too large, do the
+opposite. Keep the viscosity of the fluid you simulate: changing it to move $`\tau`$ changes the physics (the
+friction of a protein in the fluid and its diffusion follow the viscosity). Coarse-grained models sometimes use a
+viscosity larger than that of water, which also moves $`\tau`$ up. Inside a Context, `getLatticeParametersInContext(context)` returns $`\Delta x`$, $`\Delta t`$ and
 $`\tau`$.
 
 **With fluid fluctuations the spacing and the time step also set their size.** The fluctuations of a node are

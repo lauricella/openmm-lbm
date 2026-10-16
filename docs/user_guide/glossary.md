@@ -20,7 +20,8 @@ current positions and velocities ([tutorial](tutorial.md#1-the-pieces-of-an-open
 random force of the fluid, and the fluid feels it. The other particles do not see the fluid.
 
 **Coupling scheme.** How the coupled particles and the fluid exchange forces. `EulerMaruyama` (the default):
-friction and random force; `NVE`: friction only, as at zero temperature ([API](api_reference.md)).
+friction and random force; `NVE`: friction only, as at zero temperature. For a run without noise set the
+temperature to 0 K instead: same run ([API](api_reference.md#setcouplingschemescheme-getcouplingscheme)).
 
 **Domain, domain decomposition.** With `setDomainDecomposition()` the lattice is divided into blocks, the domains,
 one per MPI rank: each rank advances the fluid of its domain, on its own GPU, and every rank holds a copy of all the
@@ -47,7 +48,8 @@ that leave a domain are pushed into it and sent to their owners, and on request 
 nodes are copied there ([API](api_reference.md#setdensityhaloexchangeexchange-setvelocityhaloexchangeexchange)).
 
 **Kinematic viscosity ($`\nu`$).** The viscosity divided by the density, in nm²/ps; for water about 1 nm²/ps.
-It sets how fast velocity differences in the fluid are smoothed out.
+It sets how fast velocity differences in the fluid are smoothed out. With the temperature, it is the input to give in
+every script (`setKinematicViscosity()`); the relaxation time follows from it.
 
 **Lattice, node, spacing ($`\Delta x`$).** The fluid is described on a regular cubic grid that fills the periodic box:
 the points of the grid are the nodes, and $`\Delta x`$ is the distance between neighbouring nodes
@@ -83,7 +85,8 @@ with the thread-safe boundary condition of M. Lauricella et al., Phys. Fluids 37
 ([API](api_reference.md#setwallschemescheme-getwallscheme)).
 
 **Relaxation time ($`\tau`$).** The parameter of the lattice Boltzmann method that corresponds to the viscosity:
-$`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$. It must stay between about 0.505 and 2, and below about 1.7 with
+$`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$. It is not an input: the plugin computes it from the viscosity, the
+lattice spacing and the time step, and prints it. It must stay between about 0.505 and 2, and below about 1.7 with
 coupled particles and the explicit drag ([lattice](lattice.md#relaxation-time)).
 
 **Removal of the fluid momentum.** At regular steps the plugin subtracts the mean velocity of the fluid,
@@ -101,6 +104,10 @@ particles (`LBMVTKReporter`).
 
 **System.** In OpenMM, the description of what is simulated: particles with their masses, the periodic
 box, and the forces.
+
+**Temperature.** The temperature of the model, in K (`setTemperature()`), shared by the random force on the coupled
+particles and the fluctuations of the fluid. Give it in every script; the default is 300 K. At 0 K nothing is
+stochastic and only the drag acts ([API](api_reference.md#settemperaturetemperature-gettemperature)).
 
 **Temperature of the fluid.** By default the fluid of this plugin has no thermal fluctuations of its own: only
 the coupled particles receive a random force ([limitations](README.md#limitations-of-the-model)). With

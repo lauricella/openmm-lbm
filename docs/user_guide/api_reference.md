@@ -9,6 +9,15 @@ objects in units that convert to them (see [units](getting_started.md#units)); a
 does not convert, such as a density in g/cm³ without the Avogadro constant, raises `TypeError`. Getters
 return `Quantity` objects where the quantity has units.
 
+**Give the viscosity and the temperature, always.** The fluid and its coupling to the particles are set with
+physical quantities: the kinematic viscosity with
+[`setKinematicViscosity()`](#setkinematicviscosityviscosity-getkinematicviscosity), in nm²/ps, and the temperature
+with [`setTemperature()`](#settemperaturetemperature-gettemperature), in K. Set both in every script, also when the
+defaults (1.0035 nm²/ps, 300 K) would do and also for a run without noise, which is a run at 0 K. The parameters of
+the lattice Boltzmann method are not inputs: the relaxation time $`\tau`$ and $`k_BT`$ in lattice units follow from
+the viscosity, the temperature, the lattice spacing and the time step. The plugin prints them when the Context is
+created, and `getLatticeParametersInContext()` returns $`\tau`$.
+
 - [Summary](#summary)
 - [Lattice](#lattice)
 - [Fluid properties](#fluid-properties)
@@ -54,8 +63,8 @@ return `Quantity` objects where the quantity has units.
 | `setParticleCopiesCheck(check)` | | `True` | yes |
 | `setDensityHaloExchange(exchange)`, `setVelocityHaloExchange(exchange)` | | `False` | no |
 
-All parameters are read when the Context is created. "Change in a Context" tells whether a later
-change can be applied with [`updateParametersInContext()`](#changing-parameters-in-a-context); the
+All parameters are read when the Context is created; set `setKinematicViscosity()` and `setTemperature()` in every
+script (above). "Change in a Context" tells whether a later change can be applied with [`updateParametersInContext()`](#changing-parameters-in-a-context); the
 others need a new Context.
 
 ## Lattice
@@ -197,7 +206,9 @@ Kinematic viscosity $`\nu`$ of the fluid, in nm²/ps: the physical value, which 
 The default 1.0035 nm²/ps is water at 20 °C; water is 0.893 nm²/ps at 25 °C and 0.696 nm²/ps at 37 °C. It must be
 positive. With the lattice spacing $`\Delta x`$ and the time step $`\Delta t`$ it fixes the relaxation time
 $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$; a warning is printed if $`\tau`$ is outside [0.505, 2] (see
-[relaxation time](lattice.md#relaxation-time)).
+[relaxation time](lattice.md#relaxation-time)). The viscosity is the input for the fluid: there is no setter for
+$`\tau`$, which the Context prints and `getLatticeParametersInContext()` returns. To bring $`\tau`$ into its range,
+change $`\Delta x`$ or $`\Delta t`$ and keep the viscosity of the fluid you simulate.
 
 ## Driving and initial state
 
@@ -480,6 +491,10 @@ Scheme of the coupling:
   exchange momentum through the drag with no thermostat other than the fluctuations of the fluid, when they are
   switched on.
 
+To run without noise, set the temperature to 0 rather than choosing `NVE`: at 0 K the Euler-Maruyama scheme has
+no random force and the fluid no fluctuations, the drag stays, and the run is the same as with `NVE`, bit for bit.
+`NVE` is for particles without random force in a fluid that fluctuates at a temperature above zero.
+
 The total momentum is conserved with both schemes; the kinetic energy is dissipated by the drag and by
 the viscosity of the fluid ([theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms)).
 The scheme is saved with the force by `XmlSerializer`. It can be changed in a Context with
@@ -646,7 +661,9 @@ Particles and fluid share this one heat bath; there is no separate temperature o
 integrator: `LBMForce` requires a `VerletIntegrator`, which has no temperature, and the coupling to the fluid is the
 thermostat of the coupled particles. With the `NVE` [coupling scheme](#setcouplingschemescheme-getcouplingscheme) the
 particles have no random force, and the temperature sets only the fluctuations of the fluid, which then thermalize the
-particles. The default is 300 K. It must not be negative; at 0 there is no random force and no fluctuation. It can be
+particles. The default is 300 K, so a script that does not set it has a random force at 300 K: set it in every script.
+It must not be negative. At 0 K there is nothing stochastic, no random force and no fluctuation, and no random numbers
+are drawn, but the drag stays: particles and fluid exchange momentum without a thermostat, as with `NVE`. It can be
 changed in a running Context with `updateParametersInContext()`, for the particles and the fluid from the next step
 (the size of the fluctuations, printed when the Context is created, is not printed again).
 

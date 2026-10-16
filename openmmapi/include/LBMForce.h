@@ -276,7 +276,8 @@ public:
     /**
      * Set the kinematic viscosity of the fluid, measured in nm^2/ps.  Together with the lattice
      * spacing dx and the step size dt it fixes the relaxation time tau = 3*viscosity*dt/dx^2 + 1/2,
-     * which must be larger than 1/2.
+     * which must be larger than 1/2.  The viscosity is the input for the fluid: tau is not set directly, and
+     * getLatticeParametersInContext() returns it.
      */
     void setKinematicViscosity(double viscosity);
     /**
@@ -295,6 +296,8 @@ public:
     /**
      * Set the temperature of the random force on the coupled particles and, with fluid fluctuations
      * (setFluidFluctuations()), of the fluid, measured in K.  Particles and fluid share a single heat bath.
+     * The default is 300 K: set it in every simulation.  At 0 there is no random force and no fluctuation,
+     * while the drag still acts.
      */
     void setTemperature(double temperature);
     /**

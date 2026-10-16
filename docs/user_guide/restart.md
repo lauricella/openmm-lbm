@@ -53,6 +53,7 @@ def create_simulation():
     system.setDefaultPeriodicBoxVectors(mm.Vec3(L, 0, 0), mm.Vec3(0, L, 0), mm.Vec3(0, 0, L))
     force = LBMForce()
     force.setGridSize(12, 12, 12)
+    force.setKinematicViscosity(1.0035)      # nm^2/ps, water at 20 °C
     force.setFriction(10.0)
     force.setTemperature(300.0)
     force.setRandomNumberSeed(7)
@@ -203,6 +204,7 @@ system = mm.System()
 system.setDefaultPeriodicBoxVectors(mm.Vec3(L, 0, 0), mm.Vec3(0, L, 0), mm.Vec3(0, 0, L))
 force = LBMForce()
 force.setGridSize(12, 12, 12)
+force.setKinematicViscosity(1.0035)      # nm^2/ps, water at 20 °C
 force.setFriction(10.0)
 force.setTemperature(300.0)
 for i in range(numBeads):

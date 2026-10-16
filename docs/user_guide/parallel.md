@@ -98,6 +98,7 @@ repulsion.setNonbondedMethod(mm.CustomNonbondedForce.CutoffPeriodic)
 repulsion.setCutoffDistance(1.0)
 force = LBMForce()
 force.setGridSize(16, 16, 32)
+force.setKinematicViscosity(1.0035)          # nm^2/ps, water at 20 °C
 force.setFriction(5.0)
 force.setTemperature(300)
 for i in range(200):

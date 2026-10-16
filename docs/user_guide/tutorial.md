@@ -65,6 +65,10 @@ $`\mathbf u`$. The parameters are those of a real fluid:
   $`\Delta x = \text{box length}/\text{nodes}`$ must be the same in the three directions.
 - `setFluidDensity(rho)`: in Da/nm³ (water: 602 Da/nm³).
 - `setKinematicViscosity(nu)`: in nm²/ps (water at 300 K: about 0.9 nm²/ps).
+- `setTemperature(T)`: in K, the temperature of the particles and of the fluid (below).
+
+Give these physical quantities, always the viscosity and the temperature: the parameters of the lattice Boltzmann
+method, such as the relaxation time $`\tau`$, are computed by the plugin from them, the spacing and the time step.
 
 The particles added with `addParticle(i)` are **coupled** to the fluid. At every step each one feels,
 from the node nearest to it,
@@ -72,7 +76,9 @@ from the node nearest to it,
 - a friction force $`-\gamma m(\mathbf v - \mathbf u)`$: the particle is dragged towards the velocity of the fluid
   (`setFriction(gamma)`, in 1/ps);
 - a random force whose size is set by the temperature (`setTemperature(T)`), which keeps the particles
-  at the temperature $`T`$. This is the Euler-Maruyama scheme; the scheme `NVE` has no random force.
+  at the temperature $`T`$. This is the Euler-Maruyama scheme. At $`T = 0`$ there is no random force, only the
+  friction: a run without noise. Set the temperature also then, since the default is 300 K. (The scheme `NVE` has
+  no random force at any temperature.)
 
 The opposite of these forces is given to the fluid, so the total momentum of particles and fluid is
 conserved. A particle that moves pushes the fluid, and the fluid pushes the other particles: this is

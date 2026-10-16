@@ -19,6 +19,17 @@ versions the API may still change.
 - The tutorial (exercise on the viscosity), the installation guide (output of the first example) and
   `examples/README.md` (options `--viscosity` and `--temperature`) follow.
 
+### Documentation
+- The viscosity and the temperature are the inputs that the documentation asks for. Every complete script of the
+  user guide sets `setKinematicViscosity()` and `setTemperature()` (0 K where it runs without noise), with the same
+  results as before. The API reference (introduction, viscosity, coupling scheme, temperature), the getting-started
+  page, the lattice page (quick recipe, relaxation time), the tutorial, the glossary and `docs/theory.md` (units)
+  say that the viscosity, in nm²/ps, and the temperature, in K, are to be given in every script, that the relaxation
+  time and $`k_BT`$ in lattice units are computed from them and are not inputs, that a run without noise is a run at
+  0 K rather than one with the `NVE` scheme, and that $`\tau`$ is brought into its range with the lattice spacing and
+  the time step, not with the viscosity. The comments of `setKinematicViscosity()` and `setTemperature()` in
+  `LBMForce.h` say the same; the compiled code does not change.
+
 ### Tests
 - `test_zero_temperature_is_nve` (`python/tests/TestLBMForce.py`): the Euler-Maruyama scheme at zero temperature, with
   or without fluid fluctuations, gives the run of the NVE scheme bit for bit, with both drags; the examples rely on it.

@@ -787,8 +787,10 @@ that step drawn once (When the coupling forces are computed, above).
 
 ## 3. Units and conversions (implemented)
 
-The public API uses OpenMM units: nm, ps, Da (g/mol), K and kJ/mol. Internally the plugin works in lattice units
-only, as is usual for lattice Boltzmann [7]. `LBMForceImpl::computeLatticeParameters()` computes the lattice
+The public API uses OpenMM units: nm, ps, Da (g/mol), K and kJ/mol. The inputs are physical quantities: the fluid
+is given by its kinematic viscosity and the coupling by its temperature, which every script should set (at 0 K the
+model has no noise); the parameters of the method, such as $`\tau`$ and $`k_BT`$ in lattice units, are computed from
+them and are not inputs. Internally the plugin works in lattice units only, as is usual for lattice Boltzmann [7]. `LBMForceImpl::computeLatticeParameters()` computes the lattice
 parameters of the fluid ($`\tau`$, $`\omega`$, the initial velocity, the body acceleration and the velocities and
 densities of the faces) and passes $`\Delta x`$, $`\Delta t`$, $`\rho_0`$, the friction and $`k_BT`$, from which
 every kernel converts the quantities of the particles with the same factors:
