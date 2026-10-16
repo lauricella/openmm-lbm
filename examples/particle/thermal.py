@@ -9,8 +9,10 @@
 The beads start at the centre of the box with velocity v0 along x, sqrt(kT/m) by default, and the
 friction and the random force of LBMForce bring them to the temperature T.  The default parameters are
 those of the old plugin's single-particle test: one bead of 5 lattice cells (80.7 Da) in a box of 3 nm
-with 10^3 nodes, time step 1 fs, friction 0.1/ps, tau = 1, 300 K, 20000 steps.  With --beads N the beads
-are placed at random in the box.
+with 10^3 nodes, time step 1 fs, friction 0.1/ps, nu = 15 nm^2/ps (tau = 1), 300 K, 20000 steps.  With --beads N
+the beads are placed at random in the box.  The viscosity is given in physical units (--viscosity, nm^2/ps); the
+plugin converts it to the relaxation time tau of the lattice, which the script prints.  At --temperature 0 there is
+no random force: the beads are slowed down by the drag and do not thermalize.
 
 The script writes, for every step, the time (ps), the velocity vx vy vz (nm/ps) and the position x y z (nm) of
 the first bead; OpenMM's leapfrog stores the velocities half a step behind the positions.  The temperature of the
@@ -38,7 +40,8 @@ def parse_arguments():
     parser.add_argument('--nodes', type=int, default=10, help='lattice nodes per side (default 10)')
     parser.add_argument('--spacing', type=float, default=0.3, help='lattice spacing in nm (default 0.3)')
     parser.add_argument('--dt', type=float, default=0.001, help='time step in ps (default 0.001)')
-    parser.add_argument('--tau', type=float, default=1.0, help='relaxation time, sets the viscosity (default 1)')
+    parser.add_argument('--viscosity', type=float, default=15.0,
+                        help='kinematic viscosity in nm^2/ps (default 15: tau = 1 with the default spacing and dt)')
     parser.add_argument('--density', type=float, default=993.0, help='fluid density in kg/m^3 (default 993)')
     parser.add_argument('--cells', type=float, default=5.0, help='bead mass in lattice cells (default 5)')
     parser.add_argument('--friction', type=float, default=0.1, help='friction in 1/ps (default 0.1)')
@@ -100,7 +103,6 @@ def main():
         unit.dalton/unit.nanometer**3)
     mass = args.cells*density*args.spacing**3
     box = args.nodes*args.spacing
-    viscosity = (args.tau - 0.5)/3*args.spacing**2/args.dt
     v0 = args.velocity if args.velocity is not None else math.sqrt(kB*args.temperature/mass)
 
     system = mm.System()
@@ -108,7 +110,7 @@ def main():
     force = LBMForce()
     force.setGridSize(args.nodes, args.nodes, args.nodes)
     force.setFluidDensity(density)
-    force.setKinematicViscosity(viscosity)
+    force.setKinematicViscosity(args.viscosity)
     force.setFriction(args.friction)
     force.setTemperature(args.temperature)
     force.setRandomNumberSeed(args.seed)
@@ -133,7 +135,8 @@ def main():
                                                                        args.dt, args.steps))
     print('%d bead(s) of %.4f Da, v0 %.4f nm/ps, friction %g 1/ps (gamma dt %g), T %g K' % (
         args.beads, mass, v0, args.friction, args.friction*args.dt, args.temperature))
-    print('Fluid: density %.4f Da/nm^3, viscosity %.4f nm^2/ps, tau %g' % (density, viscosity, args.tau))
+    dx, dt, tau = force.getLatticeParametersInContext(context)
+    print('Fluid: density %.4f Da/nm^3, viscosity %g nm^2/ps, tau %.4f' % (density, args.viscosity, tau))
 
     temperatureFile = os.path.splitext(args.output)[0] + '_temperature.txt'
     with open(args.output, 'w') as out:

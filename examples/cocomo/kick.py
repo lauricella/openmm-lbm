@@ -5,16 +5,19 @@
 # --------------------------------------------------------------------------
 
 """Kick experiment with a coarse-grained protein: every bead starts with the velocity v0 along x, in a
-fluid at rest, at zero temperature.
+fluid at rest, at the temperature T (--temperature), zero by default.
 
 As in ../particle/kick.py, but the kicked object is a protein of the COCOMO2 model (cocomo2.py):
   --preset peptide    the peptide GRGDSPYS (8 beads), flexible
   --preset ubiquitin  ubiquitin (76 beads), held folded by an elastic network over the whole chain,
                       with the nonbonded terms scaled by the solvent exposure of each residue
-The coupling scheme is NVE (drag only, no random force).  With --no-lb the beads are integrated by
-LangevinMiddleIntegrator at zero temperature and the same friction, without fluid.  The parameters of
-the fluid are those of the single-bead kick: 100^3 nodes of 0.3 nm, tau = 1, friction 10/ps, time step
-10 fs, v0 = 9 nm/ps, 2000 steps.
+At zero temperature there is no random force on the beads, but the drag stays: beads and fluid exchange
+momentum without a thermostat (the fluid of this example has no thermal fluctuations of its own).  With
+--no-lb the beads are integrated by LangevinMiddleIntegrator at the same temperature and friction, without
+fluid.  The viscosity is given in physical units (--viscosity, nm^2/ps); the plugin converts it to the
+relaxation time tau of the lattice, which the script prints.  The parameters of the fluid are those of the
+single-bead kick: 100^3 nodes of 0.3 nm, nu = 1.5 nm^2/ps (tau = 1), friction 10/ps, time step 10 fs,
+v0 = 9 nm/ps, 2000 steps.
 
 The output file has one line per step: time (ps), velocity of the centre of mass vx vy vz and its norm
 (nm/ps), position of the centre of mass x y z (nm), radius of gyration (nm).
@@ -45,13 +48,16 @@ def parse_arguments():
     parser.add_argument('--nodes', type=int, default=100, help='lattice nodes per side (default 100)')
     parser.add_argument('--spacing', type=float, default=0.3, help='lattice spacing in nm (default 0.3)')
     parser.add_argument('--dt', type=float, default=0.01, help='time step in ps (default 0.01)')
-    parser.add_argument('--tau', type=float, default=1.0, help='relaxation time, sets the viscosity (default 1)')
+    parser.add_argument('--viscosity', type=float, default=1.5,
+                        help='kinematic viscosity in nm^2/ps (default 1.5: tau = 1 with the default spacing and dt)')
     parser.add_argument('--density', type=float, default=993.0, help='fluid density in kg/m^3 (default 993)')
     parser.add_argument('--friction', type=float, default=10.0, help='friction in 1/ps (default 10)')
     parser.add_argument('--velocity', type=float, default=9.0, help='initial velocity along x in nm/ps (default 9)')
     parser.add_argument('--steps', type=int, default=2000, help='number of steps (default 2000)')
     parser.add_argument('--lam', type=float, default=cocomo2.LAMBDA, help='exposure threshold lambda (default 0.7)')
-    parser.add_argument('--no-lb', action='store_true', help='no fluid: LangevinMiddleIntegrator at zero temperature')
+    parser.add_argument('--temperature', type=float, default=0.0,
+                        help='temperature in K (default 0: no random force, drag only)')
+    parser.add_argument('--no-lb', action='store_true', help='no fluid: LangevinMiddleIntegrator at the same T')
     parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
                         help='drag scheme of LBMForce (default Explicit)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
@@ -95,14 +101,14 @@ def main():
     density = (args.density*unit.kilogram/unit.meter**3*unit.AVOGADRO_CONSTANT_NA).value_in_unit(
         unit.dalton/unit.nanometer**3)
     if args.no_lb:
-        integrator = mm.LangevinMiddleIntegrator(0.0, args.friction, args.dt)
+        integrator = mm.LangevinMiddleIntegrator(args.temperature, args.friction, args.dt)
     else:
         force = LBMForce()
         force.setGridSize(args.nodes, args.nodes, args.nodes)
         force.setFluidDensity(density)
-        force.setKinematicViscosity((args.tau - 0.5)/3*args.spacing**2/args.dt)
+        force.setKinematicViscosity(args.viscosity)
         force.setFriction(args.friction)
-        force.setCouplingScheme(LBMForce.NVE)
+        force.setTemperature(args.temperature)       # at 0 K no random force: the drag only
         force.setFluidMomentumRemovalFrequency(0)
         force.setDragScheme(getattr(LBMForce, args.drag))
         for i in range(system.getNumParticles()):
@@ -116,9 +122,14 @@ def main():
 
     print('Platform %s; %s: %d beads, %.1f Da, %d elastic bonds; box %.1f nm' % (
         platform.getName(), args.preset, len(names), masses.sum(), len(pairs), box))
+    if args.no_lb:
+        fluid = 'no fluid (Langevin)'
+    else:
+        dx, dt, tau = force.getLatticeParametersInContext(context)
+        fluid = '%d^3 nodes, viscosity %g nm^2/ps (tau %.4f)' % (args.nodes, args.viscosity, tau)
     print('%s; friction %g 1/ps, v0 %g nm/ps, dt %g ps, %d steps' % (
-        'no fluid (Langevin at 0 K)' if args.no_lb else '%d^3 nodes, tau %g, NVE coupling' % (args.nodes, args.tau),
-        args.friction, args.velocity, args.dt, args.steps))
+        fluid, args.friction, args.velocity, args.dt, args.steps))
+    print('Temperature %g K%s' % (args.temperature, ' (no random force)' if args.temperature == 0 else ''))
 
     with open(args.output, 'w') as out:
         print('# time (ps), centre of mass: vx vy vz |v| (nm/ps), x y z (nm); radius of gyration (nm)', file=out)

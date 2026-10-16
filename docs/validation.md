@@ -114,6 +114,7 @@ runs in double precision (`docs/theory.md`, section 2).
 | Moving with the fluid | particle and fluid at the same velocity along x, y, z and a diagonal, two cells crossed | 1e-13 |
 | Partial coupling | uncoupled particles keep their velocity and feel no force | rounding of OpenMM's Verlet |
 | NVE scheme | at 300 K the first step is the deterministic drag, and two runs with different seeds are identical (`testNVEScheme`) | 1e-14, bitwise |
+| Zero temperature | the Euler-Maruyama scheme at $`T = 0`$, with or without fluid fluctuations, gives the run of the NVE scheme, with both drags, 50 steps; at 300 K it does not (`test_zero_temperature_is_nve` in `python/tests/TestLBMForce.py`, Reference; checked also on OpenCL) | bitwise |
 | Force evaluations and seeds | `getState()` before and after every step does not change the trajectory; two runs with seed 0 differ | bitwise |
 | Walls | a coupled particle reaching a solid node: $`v_2 = -v_0(1 - \gamma\Delta t)^2`$; an uncoupled one passes | 1e-14 |
 | Walls, direction | at a wall one node thick, a particle is reversed only if it moves into the wall, from either side | 1e-14 |

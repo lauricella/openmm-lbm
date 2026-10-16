@@ -4,16 +4,24 @@
 # SPDX-License-Identifier: MIT
 # --------------------------------------------------------------------------
 
-"""Kick experiment: one bead starts with a velocity v0 in a fluid at rest, at zero temperature.
+"""Kick experiment: one bead starts with a velocity v0 in a fluid at rest, at the temperature T (--temperature).
 
-With the fluid (the default) the bead gives its momentum to the fluid through the drag, and the fluid at
-its node starts to move with it.  The velocity decays more slowly than the exponential of a Langevin
-thermostat, and the bead travels further.  With --no-lb the same bead is integrated with OpenMM's
-LangevinMiddleIntegrator at the same friction and zero temperature, which gives v(t) = v0 exp(-gamma t).
+The default temperature is zero: there is no random force on the bead, but the drag stays, so bead and fluid
+exchange momentum without a thermostat (the fluid of this example has no thermal fluctuations of its own).  With the
+fluid (the default) the bead gives its momentum to the fluid through the drag, and the fluid at its node starts to
+move with it.  The velocity
+decays more slowly than the exponential of a Langevin thermostat, and the bead travels further.  With --no-lb the
+same bead is integrated with OpenMM's LangevinMiddleIntegrator at the same friction and temperature, which at zero
+temperature gives v(t) = v0 exp(-gamma t).  Above zero temperature the bead also receives the random force of the
+coupling at T.
 
-Two parameter sets of the old plugin's examples are available:
-  --preset bead     a bead of 5 lattice cells, 100^3 nodes of 0.3 nm, tau = 1, v0 = 9 nm/ps, 2000 steps
-  --preset alanine  a bead with the mass of alanine, 30^3 nodes of 0.5 nm, nu = 1.0035 nm^2/ps, v0 = 15 nm/ps
+The viscosity is given in physical units (--viscosity, nm^2/ps); the plugin converts it to the relaxation time tau
+of the lattice with the lattice spacing and the time step, and the script prints tau.  Two parameter sets of the old
+plugin's examples are available:
+  --preset bead     a bead of 5 lattice cells, 100^3 nodes of 0.3 nm, nu = 1.5 nm^2/ps (tau = 1), v0 = 9 nm/ps,
+                    2000 steps
+  --preset alanine  a bead with the mass of alanine, 30^3 nodes of 0.5 nm, nu = 1.0035 nm^2/ps (tau = 0.62),
+                    v0 = 15 nm/ps
 Every parameter can be changed from the command line.
 
 The output file has one line per step: time (ps), velocity vx vy vz and its norm (nm/ps), position x y z
@@ -43,12 +51,14 @@ def parse_arguments():
     parser.add_argument('--spacing', type=float, help='lattice spacing (nm)')
     parser.add_argument('--dt', type=float, help='time step (ps)')
     parser.add_argument('--friction', type=float, help='friction gamma (1/ps)')
-    parser.add_argument('--viscosity', type=float, help='kinematic viscosity (nm^2/ps)')
+    parser.add_argument('--viscosity', type=float, help='kinematic viscosity (nm^2/ps); the plugin computes tau')
     parser.add_argument('--density', type=float, help='fluid density (kg/m^3)')
     parser.add_argument('--mass', type=float, help='bead mass (Da); default from the preset')
     parser.add_argument('--velocity', type=float, help='initial velocity along x (nm/ps)')
     parser.add_argument('--steps', type=int, help='number of steps')
-    parser.add_argument('--no-lb', action='store_true', help='no fluid: LangevinMiddleIntegrator at zero temperature')
+    parser.add_argument('--temperature', type=float, default=0.0,
+                        help='temperature in K (default 0: no random force, drag only)')
+    parser.add_argument('--no-lb', action='store_true', help='no fluid: LangevinMiddleIntegrator at the same T')
     parser.add_argument('--drag', choices=['Explicit', 'Centered'], default='Explicit',
                         help='drag scheme of LBMForce (default Explicit)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
@@ -88,14 +98,14 @@ def main():
     system.setDefaultPeriodicBoxVectors(mm.Vec3(box, 0, 0), mm.Vec3(0, box, 0), mm.Vec3(0, 0, box))
     system.addParticle(mass)
     if args.no_lb:
-        integrator = mm.LangevinMiddleIntegrator(0.0, args.friction, args.dt)
+        integrator = mm.LangevinMiddleIntegrator(args.temperature, args.friction, args.dt)
     else:
         force = LBMForce()
         force.setGridSize(args.nodes, args.nodes, args.nodes)
         force.setFluidDensity(density)
         force.setKinematicViscosity(args.viscosity)
         force.setFriction(args.friction)
-        force.setCouplingScheme(LBMForce.NVE)        # zero temperature: drag only, no random force
+        force.setTemperature(args.temperature)       # at 0 K no random force: the drag only
         force.setFluidMomentumRemovalFrequency(0)    # keep the momentum given to the fluid
         force.setDragScheme(getattr(LBMForce, args.drag))
         force.addParticle(0)
@@ -108,9 +118,10 @@ def main():
     context.setVelocities([mm.Vec3(args.velocity, 0, 0)])
 
     print('Platform %s, box %.2f nm, %d^3 nodes, dt %g ps' % (platform.getName(), box, args.nodes, args.dt))
-    print('Bead mass %.4f Da, v0 %g nm/ps, friction %g 1/ps' % (mass, args.velocity, args.friction))
+    print('Bead mass %.4f Da, v0 %g nm/ps, friction %g 1/ps, temperature %g K%s' % (
+        mass, args.velocity, args.friction, args.temperature, ' (no random force)' if args.temperature == 0 else ''))
     if args.no_lb:
-        print('No fluid: LangevinMiddleIntegrator at 0 K')
+        print('No fluid: LangevinMiddleIntegrator at %g K' % args.temperature)
     else:
         dx, dt, tau = force.getLatticeParametersInContext(context)
         print('Fluid: density %.4f Da/nm^3, viscosity %g nm^2/ps, tau %.4f' % (density, args.viscosity, tau))

@@ -285,7 +285,8 @@ python ~/src/openmm-lbm/examples/particle/uniform_flow.py --platform Reference -
 ```
 
 ```
-Platform Reference, box 6.00 nm, 20^3 nodes, dt 0.001 ps, tau 1, friction 10 1/ps (gamma dt 0.01)
+Platform Reference, box 6.00 nm, 20^3 nodes, dt 0.001 ps, friction 10 1/ps (gamma dt 0.01)
+Viscosity 15 nm^2/ps (tau 1.0000), temperature 0 K (no random force)
 Bead 16.1460 Da at rest, fluid 129167.7 Da at u0 = 0.09 nm/ps: final common velocity 0.089989 nm/ps
   step   time (ps)  v_bead/u0   p_bead/p0     p_total/p0 - 1   E_bead/E0     E_fluid/E0    E_total/E0
      0      0.000   0.000000    0.0000e+00     2.220e-16      0.0000e+00    1.000000      1.000000

@@ -3,6 +3,27 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Examples
+- Every simulation script in `examples/` takes the viscosity in physical units (`--viscosity`, nm²/ps) and prints
+  the relaxation time of the lattice that the plugin computes from it. `particle/uniform_flow.py`,
+  `particle/thermal.py` and `cocomo/kick.py` took the relaxation time (`--tau`) instead; their default viscosities,
+  15, 15 and 1.5 nm²/ps, give the same relaxation time, 1, and the same runs, bit for bit.
+- Every simulation script has `--temperature`, in K, which it sets on `LBMForce` and, with `--no-lb`, on the
+  Langevin integrator. The two kick examples and `particle/uniform_flow.py` ran with the `NVE` coupling scheme without
+  saying at which temperature; they now run at `--temperature 0` by default: at zero temperature there is no random
+  force and no fluctuation of the fluid, while the drag stays, and the runs are the same as before, bit for bit.
+  Above zero the beads receive the random force of the coupling. `fluid/initial_state.py` has a fluctuating fluid
+  above zero temperature.
+- The tutorial (exercise on the viscosity), the installation guide (output of the first example) and
+  `examples/README.md` (options `--viscosity` and `--temperature`) follow.
+
+### Tests
+- `test_zero_temperature_is_nve` (`python/tests/TestLBMForce.py`): the Euler-Maruyama scheme at zero temperature, with
+  or without fluid fluctuations, gives the run of the NVE scheme bit for bit, with both drags; the examples rely on it.
+  `python/tests/TestExamples.py` also runs the examples with `--viscosity` and `--temperature`.
+
 ## 0.6.4 (2026-10-14)
 
 The units of the output files written in the user guide and in the diffusion example. The C++ code of the plugin is

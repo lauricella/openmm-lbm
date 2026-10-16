@@ -82,8 +82,9 @@ equations.
 
 ## 3. Lesson 1: a kicked bead (`kick.py`)
 
-A bead of 80.7 Da starts at 9 nm/ps in a fluid at rest, at zero temperature. Run it twice, with the
-fluid and without (`--no-lb`: the same friction in OpenMM's Langevin integrator, without fluid):
+A bead of 80.7 Da starts at 9 nm/ps in a fluid at rest, at zero temperature (`--temperature 0`, the default:
+no random force, the drag only). Run it twice, with the fluid and without (`--no-lb`: the same friction and
+temperature in OpenMM's Langevin integrator, without fluid):
 
 ```bash
 python $EX/particle/kick.py --platform Reference --nodes 30
@@ -128,8 +129,9 @@ initial one.
 
 Exercises:
 
-1. Change the viscosity through the relaxation time (`--tau 0.6`, `--tau 1.5`). Does the final energy
-   change? (The relaxation time $`\tau`$ sets the viscosity: $`\nu = (\tau - \tfrac12)\Delta x^2/(3\Delta t)`$.)
+1. Change the viscosity (`--viscosity 3`, `--viscosity 30`; the default is 15 nm²/ps). Does the final energy
+   change? The script prints the relaxation time of the lattice that the plugin computes from the viscosity,
+   $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$: 0.6 and 1.5 here, 1 by default.
 2. Make the bead heavier (`--cells 100`). The common final velocity is printed in the second line:
    check it at the end of a longer run (`--steps 5000 --interval 500`).
 

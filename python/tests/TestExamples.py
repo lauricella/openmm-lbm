@@ -35,6 +35,18 @@ CASES = [
     ('cocomo/diffusion.py', ['--preset', 'smoke', '--box', '10', '--steps', '20', '--report', '10', '--drag', 'Centered',
                              '--fluid-fluctuations', '--vtk', '10']),
     ('cocomo/kick.py', ['--preset', 'peptide', '--nodes', '24', '--steps', '5', '--drag', 'Centered']),
+    # the viscosity and the temperature, which every simulation script takes (examples/README.md)
+    ('particle/kick.py', ['--nodes', '12', '--steps', '5', '--viscosity', '3', '--temperature', '300']),
+    ('particle/kick.py', ['--nodes', '12', '--steps', '5', '--temperature', '300', '--no-lb']),
+    ('particle/thermal.py', ['--steps', '20', '--seed', '3', '--viscosity', '5', '--temperature', '0']),
+    ('particle/uniform_flow.py', ['--nodes', '12', '--steps', '20', '--interval', '10', '--viscosity', '3',
+                                  '--temperature', '300']),
+    ('fluid/initial_state.py', ['--nodes', '16', '--steps', '20', '--interval', '10', '--temperature', '298']),
+    ('cocomo/kick.py', ['--preset', 'peptide', '--nodes', '24', '--steps', '5', '--viscosity', '1.0035',
+                        '--temperature', '298']),
+    ('cocomo/kick.py', ['--preset', 'peptide', '--nodes', '24', '--steps', '5', '--temperature', '298', '--no-lb']),
+    ('cocomo/diffusion.py', ['--preset', 'smoke', '--box', '10', '--steps', '20', '--report', '10', '--temperature',
+                             '0']),
 ]
 
 

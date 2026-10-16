@@ -39,20 +39,30 @@ The output files are written in the current directory. Options common to the sim
 - `--drag Explicit|Centered`: drag scheme of the coupling (default `Explicit`; see
   [choosing the drag](../docs/user_guide/lattice.md#choosing-the-drag)); not in `fluid/initial_state.py`,
   which has no particles.
+- `--viscosity NU`: kinematic viscosity in nm²/ps, in physical units. The plugin converts it to the relaxation time
+  $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$ of the lattice with the lattice spacing and the time step, and the
+  script prints $`\tau`$ ([relaxation time](../docs/user_guide/lattice.md#relaxation-time)).
+- `--temperature T`: temperature in K. Every simulation script has it, also those that run without noise by
+  default. At $`T = 0`$ there is nothing stochastic, no random force on the particles and no thermal fluctuations of
+  the fluid, but the drag stays: particles and fluid exchange momentum without a thermostat (the same as the coupling
+  scheme `NVE`). The default is 0 in the kick and uniform-flow examples and in `fluid/initial_state.py`, 300 K in
+  `particle/thermal.py` and 298 K in `cocomo/diffusion.py`.
 - `--steps N`: number of steps. Every other parameter has an option too: see `--help`.
 
 ## The examples
 
 ### particle/kick.py
 
-A bead starts with velocity $`v_0`$ along $`x`$ in a fluid at rest, at zero temperature (coupling scheme NVE:
-drag only, no random force).
+A bead starts with velocity $`v_0`$ along $`x`$ in a fluid at rest, at zero temperature (`--temperature 0`, the
+default: drag only, no random force).
 
 - With the fluid, the drag passes the momentum of the bead to the fluid at its node, and the fluid
   moves along with the bead. The velocity decays more slowly than an exponential and the bead travels
   further than $`v_0/\gamma`$: with the default parameters, 0.958 nm instead of 0.900 nm.
-- With `--no-lb` the same bead is integrated by OpenMM's `LangevinMiddleIntegrator` at zero
-  temperature: $`v(t) = v_0\exp(-\gamma t)`$, with no hydrodynamics.
+- With `--no-lb` the same bead is integrated by OpenMM's `LangevinMiddleIntegrator` at the same friction and
+  temperature: at zero temperature $`v(t) = v_0\exp(-\gamma t)`$, with no hydrodynamics.
+- With `--temperature 300` the bead also receives the random force of the coupling: its velocity decays to thermal
+  fluctuations around zero.
 - `--preset alanine` uses a bead with the mass of an alanine residue in a lattice of 0.5 nm.
 
 The output file `kick_bead_lb_on.txt` (or `_lb_off`) has one line per step: time, velocity (vx, vy, vz,
@@ -75,10 +85,10 @@ beads is written at every step in `thermal_temperature.txt` by the reporter of t
 
 ### particle/uniform_flow.py
 
-The fluid starts with a uniform velocity of 0.09 nm/ps and a bead of one lattice cell at rest. The
-table printed every 50 steps shows the bead reaching the velocity of the fluid, the total momentum of
-bead and fluid (conserved to rounding, below 1e-13), and the kinetic energies. The total kinetic energy
-decreases: the drag and the viscosity dissipate it (see [docs/theory.md](../docs/theory.md), section 2).
+The fluid starts with a uniform velocity of 0.09 nm/ps and a bead of one lattice cell at rest, at zero temperature (no
+random force). The table printed every 50 steps shows the bead reaching the velocity of the fluid, the total momentum of
+bead and fluid (conserved to rounding, below 1e-13), and the kinetic energies. The total kinetic energy decreases: the
+drag and the viscosity dissipate it (see [docs/theory.md](../docs/theory.md), section 2).
 
 ### fluid/initial_state.py
 
@@ -86,7 +96,10 @@ The fluid starts from a shear wave, $`u_x = U\sin(2\pi y/L)`$, built with `setFl
 equilibrium; the script prints its amplitude next to the decay $`U\exp(-\nu k^2 t)`$ of a Newtonian fluid.
 `--save state.npz` writes the fluid state and the time at the end, and `--load state.npz` starts a new run from
 them: two runs of 500 steps give exactly the run of 1000 steps. The function `equilibrium_deviation()` can be reused
-to start the fluid from any density and velocity field.
+to start the fluid from any density and velocity field. With `--temperature 298` the fluid has thermal fluctuations:
+the amplitude of the wave then fluctuates around the same decay, by 0.002 to 0.004 nm/ps with the default grid
+(the mean of eight runs follows $`U\exp(-\nu k^2 t)`$ within its error), and a run continued with `--load` draws new
+random numbers.
 
 ### cocomo/diffusion.py and cocomo/msd.py
 

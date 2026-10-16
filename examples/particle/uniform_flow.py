@@ -4,19 +4,23 @@
 # SPDX-License-Identifier: MIT
 # --------------------------------------------------------------------------
 
-"""A bead at rest dragged by a uniform flow, with the NVE coupling scheme (zero temperature).
+"""A bead at rest dragged by a uniform flow, at the temperature T (--temperature), zero by default.
 
 The fluid starts with the uniform velocity u0 along x and a bead of one lattice cell at rest.  The drag
 accelerates the bead and slows the fluid down; with the removal of the fluid momentum off, the total
 momentum of bead and fluid is conserved exactly, and both end up at the common velocity
 u0 M/(M + m).  The kinetic energy is not conserved: the drag dissipates about gamma m |v - u|^2 per unit
-time, and the viscosity damps the flow that the bead disturbs (docs/theory.md, section 2).
+time, and the viscosity damps the flow that the bead disturbs (docs/theory.md, section 2).  At zero
+temperature there is no random force on the bead, only the drag, and the fluid has no thermal fluctuations of
+its own: bead and fluid exchange momentum without a thermostat (above zero the random force of the coupling
+heats the bead).
 
-The default parameters are those of the old plugin's NVE test: 20^3 nodes of 0.3 nm, time step 1 fs,
-tau = 1, friction 10/ps, u0 = 0.09 nm/ps.  The script prints, every --interval steps, the velocity of
-the bead, the momentum of bead and fluid relative to the initial one, and the kinetic energies.  The
-momentum and energy of the fluid are sums over the nodes of the density and velocity given by
-getFluidFields().
+The viscosity is given in physical units (--viscosity, nm^2/ps); the plugin converts it to the relaxation time
+tau of the lattice, which the script prints.  The default parameters are those of the old plugin's NVE test:
+20^3 nodes of 0.3 nm, time step 1 fs, nu = 15 nm^2/ps (tau = 1), friction 10/ps, u0 = 0.09 nm/ps.  The script
+prints, every --interval steps, the velocity of the bead, the momentum of bead and fluid relative to the
+initial one, and the kinetic energies.  The momentum and energy of the fluid are sums over the nodes of the
+density and velocity given by getFluidFields().
 """
 
 import argparse
@@ -32,10 +36,13 @@ def parse_arguments():
     parser.add_argument('--nodes', type=int, default=20, help='lattice nodes per side (default 20)')
     parser.add_argument('--spacing', type=float, default=0.3, help='lattice spacing in nm (default 0.3)')
     parser.add_argument('--dt', type=float, default=0.001, help='time step in ps (default 0.001)')
-    parser.add_argument('--tau', type=float, default=1.0, help='relaxation time, sets the viscosity (default 1)')
+    parser.add_argument('--viscosity', type=float, default=15.0,
+                        help='kinematic viscosity in nm^2/ps (default 15: tau = 1 with the default spacing and dt)')
     parser.add_argument('--density', type=float, default=993.0, help='fluid density in kg/m^3 (default 993)')
     parser.add_argument('--cells', type=float, default=1.0, help='bead mass in lattice cells (default 1)')
     parser.add_argument('--friction', type=float, default=10.0, help='friction in 1/ps (default 10)')
+    parser.add_argument('--temperature', type=float, default=0.0,
+                        help='temperature in K (default 0: no random force, drag only)')
     parser.add_argument('--flow', type=float, default=0.09, help='initial fluid velocity along x in nm/ps (default 0.09)')
     parser.add_argument('--steps', type=int, default=1000, help='number of steps (default 1000)')
     parser.add_argument('--interval', type=int, default=50, help='steps between lines of output (default 50)')
@@ -74,9 +81,9 @@ def main():
     force = LBMForce()
     force.setGridSize(args.nodes, args.nodes, args.nodes)
     force.setFluidDensity(density)
-    force.setKinematicViscosity((args.tau - 0.5)/3*args.spacing**2/args.dt)
+    force.setKinematicViscosity(args.viscosity)
     force.setFriction(args.friction)
-    force.setCouplingScheme(LBMForce.NVE)
+    force.setTemperature(args.temperature)           # at 0 K no random force: the drag only
     force.setInitialFluidVelocity(mm.Vec3(args.flow, 0, 0))
     force.setFluidMomentumRemovalFrequency(0)
     force.setDragScheme(getattr(LBMForce, args.drag))
@@ -89,8 +96,11 @@ def main():
     context.setVelocities([mm.Vec3(0, 0, 0)])
 
     fluidMass = density*box**3
-    print('Platform %s, box %.2f nm, %d^3 nodes, dt %g ps, tau %g, friction %g 1/ps (gamma dt %g)' % (
-        platform.getName(), box, args.nodes, args.dt, args.tau, args.friction, args.friction*args.dt))
+    dx, dt, tau = force.getLatticeParametersInContext(context)
+    print('Platform %s, box %.2f nm, %d^3 nodes, dt %g ps, friction %g 1/ps (gamma dt %g)' % (
+        platform.getName(), box, args.nodes, args.dt, args.friction, args.friction*args.dt))
+    print('Viscosity %g nm^2/ps (tau %.4f), temperature %g K%s' % (
+        args.viscosity, tau, args.temperature, ' (no random force)' if args.temperature == 0 else ''))
     print('Bead %.4f Da at rest, fluid %.1f Da at u0 = %g nm/ps: final common velocity %.6f nm/ps' % (
         mass, fluidMass, args.flow, args.flow*fluidMass/(fluidMass + mass)))
     p0 = fluidMass*args.flow

@@ -134,6 +134,37 @@ def test_centered_first_step():
         assert found == pytest.approx(initial*(1 - a + b)/(1 + a + b), rel=1e-12)
 
 
+@pytest.mark.parametrize('drag', ['Explicit', 'Centered'])
+def test_zero_temperature_is_nve(drag):
+    # At zero temperature the Euler-Maruyama scheme has no random force and a fluctuating fluid no fluctuations, while
+    # the drag stays: the run is the same, bit for bit, as with the NVE scheme.  The examples rely on it: they switch
+    # the noise off with --temperature 0 (examples/README.md).
+    def run(scheme, temperature, fluctuations):
+        system, force, positions = create_system(num_particles=4)
+        force.setFriction(10.0)
+        force.setCouplingScheme(scheme)
+        force.setTemperature(temperature)
+        force.setFluidFluctuations(fluctuations)
+        force.setDragScheme(getattr(LBMForce, drag))
+        force.setRandomNumberSeed(7)
+        integrator = mm.VerletIntegrator(0.01)
+        context = mm.Context(system, integrator, mm.Platform.getPlatformByName('Reference'))
+        context.setPositions(positions)
+        context.setVelocities([mm.Vec3(9.0, -1.0, 0.5)]*4)
+        integrator.step(50)
+        state = context.getState(getPositions=True, getVelocities=True)
+        density, velocity = force.getFluidFields(context)
+        return ([tuple(x) for x in state.getPositions().value_in_unit(unit.nanometer)],
+                [tuple(v) for v in state.getVelocities().value_in_unit(unit.nanometer/unit.picosecond)],
+                [tuple(u) for u in velocity.value_in_unit(unit.nanometer/unit.picosecond)])
+
+    nve = run(LBMForce.NVE, 300.0, False)
+    assert run(LBMForce.EulerMaruyama, 0.0, False) == nve
+    assert run(LBMForce.EulerMaruyama, 0.0, True) == nve
+    assert run(LBMForce.EulerMaruyama, 300.0, False) != nve
+    assert abs(nve[1][0][0]) < 9.0                  # the drag acted
+
+
 def test_centered_requires_last_force():
     system, force, positions = create_system()
     force.setDragScheme(LBMForce.Centered)

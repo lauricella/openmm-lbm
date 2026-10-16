@@ -13,11 +13,15 @@ them from a density and a velocity field with the equilibrium of the D3Q19 latti
 
     u_x(y) = U sin(2 pi y / L),   u_y = u_z = 0,   uniform density,
 
-and follows its decay, which for a Newtonian fluid is U exp(-nu k^2 t) with k = 2 pi / L.
+and follows its decay, which for a Newtonian fluid is U exp(-nu k^2 t) with k = 2 pi / L.  The viscosity is
+given in physical units (--viscosity, nm^2/ps); the plugin converts it to the relaxation time tau of the lattice,
+which the script prints.  The temperature (--temperature) is zero by default: the fluid has no thermal fluctuations
+and the wave decays smoothly.  Above zero the fluid fluctuates at that temperature (setFluidFluctuations()), and the
+amplitude of the wave fluctuates around the same decay.
 
 The state and the time can be written to a NumPy file with --save and read back with --load: a run that
-loads the file of another one continues it exactly.  This replaces the raw restart files of the old
-plugin.
+loads the file of another one continues it exactly at zero temperature (with fluctuations the random numbers
+of the continued run are new ones).  This replaces the raw restart files of the old plugin.
 """
 
 import argparse
@@ -50,6 +54,8 @@ def parse_arguments():
     parser.add_argument('--dt', type=float, default=0.01, help='time step in ps (default 0.01)')
     parser.add_argument('--viscosity', type=float, default=1.0035, help='kinematic viscosity in nm^2/ps (default 1.0035)')
     parser.add_argument('--amplitude', type=float, default=0.05, help='amplitude U of the wave in nm/ps (default 0.05)')
+    parser.add_argument('--temperature', type=float, default=0.0,
+                        help='temperature in K (default 0: no thermal fluctuations of the fluid)')
     parser.add_argument('--steps', type=int, default=1000, help='number of steps (default 1000)')
     parser.add_argument('--interval', type=int, default=100, help='steps between lines of output (default 100)')
     parser.add_argument('--save', help='write the final state of the fluid and the time to this .npz file')
@@ -85,6 +91,8 @@ def main():
     force = LBMForce()
     force.setGridSize(nx, ny, nz)
     force.setKinematicViscosity(args.viscosity)
+    force.setTemperature(args.temperature)
+    force.setFluidFluctuations(args.temperature > 0)     # at 0 K a fluid without thermal fluctuations
     force.setFluidMomentumRemovalFrequency(0)
     system.addForce(force)
     platform, properties = select_platform(args.platform, args.precision)
@@ -109,8 +117,9 @@ def main():
     k = 2*math.pi/L
     rate = args.viscosity*k**2
     dx, dt, tau = force.getLatticeParametersInContext(context)
-    print('Platform %s, %d x %d x %d nodes of %g nm, dt %g ps, nu %g nm^2/ps (tau %.4f)' % (
-        platform.getName(), nx, ny, nz, args.spacing, args.dt, args.viscosity, tau))
+    print('Platform %s, %d x %d x %d nodes of %g nm, dt %g ps, nu %g nm^2/ps (tau %.4f), temperature %g K%s' % (
+        platform.getName(), nx, ny, nz, args.spacing, args.dt, args.viscosity, tau, args.temperature,
+        ' (no fluctuations)' if args.temperature == 0 else ' (fluctuating fluid)'))
     print('Decay rate nu k^2 = %.5f 1/ps' % rate)
     print(' time (ps)   amplitude (nm/ps)   U exp(-nu k^2 t)')
     sine = np.sin(2*math.pi*j/ny)
