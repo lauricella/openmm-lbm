@@ -18,8 +18,22 @@ versions the API may still change.
   above zero temperature.
 - The tutorial (exercise on the viscosity), the installation guide (output of the first example) and
   `examples/README.md` (options `--viscosity` and `--temperature`) follow.
+- `cocomo/diffusion.py`: `--domain` alone sets both the residues whose nonbonded terms are scaled by their exposure
+  and the residues joined by the elastic network, so that a new protein gets one folded domain for both; with
+  `--enm-domain` the two ranges can still differ. The SOD1 presets keep 1-108 and 2-109, the ranges of the original
+  scripts, and the same runs.
+- `fluid/initial_state.py` prints a third column, the relative difference between the measured amplitude of the wave
+  and its decay $`U\exp(-\nu k^2 t)`$.
 
 ### Documentation
+- Tutorial, after a test by a user: the kick of Lesson 1 runs for 300 steps on the small box (`--steps 300`), which
+  gives a cleaner plot in a few seconds; Lesson 2 says that the bead has the mass of one cell of fluid and that
+  `--cells 100` makes it a hundred times heavier; Lesson 3 uses `--removal 1` throughout (with many beads, all
+  started along $`x`$, the total momentum is otherwise kept and the whole system drifts, which adds about 4% to the
+  temperature measured in the box), says that the one-bead run is only qualitative (two relaxation times from a
+  cold start: about 250 K, with a scatter of about 50% between seeds, the same on every platform) and that the
+  beads have no interaction potential but are coupled through the fluid; Lesson 4 describes the third column of
+  `fluid/initial_state.py`.
 - The viscosity and the temperature are the inputs that the documentation asks for. Every complete script of the
   user guide sets `setKinematicViscosity()` and `setTemperature()` (0 K where it runs without noise), with the same
   results as before. The API reference (introduction, viscosity, coupling scheme, temperature), the getting-started

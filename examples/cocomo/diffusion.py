@@ -97,9 +97,10 @@ def parse_arguments():
     parser.add_argument('--pdb', help='coarse-grained structure (default from the preset, in data/)')
     parser.add_argument('--surface', help='solvent accessible surface of each residue in nm^2 (default from the preset)')
     parser.add_argument('--domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
-                        help='folded domain for the exposure scaling, residues counted from 1 (sod1: 1 108)')
+                        help='folded domain, residues counted from 1: the exposure scaling and, without --enm-domain, '
+                        'the elastic network (sod1: 1 108)')
     parser.add_argument('--enm-domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
-                        help='residues joined by the elastic network (sod1: 2 109)')
+                        help='residues joined by the elastic network, when they differ from --domain (sod1: 2 109)')
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA, OpenCL and HIP (default mixed)')
     parser.add_argument('--output', help='prefix of the output files (default <preset>_lb_on, <preset>_lb_on_centered '
@@ -113,6 +114,8 @@ def parse_arguments():
     args = parser.parse_args()
     if args.vtk > 0 and args.no_lb:
         parser.error('--vtk writes the fluid of LBMForce, so it cannot be used with --no-lb')
+    if args.domain is not None and args.enm_domain is None:
+        args.enm_domain = args.domain          # one folded domain for both, instead of the ranges of the preset
     for key, value in PRESETS[args.preset].items():
         if getattr(args, key) is None:
             setattr(args, key, value)

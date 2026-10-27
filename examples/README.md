@@ -156,10 +156,12 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
   command with `--restart` continues it from the last checkpoint up to `--steps`, exactly as an
   uninterrupted run: the text files are cut at the checkpoint and continued, and the trajectory continues in
   `<prefix>_<step>.dcd`. See [saving and continuing a simulation](../docs/user_guide/restart.md).
-- For SOD1, `--domain` and `--enm-domain` choose the folded domain (residues counted from 1, both
-  included) for the exposure scaling and for the elastic network. The defaults, 1-108 and 2-109, are
-  what the original scripts did with their option `-d 1 109`, because of an offset of one residue in
-  their loops; they are kept to reproduce those runs.
+- `--domain FIRST LAST` chooses the folded domain (residues counted from 1, both included): the residues whose
+  nonbonded terms are scaled by their solvent exposure and, unless `--enm-domain` is also given, the residues
+  joined by the elastic network. A folded domain normally has both, so `--domain` alone is the safe choice for a
+  new protein. The SOD1 presets keep two ranges, 1-108 for the exposure and 2-109 for the elastic network: that is
+  what the original scripts did with their option `-d 1 109`, because of an offset of one residue in their loops,
+  and the presets reproduce those runs. With `--domain` alone both ranges become the same.
 
 ### cocomo/kick.py
 

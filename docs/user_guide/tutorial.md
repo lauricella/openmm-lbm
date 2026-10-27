@@ -93,19 +93,20 @@ no random force, the drag only). Run it twice, with the fluid and without (`--no
 temperature in OpenMM's Langevin integrator, without fluid):
 
 ```bash
-python $EX/particle/kick.py --platform Reference --nodes 30
-python $EX/particle/kick.py --platform Reference --nodes 30 --no-lb
+python $EX/particle/kick.py --platform Reference --nodes 30 --steps 300
+python $EX/particle/kick.py --platform Reference --nodes 30 --steps 300 --no-lb
 python $EX/plot.py kick_bead_lb_on.txt kick_bead_lb_off.txt --x 1 --y 5 --logy --xlabel 'time (ps)' --ylabel 'speed (nm/ps)' --output kick.png
 ```
 
-(`--nodes 30` makes the box smaller, 9 nm instead of 30 nm, so that the run takes about 15 seconds on
-one processor core instead of 10 minutes; on a GPU leave it out.) Open `kick.png`.
+(`--nodes 30` makes the box smaller, 9 nm instead of 30 nm, and `--steps 300` stops the run after 3 ps instead of
+20 ps, so that it takes a few seconds on one processor core; on a GPU you can leave both out and follow the decay
+for longer.) Open `kick.png`.
 
 - **Without the fluid** the speed falls as $`\exp(-\gamma t)`$, a straight line on the logarithmic axis, and
   the bead stops after $`v_0/\gamma = 0.9`$ nm.
 - **With the fluid** the first steps are the same, then the decay slows down: the fluid around the bead
   has been set in motion and drags it along. The bead travels further, and its speed decays as a power
-  of time (about $`t^{-3/2}`$, the "long-time tail" of hydrodynamics) until it reaches the velocity of the
+  of time (about $`t^{-3/2}`$, the "long-time tail" of hydrodynamics) and approaches the velocity of the
   whole fluid, $`m v_0/(m + M)`$, where $`M`$ is the mass of the fluid.
 
 Exercises:
@@ -117,7 +118,7 @@ Exercises:
 
 ## 4. Lesson 2: momentum and energy (`uniform_flow.py`)
 
-Now the fluid moves at 0.09 nm/ps and a bead of 16 Da is at rest:
+Now the fluid moves at 0.09 nm/ps and a bead with the mass of one cell of fluid (16 Da) is at rest:
 
 ```bash
 python $EX/particle/uniform_flow.py --platform Reference
@@ -138,7 +139,7 @@ Exercises:
 1. Change the viscosity (`--viscosity 3`, `--viscosity 30`; the default is 15 nm²/ps). Does the final energy
    change? The script prints the relaxation time of the lattice that the plugin computes from the viscosity,
    $`\tau = 3\nu\Delta t/\Delta x^2 + \tfrac12`$: 0.6 and 1.5 here, 1 by default.
-2. Make the bead heavier (`--cells 100`). The common final velocity is printed in the second line:
+2. Make the bead a hundred times heavier (`--cells 100`). The common final velocity is printed in the second line:
    check it at the end of a longer run (`--steps 5000 --interval 500`).
 
 ## 5. Lesson 3: temperature (`thermal.py`)
@@ -147,9 +148,14 @@ The fluid also works as a thermostat. One bead, started with the velocity $`\sqr
 to 300 K by the friction and the random force:
 
 ```bash
-python $EX/particle/thermal.py --platform Reference --seed 1
+python $EX/particle/thermal.py --seed 1 --removal 1
 python $EX/plot.py thermal.txt --x 1 --y 2 --xlabel 'time (ps)' --ylabel 'vx (nm/ps)' --output thermal.png
 ```
+
+`--removal 1`, used in the whole lesson, removes the mean momentum of the fluid at every step (the
+[lattice page](lattice.md#removal-of-the-fluid-momentum) explains it). It matters for the gas below: its beads all
+start along $`x`$, and without it the total momentum is kept, the whole system drifts, and the temperature measured
+in the box includes the drift.
 
 `thermal.png` shows the velocity of the bead fluctuating around zero. The temperature of the beads is written at
 every step in `thermal_temperature.txt` by the reporter of the plugin, `openmmlbm.LBMTemperatureReporter`, and the
@@ -158,8 +164,11 @@ depends on the scheme is explained in
 [theory.md](../theory.md#2-particle-fluid-coupling-implemented-on-all-platforms) (Which velocity has the right
 temperature).
 
-With one bead and a small friction the mean converges slowly. A gas of 100 beads with a larger
-friction gives a precise value in a few seconds, on a GPU or on the Reference platform:
+This first run is only qualitative. With one bead and a small friction it lasts two relaxation times
+($`1/\gamma = 10`$ ps), and the bead starts with the energy $`k_BT/2`$ along $`x`$ only: the mean temperature is
+about 250 K and changes by about 50% from one seed to another. Each platform has its own random number generator,
+so the same seed gives a different trajectory on each platform, with the same statistics. A gas of 100 beads with
+a larger friction gives a precise value in a few seconds, on a GPU or on the Reference platform:
 
 ```bash
 python $EX/particle/thermal.py --beads 100 --friction 10 --steps 20000 --equilibration 2000 --seed 2 --removal 1
@@ -170,10 +179,10 @@ Mean temperature over 18000 steps: 297.6 K (explicit drag, set temperature 300 K
 Trajectory written to thermal.txt, temperature to thermal_temperature.txt
 ```
 
-(on an A100 GPU; another platform gives slightly different numbers, because the random numbers come from another
-generator (Reference) or are rounded differently.) The temperature is about 1% below 300 K: the fluid itself has no
-thermal fluctuations in this example (they are off by default, `setFluidFluctuations()`), and it takes part of the
-momentum of the beads.
+The beads have no interaction potential, but they are coupled through the fluid. The output above comes from a
+GPU: another platform gives slightly different numbers, because it has another random number generator or rounds
+differently. The temperature is about 1% below 300 K: the fluid itself has no thermal fluctuations in this example
+(they are off by default, `setFluidFluctuations()`), and it takes part of the momentum of the beads.
 
 Exercises:
 
@@ -191,8 +200,8 @@ and prints its amplitude while the viscosity damps it:
 python $EX/fluid/initial_state.py --platform Reference --save state.npz
 ```
 
-The two columns are the measured amplitude and the decay $`U\exp(-\nu k^2 t)`$ of a fluid with the
-viscosity $`\nu`$ that was set; they agree within 1%.
+The columns are the measured amplitude $`A`$, the decay $`U\exp(-\nu k^2 t)`$ of a fluid with the viscosity $`\nu`$
+that was set, and their relative difference $`A/(U\exp(-\nu k^2 t)) - 1`$: they agree within 1%.
 
 - The script builds the initial populations of the lattice from the density and the velocity with the
   function `equilibrium_deviation()`, and gives them to the plugin with `setFluidState()`. Read it:

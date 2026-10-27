@@ -111,6 +111,25 @@ def test_cocomo2_parameters():
     assert abs(sum(system.getParticleMass(i)._value for i in range(110)) - sum(cocomo2.RESIDUES[n][0] for n in names)) < 1e-9
 
 
+@pytest.mark.parametrize('options, ranges', [([], [(2, 109)]),
+                                              (['--domain', '1', '110'], [(1, 110)]),
+                                              (['--domain', '1', '110', '--enm-domain', '2', '109'], [(2, 109)])],
+                         ids=['preset', 'domain alone', 'both'])
+def test_diffusion_domain(tmp_path, options, ranges):
+    """--domain alone sets the residues of the elastic network too; the SOD1 presets and --enm-domain keep 2-109."""
+    sys.path.insert(0, os.path.join(EXAMPLES, 'cocomo'))
+    import re
+    import cocomo2
+    names, chains, positions = cocomo2.read_beads(os.path.join(EXAMPLES, 'cocomo', 'data', 'sod1.pdb'))
+    expected = len(cocomo2.elastic_network(positions, ranges))
+    script = os.path.join(EXAMPLES, 'cocomo', 'diffusion.py')
+    command = [sys.executable, script, '--platform', 'Reference', '--preset', 'smoke', '--box', '10', '--steps', '2',
+               '--report', '1', '--checkpoint', '0'] + options
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert int(re.search(r'(\d+) elastic bonds', result.stdout).group(1)) == expected
+
+
 @pytest.mark.parametrize('fluctuations', [False, True], ids=['still fluid', 'fluctuating fluid'])
 def test_diffusion_restart(tmp_path, fluctuations):
     """A run split in two with --checkpoint and --restart gives the same output as an uninterrupted run."""

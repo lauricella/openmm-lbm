@@ -13,7 +13,8 @@ them from a density and a velocity field with the equilibrium of the D3Q19 latti
 
     u_x(y) = U sin(2 pi y / L),   u_y = u_z = 0,   uniform density,
 
-and follows its decay, which for a Newtonian fluid is U exp(-nu k^2 t) with k = 2 pi / L.  The viscosity is
+and follows its decay, which for a Newtonian fluid is U exp(-nu k^2 t) with k = 2 pi / L: the last column of the
+output is the relative difference between the measured amplitude and this decay.  The viscosity is
 given in physical units (--viscosity, nm^2/ps); the plugin converts it to the relaxation time tau of the lattice,
 which the script prints.  The temperature (--temperature) is zero by default: the fluid has no thermal fluctuations
 and the wave decays smoothly.  Above zero the fluid fluctuates at that temperature (setFluidFluctuations()), and the
@@ -121,7 +122,7 @@ def main():
         platform.getName(), nx, ny, nz, args.spacing, args.dt, args.viscosity, tau, args.temperature,
         ' (no fluctuations)' if args.temperature == 0 else ' (fluctuating fluid)'))
     print('Decay rate nu k^2 = %.5f 1/ps' % rate)
-    print(' time (ps)   amplitude (nm/ps)   U exp(-nu k^2 t)')
+    print(' time (ps)   amplitude (nm/ps)   U exp(-nu k^2 t)   difference')
     sine = np.sin(2*math.pi*j/ny)
     for step in range(0, args.steps + 1, args.interval):
         if step > 0:
@@ -130,7 +131,8 @@ def main():
         ux = np.asarray(u.value_in_unit(unit.nanometer/unit.picosecond))[:, 0]
         amplitude = 2*(ux*sine).mean()             # projection on the sine
         t = context.getTime().value_in_unit(unit.picosecond)
-        print('%9.2f   %.6e        %.6e' % (t, amplitude, args.amplitude*math.exp(-rate*t)))
+        decay = args.amplitude*math.exp(-rate*t)
+        print('%9.2f   %.6e        %.6e       %+.2e' % (t, amplitude, decay, amplitude/decay - 1))
 
     if args.save:
         np.savez(args.save, state=np.array(force.getFluidState(context)),
