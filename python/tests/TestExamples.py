@@ -57,6 +57,24 @@ def test_example_runs(script, arguments, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize('script, first, second', [
+    ('particle/thermal.py', ['--beads', '4'], ['--particles', '4']),
+    ('particle/kick.py', ['--preset', 'bead'], ['--preset', 'particle'])], ids=['--particles', 'preset particle'])
+def test_bead_and_particle_names(tmp_path, script, first, second):
+    """The second names of the options (--particles, the preset particle) give the same run as the first ones."""
+    common = [sys.executable, os.path.join(EXAMPLES, script), '--platform', 'Reference', '--nodes', '12',
+              '--steps', '5']
+    if script.endswith('thermal.py'):
+        common += ['--seed', '3']
+    outputs = []
+    for i, names in enumerate([first, second]):
+        result = subprocess.run(common + names + ['--output', 'run%d.txt' % i], cwd=tmp_path, capture_output=True,
+                                text=True, timeout=600)
+        assert result.returncode == 0, result.stdout + result.stderr
+        outputs.append((tmp_path/('run%d.txt' % i)).read_text())
+    assert outputs[0] == outputs[1]
+
+
 def test_fluid_state_restart(tmp_path):
     """Loading the saved state continues the run exactly: two runs of 20 steps give the run of 40 steps."""
     script = os.path.join(EXAMPLES, 'fluid', 'initial_state.py')

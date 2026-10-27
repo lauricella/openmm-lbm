@@ -19,7 +19,7 @@ The viscosity is given in physical units (--viscosity, nm^2/ps); the plugin conv
 of the lattice with the lattice spacing and the time step, and the script prints tau.  Two parameter sets of the old
 plugin's examples are available:
   --preset bead     a bead of 5 lattice cells, 100^3 nodes of 0.3 nm, nu = 1.5 nm^2/ps (tau = 1), v0 = 9 nm/ps,
-                    2000 steps
+                    2000 steps (--preset particle is the same)
   --preset alanine  a bead with the mass of alanine, 30^3 nodes of 0.5 nm, nu = 1.0035 nm^2/ps (tau = 0.62),
                     v0 = 15 nm/ps
 Every parameter can be changed from the command line.
@@ -42,11 +42,13 @@ PRESETS = {
     'alanine': dict(nodes=30, spacing=0.5, dt=0.01, friction=10.0, viscosity=1.0035, density=1000.0,
                     mass=71.079, cells=None, velocity=15.0, steps=100),
 }
+ALIASES = {'particle': 'bead'}       # a bead is a coupled particle: both names select the same preset
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--preset', choices=sorted(PRESETS), default='bead', help='parameter set (default bead)')
+    parser.add_argument('--preset', choices=sorted(PRESETS) + sorted(ALIASES), default='bead',
+                        help='parameter set (default bead; particle is the same preset)')
     parser.add_argument('--nodes', type=int, help='lattice nodes per side of the cubic box')
     parser.add_argument('--spacing', type=float, help='lattice spacing (nm)')
     parser.add_argument('--dt', type=float, help='time step (ps)')
@@ -65,6 +67,7 @@ def parse_arguments():
     parser.add_argument('--precision', default='mixed', help='precision on CUDA, OpenCL and HIP (default mixed)')
     parser.add_argument('--output', help='output file (default kick_<preset>_lb_on.txt or _lb_off.txt)')
     args = parser.parse_args()
+    args.preset = ALIASES.get(args.preset, args.preset)
     for key, value in PRESETS[args.preset].items():
         if getattr(args, key, None) is None:
             setattr(args, key, value)

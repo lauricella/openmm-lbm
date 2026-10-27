@@ -36,7 +36,8 @@ from openmmlbm import LBMForce
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--beads', type=int, default=1, help='number of beads (default 1)')
+    parser.add_argument('--beads', '--particles', dest='beads', type=int, default=1,
+                        help='number of beads, that is coupled particles (default 1); --particles is the same option')
     parser.add_argument('--nodes', type=int, default=10, help='lattice nodes per side (default 10)')
     parser.add_argument('--spacing', type=float, default=0.3, help='lattice spacing in nm (default 0.3)')
     parser.add_argument('--dt', type=float, default=0.001, help='time step in ps (default 0.001)')

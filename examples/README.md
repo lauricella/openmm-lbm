@@ -75,7 +75,7 @@ One bead, started with the velocity $`\sqrt{k_BT/m}`$ along $`x`$, in a box of 3
 friction and the random force of `LBMForce` (the Euler-Maruyama scheme) bring it to 300 K. The temperature of the
 beads is written at every step in `thermal_temperature.txt` by the reporter of the plugin,
 `openmmlbm.LBMTemperatureReporter`, which gives the right temperature for the drag scheme
-([theory.md](../docs/theory.md), section 2), and the script prints its mean at the end. With `--beads N` there are N beads at random positions.
+([theory.md](../docs/theory.md), section 2), and the script prints its mean at the end. With `--beads N` (or `--particles N`) there are N beads at random positions.
 
 - The default friction is small, 0.1/ps, so one bead needs about 10 ps to thermalize and its
   temperature fluctuates strongly. Use `--steps 200000` or more beads for a stable mean.

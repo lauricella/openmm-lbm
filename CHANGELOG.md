@@ -22,6 +22,9 @@ versions the API may still change.
   and the residues joined by the elastic network, so that a new protein gets one folded domain for both; with
   `--enm-domain` the two ranges can still differ. The SOD1 presets keep 1-108 and 2-109, the ranges of the original
   scripts, and the same runs.
+- `particle/thermal.py` accepts `--particles` as a second name for `--beads`, and `particle/kick.py` the preset
+  `particle` for `bead`: the same runs. The documentation keeps "bead", the usual word of coarse-grained models, and
+  defines it in the glossary and in the tutorial: a coupled particle, one per amino acid in the protein examples.
 - `fluid/initial_state.py` prints a third column, the relative difference between the measured amplitude of the wave
   and its decay $`U\exp(-\nu k^2 t)`$.
 

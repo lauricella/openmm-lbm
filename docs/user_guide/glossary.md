@@ -2,6 +2,10 @@
 
 The words used in this guide, explained briefly, with a link to where they are explained in full.
 
+**Bead.** A coupled particle, in the words of coarse-grained models: in the protein examples there is one bead per
+amino acid (residue). The examples call their coupled particles beads; `particle/thermal.py` also takes
+`--particles` for `--beads`, and `particle/kick.py` the preset `particle` for `bead`.
+
 **Body acceleration.** A uniform acceleration g applied to the whole fluid, as gravity or a pressure
 gradient would: it drives a flow, for example in a channel. Set with `setBodyAcceleration()`
 ([lattice](lattice.md#velocity-of-the-fluid)).

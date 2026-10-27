@@ -70,7 +70,8 @@ $`\mathbf u`$. The parameters are those of a real fluid:
 Give these physical quantities, always the viscosity and the temperature: the parameters of the lattice Boltzmann
 method, such as the relaxation time $`\tau`$, are computed by the plugin from them, the spacing and the time step.
 
-The particles added with `addParticle(i)` are **coupled** to the fluid. At every step each one feels,
+The particles added with `addParticle(i)` are **coupled** to the fluid; the examples call them *beads*, as
+coarse-grained models do (one bead per amino acid in the protein examples). At every step each one feels,
 from the node nearest to it,
 
 - a friction force $`-\gamma m(\mathbf v - \mathbf u)`$: the particle is dragged towards the velocity of the fluid
