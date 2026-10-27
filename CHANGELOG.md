@@ -22,6 +22,12 @@ versions the API may still change.
   and the residues joined by the elastic network, so that a new protein gets one folded domain for both; with
   `--enm-domain` the two ranges can still differ. The SOD1 presets keep 1-108 and 2-109, the ranges of the original
   scripts, and the same runs.
+- `cocomo/kick.py` has the options of `diffusion.py` that it lacked: `--box` (in nm, besides `--nodes`), the preset
+  `sod1` with `--domain` and `--enm-domain`, `--seed` and `--fluid-fluctuations`. Above zero temperature
+  `--equilibration N` equilibrates beads and fluid at T before the kick, and `--repeats N` averages N independent
+  kicks, with the standard error of vx in a last column. The defaults give the same output as before, bit for bit
+  (at zero temperature; above zero the old script had no fixed seed). Tests `test_kick_repeats` and new cases of
+  `test_example_runs`.
 - `particle/thermal.py` accepts `--particles` as a second name for `--beads`, and `particle/kick.py` the preset
   `particle` for `bead`: the same runs. The documentation keeps "bead", the usual word of coarse-grained models, and
   defines it in the glossary and in the tutorial: a coupled particle, one per amino acid in the protein examples.

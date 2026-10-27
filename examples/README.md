@@ -13,7 +13,7 @@ the [tutorial](../docs/user_guide/tutorial.md), which goes through these example
 | [particle/uniform_flow.py](particle/uniform_flow.py) | a bead dragged by a uniform flow; momentum and kinetic energy | $`20^3`$ nodes, 1000 steps | 1 s | 3 s |
 | [fluid/initial_state.py](fluid/initial_state.py) | a fluid started from a shear wave; saving and loading the fluid state | 32 x 32 x 4 nodes, 1000 steps | 1 s | 2 s |
 | [cocomo/diffusion.py](cocomo/diffusion.py) | diffusion of a protein (COCOMO2): the folded SOD1 (110 beads) or a disordered one, with and without the fluid | $`30^3`$ nodes, 2000 steps (`--preset smoke`) to 2e7 steps (200 ns) | 2 s (smoke), 30 min (200 ns) | 25 s (smoke) |
-| [cocomo/kick.py](cocomo/kick.py) | a peptide or ubiquitin kicked in the fluid | $`100^3`$ nodes, 2000 steps | 10 s | 20 s with `--nodes 30` |
+| [cocomo/kick.py](cocomo/kick.py) | a peptide, ubiquitin or SOD1 kicked in the fluid | $`100^3`$ nodes, 2000 steps | 10 s | 20 s with `--nodes 30` |
 | [cocomo/msd.py](cocomo/msd.py) | mean square displacement and diffusion coefficient of the centre of mass | - | - | seconds |
 
 The times include the start of Python and OpenMM. The thermal example reads the velocities and writes the
@@ -166,11 +166,26 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
 ### cocomo/kick.py
 
 The kick experiment of [particle/kick.py](particle/kick.py) with a protein: every bead starts at
-9 nm/ps along x, at zero temperature. `--preset peptide` kicks the flexible peptide GRGDSPYS (8 beads),
-`--preset ubiquitin` ubiquitin (76 beads) held folded by an elastic network over the whole chain. The
-output has the velocity and position of the centre of mass and the radius of gyration at every step.
-With the default box ($`100^3`$ nodes, 30 nm) a run takes about 10 seconds on a GPU; on the Reference
-platform use a smaller box, for example `--nodes 30` (20 seconds).
+9 nm/ps along x, at zero temperature by default. `--preset peptide` kicks the flexible peptide GRGDSPYS (8 beads),
+`--preset ubiquitin` ubiquitin (76 beads) held folded by an elastic network over the whole chain, `--preset sod1`
+the SOD1 of `diffusion.py`, with the same structure, exposure and elastic network (`--domain` and `--enm-domain`
+work as in `diffusion.py`). The output has the velocity and position of the centre of mass and the radius of
+gyration at every step. With the default box (30 nm, $`100^3`$ nodes) a run takes about 10 seconds on a GPU; on
+the Reference platform use a smaller box, for example `--box 9` or `--nodes 30` (20 seconds). The momentum of the
+fluid is never removed, so the protein ends at the velocity of the whole system, $`M v_0/(M + M_\text{fluid})`$.
+
+- **At a temperature.** With `--temperature T` the beads receive the random force, and with `--fluid-fluctuations`
+  (and `--drag Centered`) the fluid fluctuates too. `--equilibration N` runs N steps at T, from velocities drawn at
+  T, before the kick adds $`v_0`$ along x to every bead. A single kick is then lost in the thermal velocity of the
+  centre of mass, $`\sqrt{k_BT/M}`$ (about 0.015 nm/ps for SOD1 at 300 K), after about a picosecond: `--repeats N`
+  runs N independent kicks (seeds `--seed`, `--seed` + 1, ...) and writes their mean, with the standard error of vx in a
+  last column. To follow the decay down to a velocity $`V`$ about $`(\sqrt{k_BT/M}/V)^2`$ kicks are needed. In
+  linear response the mean decay is the one at zero temperature.
+
+  ```bash
+  python $EX/cocomo/kick.py --preset sod1 --temperature 300 --fluid-fluctuations --drag Centered \
+      --equilibration 5000 --repeats 100 --output kick_sod1_300K.txt
+  ```
 
 Compared with the original scripts, the centre of mass is weighted by the masses (the original used
 the plain mean of the positions), and the elastic network of ubiquitin covers the whole chain: the

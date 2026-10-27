@@ -35,6 +35,10 @@ CASES = [
     ('cocomo/diffusion.py', ['--preset', 'smoke', '--box', '10', '--steps', '20', '--report', '10', '--drag', 'Centered',
                              '--fluid-fluctuations', '--vtk', '10']),
     ('cocomo/kick.py', ['--preset', 'peptide', '--nodes', '24', '--steps', '5', '--drag', 'Centered']),
+    ('cocomo/kick.py', ['--preset', 'sod1', '--box', '9', '--steps', '5']),
+    ('cocomo/kick.py', ['--preset', 'sod1', '--box', '9', '--steps', '5', '--domain', '1', '110']),
+    ('cocomo/kick.py', ['--preset', 'sod1', '--box', '9', '--steps', '5', '--temperature', '300', '--fluid-fluctuations',
+                        '--drag', 'Centered', '--equilibration', '5', '--repeats', '2']),
     # the viscosity and the temperature, which every simulation script takes (examples/README.md)
     ('particle/kick.py', ['--nodes', '12', '--steps', '5', '--viscosity', '3', '--temperature', '300']),
     ('particle/kick.py', ['--nodes', '12', '--steps', '5', '--temperature', '300', '--no-lb']),
@@ -73,6 +77,21 @@ def test_bead_and_particle_names(tmp_path, script, first, second):
         assert result.returncode == 0, result.stdout + result.stderr
         outputs.append((tmp_path/('run%d.txt' % i)).read_text())
     assert outputs[0] == outputs[1]
+
+
+def test_kick_repeats(tmp_path):
+    """At zero temperature the kicks of --repeats are all the same: their mean is the single kick, with zero error."""
+    import numpy as np
+    common = [sys.executable, os.path.join(EXAMPLES, 'cocomo', 'kick.py'), '--platform', 'Reference', '--preset',
+              'peptide', '--nodes', '24', '--steps', '10']
+    for name, extra in (('one.txt', []), ('three.txt', ['--repeats', '3'])):
+        result = subprocess.run(common + extra + ['--output', name], cwd=tmp_path, capture_output=True, text=True,
+                                timeout=600)
+        assert result.returncode == 0, result.stdout + result.stderr
+    one, three = np.loadtxt(tmp_path/'one.txt'), np.loadtxt(tmp_path/'three.txt')
+    assert three.shape == (11, 10)
+    assert np.array_equal(three[:, :9], one)
+    assert np.all(three[:, 9] < 1e-12)         # zero up to the rounding of the mean of equal numbers
 
 
 def test_fluid_state_restart(tmp_path):
