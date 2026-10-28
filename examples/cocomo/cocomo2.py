@@ -113,7 +113,8 @@ def read_beads(path):
 def exposure(names, sasa, domains, lam=LAMBDA):
     """Scaling factors xi of the nonbonded terms: 1 outside the folded domains, min(S/S_ref, lam)/lam
     inside.  sasa holds the solvent accessible surface of each residue (nm^2) in the reference
-    structure; domains is a list of (first, last) residue numbers, counted from 1, both included."""
+    structure, computed from the all-atom structure with atomic radii, as the reference surfaces S_ref of
+    RESIDUES; domains is a list of (first, last) residue numbers, counted from 1, both included."""
     xi = np.ones(len(names))
     for first, last in domains:
         for i in range(first - 1, last):

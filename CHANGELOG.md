@@ -28,6 +28,10 @@ versions the API may still change.
   kicks, with the standard error of vx in a last column. The defaults give the same output as before, bit for bit
   (at zero temperature; above zero the old script had no fixed seed). Tests `test_kick_repeats` and new cases of
   `test_example_runs`.
+- `examples/README.md` and `exposure()` in `cocomo2.py` say what the surface file of a protein holds: the solvent
+  accessible surface of each residue in nm², computed from the all-atom structure with atomic radii, as in COCOMO2.
+  `ubiquitin.surface` is such a file; `sod1.surface` was computed from the coarse-grained structure (one sphere of
+  0.2 nm per bead), and the SOD1 presets keep it to reproduce the original runs.
 - `particle/thermal.py` accepts `--particles` as a second name for `--beads`, and `particle/kick.py` the preset
   `particle` for `bead`: the same runs. The documentation keeps "bead", the usual word of coarse-grained models, and
   defines it in the glossary and in the tutorial: a coupled particle, one per amino acid in the protein examples.

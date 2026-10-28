@@ -203,12 +203,19 @@ proteins. On SOD1 its energies and forces are equal, term by term, to those of t
 in the DragOpenMM project (energies identical to the last digit, forces within 1e-16 relative, also
 away from the reference structure).
 
+The surface file given to `exposure()` holds, for each residue, its solvent accessible surface area in nm²,
+computed from the all-atom structure of the protein with atomic radii, as in COCOMO2: the reference surfaces
+of the residues in `cocomo2.RESIDUES` are of the same kind. `ubiquitin.surface` is such a file. `sod1.surface`,
+instead, was computed from the coarse-grained structure `sod1.pdb`, with one sphere of radius 0.2 nm per bead
+(the default radius of Biopython for an atom that is not a chemical element) and a probe of 0.14 nm; it is the
+file of the original runs of the DragOpenMM project, and the SOD1 presets keep it to reproduce them.
+
 ### Data
 
 | File | Content | Source |
 |---|---|---|
 | `cocomo/data/sod1.pdb` | SOD1 coarse grained with one bead per residue (110 beads, positions in Angstrom) | prepared by the IBPC group (L. E. Coronas-Serna, F. Sterpone) for the thermal-diffusion runs of SOD1 with COCOMO2 |
-| `cocomo/data/sod1.surface` | solvent accessible surface of each residue of `sod1.pdb`, in nm² | same |
+| `cocomo/data/sod1.surface` | solvent accessible surface of each residue of `sod1.pdb`, in nm², computed from the coarse-grained structure (see cocomo2.py above) | same |
 | `cocomo/data/GRGDSPYS.pdb` | the peptide GRGDSPYS, one bead per residue | kick examples of the DragOpenMM plugin (IBPC group) |
 | `cocomo/data/ubiquitin.pdb`, `cocomo/data/ubiquitin.surface` | ubiquitin, one bead per residue at the C-alpha positions (`ubione.min.pdb` of the original example), and the solvent accessible surface of each residue in nm² | same |
 | `cocomo/data/rlp.pdb` | an intrinsically disordered protein of 166 residues, one bead per residue | thermal-diffusion example of the DragOpenMM plugin (IBPC group) |
