@@ -94,6 +94,54 @@ def test_kick_repeats(tmp_path):
     assert np.all(three[:, 9] < 1e-12)         # zero up to the rounding of the mean of equal numbers
 
 
+def _pdb(atoms):
+    """PDB lines for (residue name, residue number, atom name, element, x, y, z in Angstrom)."""
+    return ''.join('ATOM  %5d %-4s %3s A%4d    %8.3f%8.3f%8.3f  1.00  0.00          %2s\n' % (
+        i + 1, name, res, num, x, y, z, element) for i, (res, num, name, element, x, y, z) in enumerate(atoms))
+
+
+def test_surface_exact_cases():
+    """surface.py against exact areas: an isolated atom, two overlapping spheres (spherical cap), a buried atom."""
+    import math
+    import numpy as np
+    sys.path.insert(0, os.path.join(EXAMPLES, 'cocomo'))
+    import surface
+    R = surface.RADII['C'] + 0.14
+    # one atom: the whole grown sphere
+    areas = surface.atom_areas(np.zeros((1, 3)), np.array([surface.RADII['C']]))
+    assert abs(areas[0] - 4*math.pi*R**2) < 1e-12
+    # two atoms at a distance d < 2R: each loses a cap of height h = R - d/2; 50 random distances and orientations
+    rng = np.random.default_rng(5)
+    errors = []
+    for _ in range(50):
+        d, u = rng.uniform(0.05, 0.6), rng.normal(size=3)
+        areas = surface.atom_areas(np.array([[0, 0, 0], d*u/np.linalg.norm(u)]), np.full(2, surface.RADII['C']))
+        errors.append(np.abs(areas - (4*math.pi*R**2 - 2*math.pi*R*(R - d/2))).max()/(4*math.pi*R**2))
+    assert np.mean(errors) < 3e-3 and np.max(errors) < 1e-2
+    # an atom inside an octahedron of atoms 0.25 nm away is not accessible
+    centre = [[0, 0, 0]] + [[s*0.25*(k == 0), s*0.25*(k == 1), s*0.25*(k == 2)] for k in range(3) for s in (1, -1)]
+    areas = surface.atom_areas(np.array(centre, dtype=float), np.full(7, surface.RADII['C']))
+    assert areas[0] == 0
+
+
+def test_surface_script(tmp_path):
+    """surface.py writes one area per residue, leaves out hydrogens and water, and refuses a coarse-grained file."""
+    import numpy as np
+    pdb = tmp_path/'two.pdb'
+    pdb.write_text(_pdb([('ALA', 1, ' CA ', 'C', 0, 0, 0), ('ALA', 1, ' HA ', 'H', 1.0, 0, 0),
+                         ('GLY', 2, ' CA ', 'C', 30, 0, 0), ('HOH', 3, ' O  ', 'O', 0, 30, 0)]))
+    script = os.path.join(EXAMPLES, 'cocomo', 'surface.py')
+    result = subprocess.run([sys.executable, script, str(pdb), '--output', 'two.surface'], cwd=tmp_path,
+                            capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    areas = np.loadtxt(tmp_path/'two.surface')
+    assert areas.shape == (2,)
+    assert np.allclose(areas, 4*np.pi*(0.17 + 0.14)**2, rtol=0, atol=1e-3)       # isolated carbons, no hydrogen
+    result = subprocess.run([sys.executable, script, os.path.join(EXAMPLES, 'cocomo', 'data', 'sod1.pdb')],
+                            cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode != 0 and 'all-atom' in result.stderr
+
+
 def test_fluid_state_restart(tmp_path):
     """Loading the saved state continues the run exactly: two runs of 20 steps give the run of 40 steps."""
     script = os.path.join(EXAMPLES, 'fluid', 'initial_state.py')

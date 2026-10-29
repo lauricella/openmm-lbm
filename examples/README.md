@@ -15,6 +15,7 @@ the [tutorial](../docs/user_guide/tutorial.md), which goes through these example
 | [cocomo/diffusion.py](cocomo/diffusion.py) | diffusion of a protein (COCOMO2): the folded SOD1 (110 beads) or a disordered one, with and without the fluid | $`30^3`$ nodes, 2000 steps (`--preset smoke`) to 2e7 steps (200 ns) | 2 s (smoke), 30 min (200 ns) | 25 s (smoke) |
 | [cocomo/kick.py](cocomo/kick.py) | a peptide, ubiquitin or SOD1 kicked in the fluid | $`100^3`$ nodes, 2000 steps | 10 s | 20 s with `--nodes 30` |
 | [cocomo/msd.py](cocomo/msd.py) | mean square displacement and diffusion coefficient of the centre of mass | - | - | seconds |
+| [cocomo/surface.py](cocomo/surface.py) | solvent accessible surface of each residue of an all-atom structure, the input of the exposure scaling | - | - | 2 s (159 residues) |
 
 The times include the start of Python and OpenMM. The thermal example reads the velocities and writes the
 temperature at every step, which costs more than the step itself on a GPU.
@@ -209,6 +210,19 @@ of the residues in `cocomo2.RESIDUES` are of the same kind. `ubiquitin.surface` 
 instead, was computed from the coarse-grained structure `sod1.pdb`, with one sphere of radius 0.2 nm per bead
 (the default radius of Biopython for an atom that is not a chemical element) and a probe of 0.14 nm; it is the
 file of the original runs of the DragOpenMM project, and the SOD1 presets keep it to reproduce them.
+
+`surface.py` writes such a file from an all-atom PDB file, by the method of Shrake and Rupley with the van der
+Waals radii of Bondi and a probe of 0.14 nm, one area per residue in nm², in the order of the residues:
+
+```bash
+python $EX/cocomo/surface.py protein.pdb --output protein.surface
+```
+
+Hydrogen atoms, water and residues that are not amino acids are left out (`--hydrogens` keeps the hydrogens). An
+atom whose element is not in the table of radii stops the script, so a coarse-grained file gives an error instead
+of a surface. The coarse-grained model must have one bead for each residue of the file, in the same order. With
+the default 960 points per atom the error on the area of an atom is 0.14 % of its sphere on average, at most
+0.7 %; on dihydrofolate reductase (OpenMM's `5dfr_minimized.pdb`, 159 residues) the total is 89.8 nm².
 
 ### Data
 
