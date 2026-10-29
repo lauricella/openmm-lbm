@@ -3,13 +3,16 @@ OpenMM plugin coupling molecular dynamics to a thread-safe lattice Boltzmann flu
 forcing) for coarse-grained simulations with hydrodynamics. Particles exchange friction and thermal noise with the
 fluid. Native OpenMM plugin with Reference, CUDA, OpenCL and HIP platforms.
 
-**Version 0.6.4 (2026-10-14).** The fluid, solid walls (bounce-back or regularized), open faces with an imposed
+**Version 0.6.5 (2026-10-29).** The fluid, solid walls (bounce-back or regularized), open faces with an imposed
 velocity, density or both, thermal fluctuations of the fluid and the particle-fluid coupling, with the explicit or the
 centred drag, at the nearest node or through an interpolation stencil, run on all platforms (Reference, CUDA, OpenCL,
 HIP), with one domain or with the lattice divided over MPI ranks, one GPU per rank ([running on several
 GPUs](docs/user_guide/parallel.md)); the platforms agree with each other, and the explicit drag at the nearest node
-with the reference CUDA library of the DragOpenMM project. Version 0.6.4 gives the units of the output files (the DCD
-files of OpenMM in Å, those of the plugin in nm), version 0.6.3 describes the viscosity of the SOD1 examples (five times
+with the reference CUDA library of the DragOpenMM project. Version 0.6.5 makes the viscosity and the temperature the
+inputs of every example and of the documentation, aligns the protein kick with the diffusion example (SOD1, a fluctuating
+fluid, kicks at a temperature averaged over seeds), adds `examples/cocomo/surface.py` for the surface file of a protein
+and the corrections of a test of the tutorial; version 0.6.4 gives the units of the output files (the DCD files of
+OpenMM in Å, those of the plugin in nm), version 0.6.3 describes the viscosity of the SOD1 examples (five times
 that of water) and validates them at the viscosity of water, version 0.6.2 adds the temperature of the fluctuating fluid
 to the diffusion example, takes the temperature of the beads in the examples from the reporter of the plugin and
 proofreads the documentation, and version 0.6.1 corrects the description of the Guo forcing in `docs/theory.md`, all
@@ -50,7 +53,7 @@ CMake builds every GPU platform (`LBM_BUILD_CUDA_LIB`, `LBM_BUILD_OPENCL_LIB`, `
 the OpenMM in `OPENMM_DIR` has (its header and its library) and the system can compile, and the Python wrapper
 (`LBM_BUILD_PYTHON_WRAPPERS`) if SWIG and Python with the OpenMM module, NumPy, setuptools and pip are
 installed. It says why it leaves a part out, and ends with the list of what it builds, for example
-`-- openmm-lbm 0.6.4: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`. An option set to `ON`
+`-- openmm-lbm 0.6.5: platforms to build: Reference, CUDA, OpenCL; Python wrapper: yes; MPI: no`. An option set to `ON`
 for a part that cannot be built stops `cmake` with an error. CMake also prints the version of OpenMM it found
 and stops with an error if it is older than 8.3 (it warns if it is newer than 8.6, the newest tested version).
 All the checks, options and messages are in

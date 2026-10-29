@@ -3,7 +3,12 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.6.5 (2026-10-29)
+
+The viscosity and the temperature as the inputs of every example and of the documentation; the protein kick aligned
+with the diffusion example, with SOD1, a fluctuating fluid and kicks at a temperature averaged over seeds; the surface
+file of a protein from its all-atom structure (`examples/cocomo/surface.py`); the corrections of a test of the
+tutorial. The C++ code of the plugin is that of version 0.6.0 (only comments of `LBMForce.h` change).
 
 ### Examples
 - Every simulation script in `examples/` takes the viscosity in physical units (`--viscosity`, nm²/ps) and prints
