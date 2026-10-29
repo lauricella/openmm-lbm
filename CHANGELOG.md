@@ -31,7 +31,7 @@ versions the API may still change.
 - `cocomo/surface.py` (new) computes the surface file of a protein from its all-atom structure: the solvent
   accessible surface of each residue in nm², by the method of Shrake and Rupley with the radii of Bondi and a probe
   of 0.14 nm, with numpy only. It stops at an atom that is not a chemical element, so that a coarse-grained file
-  gives an error. Tests `test_surface_exact_cases` (an isolated atom, two overlapping spheres against the exact
+  gives an error. `--chain` keeps some chains of a structure with several copies of the protein. Tests `test_surface_exact_cases` (an isolated atom, two overlapping spheres against the exact
   spherical cap, a buried atom) and `test_surface_script`.
 - `examples/README.md` and `exposure()` in `cocomo2.py` say what the surface file of a protein holds: the solvent
   accessible surface of each residue in nm², computed from the all-atom structure with atomic radii, as in COCOMO2.

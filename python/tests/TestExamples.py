@@ -140,6 +140,17 @@ def test_surface_script(tmp_path):
     result = subprocess.run([sys.executable, script, os.path.join(EXAMPLES, 'cocomo', 'data', 'sod1.pdb')],
                             cwd=tmp_path, capture_output=True, text=True, timeout=600)
     assert result.returncode != 0 and 'all-atom' in result.stderr
+    # --chain keeps one copy of a crystal structure: the touching atom of chain B no longer hides part of chain A
+    pair = tmp_path/'pair.pdb'
+    lines = _pdb([('ALA', 1, ' CA ', 'C', 0, 0, 0), ('ALA', 1, ' CA ', 'C', 4.0, 0, 0)]).splitlines(keepends=True)
+    pair.write_text(lines[0] + lines[1][:21] + 'B' + lines[1][22:])          # second atom in chain B
+    for chains, expected in (([], 2), (['--chain', 'A'], 1)):
+        result = subprocess.run([sys.executable, script, str(pair), '--output', 'pair.surface'] + chains, cwd=tmp_path,
+                                capture_output=True, text=True, timeout=600)
+        assert result.returncode == 0, result.stdout + result.stderr
+        areas = np.atleast_1d(np.loadtxt(tmp_path/'pair.surface'))
+        assert len(areas) == expected
+    assert abs(areas[0] - 4*np.pi*(0.17 + 0.14)**2) < 1e-3         # the file has three decimals
 
 
 def test_fluid_state_restart(tmp_path):

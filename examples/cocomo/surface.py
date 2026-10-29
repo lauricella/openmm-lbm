@@ -24,7 +24,8 @@ The structure must be all-atom: the element of every atom is read from the eleme
 script.  A coarse-grained file, with one bead per residue, gives an error instead of a meaningless surface.
 Hydrogen atoms are left out unless --hydrogens is given, so that structures with and without them give the same
 surfaces; water and other residues that are not amino acids are left out; of alternate locations the first one
-is kept.
+is kept.  A crystal structure may hold several copies of the protein: --chain A keeps chain A only, and the other
+chains are left out as if absent, so that their contacts do not hide part of its surface.
 
 Usage:
     python surface.py protein.pdb > protein.surface
@@ -45,9 +46,9 @@ AMINO_ACIDS = {'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS', 'I
                'HID', 'HIE', 'HIP', 'HSD', 'HSE', 'HSP', 'CYX', 'ASH', 'GLH', 'LYN', 'MSE', 'SEC'}
 
 
-def read_atoms(path, hydrogens=False):
-    """Atoms of the amino acids in an all-atom PDB file: (positions in nm, radii in nm, residue index of each atom,
-    list of residues as (chain, number, insertion code, name))."""
+def read_atoms(path, hydrogens=False, chains=None):
+    """Atoms of the amino acids in an all-atom PDB file, of the given chains (all if None): (positions in nm, radii
+    in nm, residue index of each atom, list of residues as (chain, number, insertion code, name))."""
     positions, radii, owner, residues, index = [], [], [], [], {}
     with open(path) as lines:
         for line in lines:
@@ -56,7 +57,7 @@ def read_atoms(path, hydrogens=False):
             if not line.startswith(('ATOM', 'HETATM')):
                 continue
             name, altloc, resname = line[12:16], line[16], line[17:20].strip()
-            if resname not in AMINO_ACIDS or altloc not in (' ', 'A', '1'):
+            if resname not in AMINO_ACIDS or altloc not in (' ', 'A', '1') or (chains and line[21] not in chains):
                 continue
             element = line[76:78].strip().upper()
             if not element:
@@ -116,9 +117,9 @@ def atom_areas(positions, radii, probe=0.14, points=960):
     return areas
 
 
-def residue_areas(path, probe=0.14, points=960, hydrogens=False):
+def residue_areas(path, probe=0.14, points=960, hydrogens=False, chains=None):
     """Solvent accessible area of every residue (nm^2) and the list of residues."""
-    positions, radii, owner, residues = read_atoms(path, hydrogens)
+    positions, radii, owner, residues = read_atoms(path, hydrogens, chains)
     areas = atom_areas(positions, radii, probe, points)
     return np.bincount(owner, weights=areas, minlength=len(residues)), residues
 
@@ -130,9 +131,11 @@ def main():
     parser.add_argument('--probe', type=float, default=0.14, help='radius of the probe in nm (default 0.14, water)')
     parser.add_argument('--points', type=int, default=960, help='points on the sphere of each atom (default 960)')
     parser.add_argument('--hydrogens', action='store_true', help='include the hydrogen atoms (default: left out)')
+    parser.add_argument('--chain', help='chain identifiers to keep, for example A (default: all chains); the other '
+                        'chains are left out, as if absent')
     parser.add_argument('--list', action='store_true', help='print residue, number and area on the standard error')
     args = parser.parse_args()
-    areas, residues = residue_areas(args.pdb, args.probe, args.points, args.hydrogens)
+    areas, residues = residue_areas(args.pdb, args.probe, args.points, args.hydrogens, args.chain)
     out = open(args.output, 'w') if args.output else sys.stdout
     for area in areas:
         print('%.3f' % area, file=out)
