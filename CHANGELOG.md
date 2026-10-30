@@ -5,6 +5,15 @@ versions the API may still change.
 
 ## Unreleased
 
+### Examples
+- `cocomo/shear.py` (new): SOD1 in a double Couette flow, between two `DensityVelocity` faces along z that move along
+  x in opposite directions, with no restraint. The fluid starts with the linear profile of the faces and the protein
+  where the flow is at rest; by default water at 298 K, a fluctuating fluid and the centred drag, faces at 0.5 nm/ps.
+  The script refuses faces faster than Mach 0.1 of the lattice and recommends 1 nm/ps at most (Mach 0.035). It writes
+  the centre of mass with the velocity of the flow at its height, the rotation of the protein (quaternion and angle
+  accumulated about y) and the profile of the fluid; checkpoints and `--restart` as in `diffusion.py`. Tests
+  `test_shear_profile`, `test_shear_refuses`, `test_shear_restart` and two cases of `test_example_runs`.
+
 ### Tests
 - `testMovingFaceFluctuations` (C++, all platforms): a fluctuating fluid between two `DensityVelocity` faces moving
   at -1 and +1 nm/ps has the linear mean profile of the faces, and the planes of the faces are at equilibrium

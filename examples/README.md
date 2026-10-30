@@ -14,6 +14,7 @@ the [tutorial](../docs/user_guide/tutorial.md), which goes through these example
 | [fluid/initial_state.py](fluid/initial_state.py) | a fluid started from a shear wave; saving and loading the fluid state | 32 x 32 x 4 nodes, 1000 steps | 1 s | 2 s |
 | [cocomo/diffusion.py](cocomo/diffusion.py) | diffusion of a protein (COCOMO2): the folded SOD1 (110 beads) or a disordered one, with and without the fluid | $`30^3`$ nodes, 2000 steps (`--preset smoke`) to 2e7 steps (200 ns) | 2 s (smoke), 30 min (200 ns) | 25 s (smoke) |
 | [cocomo/kick.py](cocomo/kick.py) | a peptide, ubiquitin or SOD1 kicked in the fluid | $`100^3`$ nodes, 2000 steps | 10 s | 20 s with `--nodes 30` |
+| [cocomo/shear.py](cocomo/shear.py) | SOD1 in a double Couette flow between two open faces moving in opposite directions: drift, rotation, profile of the fluid | 60 x 60 x 100 nodes, 1e6 steps (10 ns) | 11 min on an NVIDIA A30 | 20 s with `--box 10 10 --height 12 --steps 1000` |
 | [cocomo/msd.py](cocomo/msd.py) | mean square displacement and diffusion coefficient of the centre of mass | - | - | seconds |
 | [cocomo/surface.py](cocomo/surface.py) | solvent accessible surface of each residue of an all-atom structure, the input of the exposure scaling | - | - | 2 s (159 residues) |
 
@@ -37,7 +38,7 @@ The output files are written in the current directory. Options common to the sim
 - `--platform NAME`: `Reference`, `CUDA`, `OpenCL` or `HIP`. Without it the script takes CUDA, then
   OpenCL, then Reference, the first that is available.
 - `--precision single|mixed|double`: precision on CUDA, OpenCL and HIP (default `mixed`).
-- `--drag Explicit|Centered`: drag scheme of the coupling (default `Explicit`; see
+- `--drag Explicit|Centered`: drag scheme of the coupling (default `Explicit`, `Centered` in `cocomo/shear.py`; see
   [choosing the drag](../docs/user_guide/lattice.md#choosing-the-drag)); not in `fluid/initial_state.py`,
   which has no particles.
 - `--viscosity NU`: kinematic viscosity in nm²/ps, in physical units. The plugin converts it to the relaxation time
@@ -47,7 +48,7 @@ The output files are written in the current directory. Options common to the sim
   default. At $`T = 0`$ there is nothing stochastic, no random force on the particles and no thermal fluctuations of
   the fluid, but the drag stays: particles and fluid exchange momentum without a thermostat (the same as the coupling
   scheme `NVE`). The default is 0 in the kick and uniform-flow examples and in `fluid/initial_state.py`, 300 K in
-  `particle/thermal.py` and 298 K in `cocomo/diffusion.py`.
+  `particle/thermal.py` and 298 K in `cocomo/diffusion.py` and `cocomo/shear.py`.
 - `--steps N`: number of steps. Every other parameter has an option too: see `--help`.
 
 ## The examples
@@ -192,6 +193,58 @@ Compared with the original scripts, the centre of mass is weighted by the masses
 the plain mean of the positions), and the elastic network of ubiquitin covers the whole chain: the
 original command line gave one-residue domains and therefore no elastic bonds. The exposure threshold
 is the lambda = 0.7 of COCOMO2 (`--lam`; the original command used 0.9).
+
+### cocomo/shear.py
+
+SOD1 in a flow out of equilibrium, a double Couette flow. The box is open along $`z`$, between two `DensityVelocity`
+faces at the density of the fluid that move along $`x`$ in opposite directions, $`-v`$ at `ZMin` and $`+v`$ at `ZMax`
+([open faces](../docs/user_guide/api_reference.md#open-faces)), and periodic along $`x`$ and $`y`$. The faces hold
+their velocity one node beyond the box, so the shear rate is $`\dot\gamma = 2v/((n_z + 1)\Delta x)`$ and the flow is
+at rest at $`z_0 = (n_z - 1)\Delta x/2`$, half a spacing below the middle of the box, where the protein starts.
+Nothing holds the protein, neither a restraint nor a wall: it turns about $`y`$ with the vorticity of the flow and is
+carried along $`x`$ when it diffuses away from $`z_0`$. The protein is the SOD1 of `diffusion.py`, with the same
+structure, exposure and elastic network (`--domain` and `--enm-domain` work as there). The fluid starts with the
+linear profile of the faces (`setFluidState()`, as in `fluid/initial_state.py`). The defaults are those of a protein
+in water: 298 K, $`\nu`$ = 0.893 nm²/ps, friction 30/ps, centred drag and fluctuating fluid, a box of
+30 x 30 x 50 nm (`--box 30 30 --height 50`), $`v`$ = 0.5 nm/ps ($`\dot\gamma`$ = 0.0198/ps) and 10 ns, which take
+11 minutes on an NVIDIA A30 (1370 ns/day; 2400 ns/day without fluctuations of the fluid).
+
+```bash
+python $EX/cocomo/shear.py --velocity 0.5 --steps 1000000 --output shear
+```
+
+- **Speed of the faces.** The faces must move well below the speed of sound of the lattice,
+  $`c_s = \Delta x/(\sqrt3\,\Delta t)`$, 28.9 nm/ps with $`\Delta x`$ = 0.5 nm and $`\Delta t`$ = 0.01 ps. The script
+  refuses faces faster than Mach 0.1, 2.9 nm/ps. Keep them at 1 nm/ps or below (Mach 0.035): the fluctuating fluid
+  adds to the flow a thermal velocity of standard deviation $`\sqrt{k_BT/(\rho\Delta x^3)}`$ per node and component,
+  0.18 nm/ps at 298 K, and its largest values on the lattice reach about five times that. Faces moving at 1 nm/ps
+  keep the fluid at the temperature of the run on every plane, the planes of the faces included
+  ([validation.md](../docs/validation.md#fluctuating-fluid-testslbmfluctuationsh-all-platforms)).
+- **Shear rate.** The shear rates within reach are those of molecular dynamics: $`v`$ = 0.5 nm/ps over 50 nm gives
+  $`\dot\gamma = 2\cdot10^{10}`$ /s. With a rotation time of SOD1 in water of about 7 ns (Stokes-Einstein-Debye with
+  a hydrodynamic radius of 2 nm) the Weissenberg number $`\dot\gamma\tau_r`$ is about 140, and about 30 at
+  $`v`$ = 0.1 nm/ps. A Weissenberg number of 1 needs $`v`$ of about 0.004 nm/ps with this height, far below the
+  thermal velocity of the fluid: the flow then shows only in averages over long runs.
+- **Height and sides.** `--height` keeps the protein away from the faces: in water it diffuses by about 5 nm along
+  $`z`$ in 100 ns. A bead that crossed a face would be coupled to the fluid next to the opposite face, which moves the
+  other way: the coupling wraps the positions into the periodic box of OpenMM, and the faces are not a Lees-Edwards
+  boundary. `--box LX LY` gives the sides along $`x`$ and $`y`$: the protein interacts through the fluid with its
+  periodic images at that distance.
+- **Output.** `<prefix>_motion.txt` has, every `--report` steps, the centre of mass (not wrapped into the box), the
+  velocity of the imposed flow at its height, the rotation of the protein from its starting structure as a
+  quaternion (best fit weighted by the masses) and the angle of rotation about $`y`$ accumulated since the start.
+  `<prefix>_profile.txt` has the mean velocity $`u_x`$ of the fluid on each plane of nodes, every `--profile`
+  reports. The trajectory, the temperature of the beads, the checkpoints and `--restart` work as in `diffusion.py`;
+  the accumulated angle is written with all its digits, so that a restarted run continues it exactly.
+- **Rotation.** A sphere turns at $`\dot\gamma/2`$. A body of another shape turns faster or slower as its
+  orientation changes (the Jeffery orbits of an ellipsoid), and its mean rate differs from $`\dot\gamma/2`$. In a
+  run of 10 ns with the defaults (NVIDIA A30, mixed precision) SOD1 turned about $`y`$ at
+  $`0.81 \pm 0.02\,\dot\gamma/2`$ (blocks of 1 ns between 0.73 and 0.89); over windows of 100 ps its rate went from
+  0.35 to 1.3 $`\dot\gamma/2`$ and back twice per turn, as for an elongated body. Runs of 1 ns with a fluid
+  without fluctuations and the explicit drag, at zero temperature and at 298 K, gave 0.74, within the spread of the
+  blocks: the changes of
+  the rate come from the shape, not from the noise. The beads were at 299.5 K: the temperature of
+  `<prefix>_temperature.txt` includes the velocity of the flow at the beads.
 
 ### cocomo/cocomo2.py
 

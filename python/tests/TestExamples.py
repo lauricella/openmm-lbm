@@ -51,6 +51,9 @@ CASES = [
     ('cocomo/kick.py', ['--preset', 'peptide', '--nodes', '24', '--steps', '5', '--temperature', '298', '--no-lb']),
     ('cocomo/diffusion.py', ['--preset', 'smoke', '--box', '10', '--steps', '20', '--report', '10', '--temperature',
                              '0']),
+    ('cocomo/shear.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10']),
+    ('cocomo/shear.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10', '--velocity', '1',
+                         '--no-fluid-fluctuations', '--drag', 'Explicit']),
 ]
 
 
@@ -260,3 +263,48 @@ def test_diffusion_fluid_temperature(tmp_path):
     fluid = np.loadtxt(tmp_path/'fluct_fluid_temperature.txt', ndmin=2)
     assert len(fluid) == 10
     assert abs(fluid[:, 1].mean() - 298) < 0.02*298
+
+
+def test_shear_profile(tmp_path):
+    """shear.py starts the fluid with the steady Couette profile of its faces: at zero temperature the planes next to
+    the faces, far from the protein, keep the linear profile u_x = v (2 (k + 1)/(n_z + 1) - 1) (the file has five
+    decimals)."""
+    import numpy as np
+    command = [sys.executable, os.path.join(EXAMPLES, 'cocomo', 'shear.py'), '--platform', 'Reference', '--box', '10',
+               '10', '--height', '12', '--temperature', '0', '--steps', '20', '--report', '10', '--profile', '1']
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    profile = np.loadtxt(tmp_path/'shear_profile.txt', ndmin=2)
+    nz, v = 24, 0.5
+    linear = v*(2*(np.arange(nz) + 1)/(nz + 1) - 1)
+    assert profile.shape == (2, nz + 1)
+    for k in (0, 1, 2, nz - 3, nz - 2, nz - 1):
+        assert np.all(np.abs(profile[:, 1 + k] - linear[k]) < 1e-5)
+
+
+@pytest.mark.parametrize('options, message', [(['--velocity', '3'], 'Mach'),
+                                               (['--report', '10', '--checkpoint', '25'], 'multiple')],
+                         ids=['Mach', 'checkpoint'])
+def test_shear_refuses(tmp_path, options, message):
+    """shear.py refuses faces faster than Mach 0.1 (2.9 nm/ps with the default lattice) and checkpoints between
+    two reports."""
+    command = [sys.executable, os.path.join(EXAMPLES, 'cocomo', 'shear.py'), '--platform', 'Reference'] + options
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode != 0 and message in result.stderr
+
+
+def test_shear_restart(tmp_path):
+    """A run of shear.py split in two with --checkpoint and --restart gives the same output as an uninterrupted run,
+    the accumulated angle of rotation included."""
+    script = os.path.join(EXAMPLES, 'cocomo', 'shear.py')
+    common = [sys.executable, script, '--platform', 'Reference', '--box', '10', '10', '--height', '12', '--report', '10',
+              '--profile', '1', '--checkpoint', '20']
+    def run(arguments):
+        result = subprocess.run(common + arguments, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+        assert result.returncode == 0, result.stdout + result.stderr
+    run(['--steps', '60', '--output', 'whole'])
+    run(['--steps', '30', '--output', 'split'])          # stops 10 steps after the checkpoint at step 20
+    run(['--steps', '60', '--output', 'split', '--restart'])
+    for suffix in ('_motion.txt', '_profile.txt', '_temperature.txt'):
+        assert (tmp_path/('whole' + suffix)).read_text() == (tmp_path/('split' + suffix)).read_text()
+    assert (tmp_path/'split_20.dcd').exists()
