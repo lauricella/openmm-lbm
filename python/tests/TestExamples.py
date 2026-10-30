@@ -295,10 +295,11 @@ def test_shear_refuses(tmp_path, options, message):
 
 def test_shear_restart(tmp_path):
     """A run of shear.py split in two with --checkpoint and --restart gives the same output as an uninterrupted run,
-    the accumulated angle of rotation included."""
+    the accumulated angle of rotation and the VTK files included: the collection lists every step once, and the files
+    written after the checkpoint by the first part are written again, the same."""
     script = os.path.join(EXAMPLES, 'cocomo', 'shear.py')
     common = [sys.executable, script, '--platform', 'Reference', '--box', '10', '10', '--height', '12', '--report', '10',
-              '--profile', '1', '--checkpoint', '20']
+              '--profile', '1', '--checkpoint', '20', '--vtk', '10']
     def run(arguments):
         result = subprocess.run(common + arguments, cwd=tmp_path, capture_output=True, text=True, timeout=600)
         assert result.returncode == 0, result.stdout + result.stderr
@@ -308,3 +309,7 @@ def test_shear_restart(tmp_path):
     for suffix in ('_motion.txt', '_profile.txt', '_temperature.txt'):
         assert (tmp_path/('whole' + suffix)).read_text() == (tmp_path/('split' + suffix)).read_text()
     assert (tmp_path/'split_20.dcd').exists()
+    assert (tmp_path/'split.pvd').read_text().replace('split_', 'whole_') == (tmp_path/'whole.pvd').read_text()
+    for step in range(10, 70, 10):
+        for name in ('density_%010d.vti', 'velocity_%010d.vti', 'particles_%010d.vtp'):
+            assert (tmp_path/('whole_' + name % step)).read_bytes() == (tmp_path/('split_' + name % step)).read_bytes()

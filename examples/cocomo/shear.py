@@ -35,6 +35,38 @@ height of 50 nm, gamma_dot = 0.02/ps = 2e10/s, and with a rotation time of SOD1 
 Weissenberg number gamma_dot*tau_r is about 140; a Weissenberg number of 1 needs v of about 0.004 nm/ps, well below
 the thermal velocity of the fluid.
 
+How to run it.  Activate the environment where OpenMM and openmm-lbm are installed, go to a working directory, where
+the output files are written, and give Python the path of the script in the repository: the script reads
+cocomo2.py, data/ and ../fluid/initial_state.py next to itself, so keep it there instead of copying it alone.  Below,
+shear.py stands for /path/to/openmm-lbm/examples/cocomo/shear.py.
+
+  python shear.py                                                      # the defaults: SOD1 in water at 298 K,
+                                                                       # faces at -/+0.5 nm/ps, 10 ns
+  python shear.py --velocity 1 --steps 5000000 --output v1             # faster faces, 50 ns, files v1*
+  python shear.py --box 40 40 --height 80                              # a larger box
+  python shear.py --vtk 10000                                          # VTK files for ParaView every 100 ps
+  python shear.py --restart                                            # continue a stopped run from shear.chk
+  python shear.py --temperature 0 --no-fluid-fluctuations --drag Explicit --steps 100000
+                                                                       # 1 ns without noise: the deterministic flow
+  python shear.py --platform Reference --box 10 10 --height 12 --steps 1000    # a quick try on a CPU (20 s)
+
+Options (python shear.py --help lists them with their defaults):
+  flow        --velocity V (nm/ps, default 0.5: ZMin moves with -V, ZMax with +V along x; at most 0.1 c_s, better
+              at most 1), --height LZ (nm, default 50), --box LX LY (nm, default 30 30); every side a whole number
+              of lattice spacings
+  fluid       --viscosity (nm^2/ps, default 0.893, water at 298 K), --temperature (K, default 298; 0 = no noise),
+              --no-fluid-fluctuations (a fluid without thermal fluctuations), --spacing (nm, default 0.5),
+              --dt (ps, default 0.01)
+  coupling    --friction (1/ps, default 30), --drag Centered|Explicit (default Centered)
+  protein     --domain FIRST LAST and --enm-domain FIRST LAST: folded domain of SOD1 for the exposure scaling and
+              for the elastic network (as in diffusion.py; default 1 108 and 2 109)
+  run         --steps (default 1000000, 10 ns), --seed, --platform CUDA|OpenCL|HIP|Reference (default the fastest
+              available), --precision single|mixed|double (default mixed)
+  output      --output PREFIX (default shear), --report N (steps between reports, default 1000: 10 ps),
+              --profile N (reports between profiles of the fluid, default 100; 0 = none), --vtk N (steps between
+              VTK files, default 0 = none), --checkpoint N (steps between checkpoints, a multiple of --report; default
+              100 reports, 0 = none), --restart
+
 Files written, with the prefix given by --output (default shear):
   <prefix>.dcd               trajectory, every --report steps (OpenMM's DCDReporter: positions in Angstrom)
   <prefix>.log               step, time, potential energy, speed
@@ -50,6 +82,12 @@ Files written, with the prefix given by --output (default shear):
                              plane of nodes k = 0 ... n_z - 1 (nm/ps), averaged over x and y
   <prefix>.chk               checkpoint of the whole run, fluid included, every --checkpoint steps; the same
                              command with --restart continues the run up to --steps (docs/user_guide/restart.md)
+  <prefix>_density_<step>.vti, <prefix>_velocity_<step>.vti, <prefix>_particles_<step>.vtp, <prefix>.pvd
+                             with --vtk N, every N steps, the fluid (density and velocity on the nodes) and the
+                             beads (positions, velocities, masses) in VTK files for ParaView, in OpenMM units
+                             (openmmlbm.LBMVTKReporter); open <prefix>.pvd for the series.  The velocity of the
+                             fluid is the whole velocity, the Couette flow and the thermal fluctuations; with the
+                             default box a pair of files of the fluid takes about 6 MB
 """
 
 import argparse
@@ -105,6 +143,8 @@ def parse_arguments():
     parser.add_argument('--precision', default='mixed', help='precision on CUDA, OpenCL and HIP (default mixed)')
     parser.add_argument('--output', default='shear', help='prefix of the output files (default shear)')
     parser.add_argument('--checkpoint', type=int, help='steps between checkpoints (default 100 reports, 0 = none)')
+    parser.add_argument('--vtk', type=int, default=0,
+                        help='steps between VTK files of the fluid and of the beads, for ParaView (default 0 = none)')
     parser.add_argument('--restart', action='store_true',
                         help='continue from <prefix>.chk, appending to the output files, up to --steps')
     args = parser.parse_args()
@@ -227,6 +267,17 @@ class ProfileReporter:
               file=self._out, flush=True)
 
 
+def truncate_pvd(file, lastTime):
+    """Remove from a ParaView collection the files written after lastTime (ps), which a restarted run writes again."""
+    if not os.path.exists(file):
+        return
+    with open(file) as lines:
+        kept = [line for line in lines if '<DataSet ' not in line or
+                float(line.split('timestep="')[1].split('"')[0]) <= lastTime + 1e-6]
+    with open(file, 'w') as out:
+        out.writelines(kept)
+
+
 def truncate(file, lastValue, column=0):
     """Remove from a text file of reports the lines whose first column is beyond lastValue."""
     if not os.path.exists(file):
@@ -299,8 +350,8 @@ def main():
     print('Viscosity %g nm^2/ps (tau %.4f), %g K, friction %g 1/ps, %s drag%s' % (
         args.viscosity, tau, args.temperature, args.friction, args.drag.lower(),
         ', fluctuating fluid' if fluctuations else ''))
-    print('Faces at -/+ %g nm/ps along x (Mach %.4f): shear rate %.5f 1/ps, rotation of the flow %.5f rad/ps about y' % (
-        v, v/(dx/(math.sqrt(3)*args.dt)), rate, rate/2))
+    print('Faces at -/+ %g nm/ps along x (Mach %.4f): shear rate %.5f 1/ps, rotation of the flow %.5f rad/ps about y'
+          % (v, v/(dx/(math.sqrt(3)*args.dt)), rate, rate/2))
 
     checkpointFile = args.output + '.chk'
     reference = positions
@@ -330,6 +381,7 @@ def main():
         truncate(args.output + '_temperature.txt', step)
         truncate(args.output + '_motion.txt', time)
         truncate(args.output + '_profile.txt', time)
+        truncate_pvd(args.output + '.pvd', time)
         dcdFile = '%s_%d.dcd' % (args.output, step)
     simulation.reporters.append(app.DCDReporter(dcdFile, args.report))
     simulation.reporters.append(app.StateDataReporter(args.output + '.log', args.report, step=True, time=True,
@@ -345,6 +397,8 @@ def main():
                                                     nodes, append))
     if args.checkpoint > 0:
         simulation.reporters.append(openmmlbm.LBMCheckpointReporter(checkpointFile, args.checkpoint, force))
+    if args.vtk > 0:
+        simulation.reporters.append(openmmlbm.LBMVTKReporter(args.output, args.vtk, force, append=append))
     simulation.step(max(0, args.steps - simulation.currentStep))
 
     motion = np.loadtxt(args.output + '_motion.txt', ndmin=2)

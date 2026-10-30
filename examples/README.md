@@ -236,6 +236,14 @@ python $EX/cocomo/shear.py --velocity 0.5 --steps 1000000 --output shear
   `<prefix>_profile.txt` has the mean velocity $`u_x`$ of the fluid on each plane of nodes, every `--profile`
   reports. The trajectory, the temperature of the beads, the checkpoints and `--restart` work as in `diffusion.py`;
   the accumulated angle is written with all its digits, so that a restarted run continues it exactly.
+- **ParaView.** `--vtk N` writes every N steps the fluid, density and velocity on the nodes, and the beads, with
+  their positions, velocities and masses, in VTK files in OpenMM units (`openmmlbm.LBMVTKReporter`, as in
+  `diffusion.py`): open `<prefix>.pvd` in ParaView for the whole series. The velocity of the fluid is the whole
+  velocity, the Couette flow plus the thermal fluctuations, which in a single snapshot are of the same size as the
+  flow (0.18 nm/ps per node against 0.5 nm/ps at the faces): the profile shows in averages over planes or over
+  time. With the default box the files of the fluid of one snapshot take about 6 MB, so `--vtk 10000` (every
+  100 ps) writes about 0.6 GB in 10 ns. A restarted run rewrites the files after the checkpoint and keeps the
+  series in order.
 - **Rotation.** A sphere turns at $`\dot\gamma/2`$. A body of another shape turns faster or slower as its
   orientation changes (the Jeffery orbits of an ellipsoid), and its mean rate differs from $`\dot\gamma/2`$. In a
   run of 10 ns with the defaults (NVIDIA A30, mixed precision) SOD1 turned about $`y`$ at

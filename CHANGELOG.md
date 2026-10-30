@@ -11,7 +11,8 @@ versions the API may still change.
   where the flow is at rest; by default water at 298 K, a fluctuating fluid and the centred drag, faces at 0.5 nm/ps.
   The script refuses faces faster than Mach 0.1 of the lattice and recommends 1 nm/ps at most (Mach 0.035). It writes
   the centre of mass with the velocity of the flow at its height, the rotation of the protein (quaternion and angle
-  accumulated about y) and the profile of the fluid; checkpoints and `--restart` as in `diffusion.py`. Tests
+  accumulated about y) and the profile of the fluid; checkpoints and `--restart` as in `diffusion.py`; with `--vtk N`
+  the fluid and the beads in VTK files for ParaView every N steps. Tests
   `test_shear_profile`, `test_shear_refuses`, `test_shear_restart` and two cases of `test_example_runs`.
 
 ### Tests
