@@ -544,6 +544,7 @@ section 7); $`T`$ = 300 K, $`\Delta x`$ = 0.5 nm, $`\Delta t`$ = 0.01 ps and the
 | Single node | a 1x1x1 lattice streams every population back to its node, so the state is the post-collision state: density and momentum unchanged at every step; over 20000 steps the moments $`k = 4,\dots,18`$ have the variance $`\mu b_k`$ and are uncorrelated, for $`\tau`$ = 1 and 0.8 | 1e-15; 0.05 (statistical error 0.01) |
 | Equilibrium | fluid at rest, 8x8x8, 300 steps of transient, 300 samples every 5 steps: variances of density, momentum and moments $`k = 4,\dots,18`$ of a node equal to $`\mu\rho`$, $`\rho k_BT`$ and $`\mu\rho b_k`$, for $`\tau`$ = 0.8 and 2.5; total mass and momentum conserved | 0.05; 1e-13 |
 | Boundaries (`testBoundaryFluctuations`, version 0.5.0) | fluid at rest at $`\tau = 0.62`$, $`8 \times 8 \times 10`$ nodes: regularized walls on the planes $`k = 0`$ and $`k = 9`$, momentum along the walls of the first fluid planes (1500 samples every 10 steps); `DensityVelocity` faces at rest at $`z_{\min}`$ and $`z_{\max}`$, momentum across the faces and density of the face planes (500 samples): equilibrium variances (the random part of a collision gave 0.955, 0.62 and 0.785 of them) | 2% (walls), 5% (faces) |
+| Moving faces (`testMovingFaceFluctuations`) | fluid at $`\tau = 0.62`$, $`8 \times 8 \times 10`$ nodes, between two `DensityVelocity` faces moving along x at $`-U`$ (`ZMin`) and $`+U`$ (`ZMax`), $`U`$ = 0.02 (1 nm/ps), 3000 steps of transient, 500 samples every 10 steps: the mean velocity of every plane equals the linear profile $`U(2(k + 1)/(n_z + 1) - 1)`$ of the faces holding one node beyond the box; on the planes of the faces the momentum along the flow and across the faces has the variance $`\rho k_BT`$ around its mean, the density $`\mu\rho`$ (the double Couette flow of `examples/cocomo/shear.py`) | 5% of $`U`$; 5% |
 | Velocity spectrum (`testVelocitySpectrum`) | fluid on 8x8x8 nodes, $`\tau = 1`$, 300 steps of transient, 400 samples every 5 steps: the velocity of `getFluidFields()` minus the mean velocity of the sample, Fourier transformed; the longitudinal and transverse parts of the spectrum equal $`k_BT/\rho`$ and $`2k_BT/\rho`$ in three bands of $`\lvert\mathbf k\rvert`$ ($`\lvert\mathbf m\rvert^2 \le 3`$, $`4 \dots 12`$, $`> 12`$, with $`\mathbf k = 2\pi\mathbf m/8`$), and the variance per node is $`(N - 1)/N\,k_BT/\rho`$ per component; at rest, in a uniform flow (0.05, 0.02, -0.03) and with a body force $`g = 10^{-5}`$ along x, whose mean velocity $`u_0 + gt`$ is checked to 2e-4 | 5% (spectrum), 3% (per node) |
 | Zero temperature | with walls, body force and particles with the NVE scheme, the run with the fluctuations switched on at $`T = 0`$ equals the run without them | bitwise |
 | Reproducibility | same seed: identical runs, also with force evaluations between steps; another seed: a different run | bitwise |
@@ -563,6 +564,14 @@ the buffer back with the size it has in the new Context; with 8.6.1 it passed. C
 and $`128^3`$ nodes. Without fluctuations, and with fluctuations at zero temperature, the fluid, positions and
 velocities after 40 steps with walls, body force and six coupled particles (explicit and centred drag, EM and NVE) are
 identical, bit for bit, to those of version 0.2.1.
+
+`testMovingFaceFluctuations` (added after version 0.6.5) passes on Reference, and on CUDA and OpenCL in the three
+precisions on an NVIDIA A30 (OpenMM 8.6.1). A longer run of the same flow on 16 x 16 x 40 nodes (CUDA, double
+precision, water at 298 K, $`\tau`$ = 0.607, 10000 steps of transient and 2000 samples every 20 steps), with the faces
+at rest and at -/+0.5 and -/+1 nm/ps, gave a mean profile linear within 2.9e-3, 3.1e-3 and 3.4e-3 nm/ps, the
+noise of the samples, the temperature of every plane and component within 0.4% of $`T`$, the planes of the faces
+included, and a mean density within 4e-5 (relative) of the density of the faces; the largest Mach number on the lattice was 0.039,
+0.049 and 0.064.
 
 ### Equilibrium spectra (CUDA, NVIDIA A100)
 

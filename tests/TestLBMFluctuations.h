@@ -213,6 +213,58 @@ void testBoundaryFluctuations(Platform& platform) {
 }
 
 /**
+ * A fluctuating fluid between two DensityVelocity faces that move along x in opposite directions, -U at ZMin and +U
+ * at ZMax (a double Couette flow, as in examples/cocomo/shear.py), at tau = 0.62 and U = 0.02 (1 nm/ps): the mean
+ * velocity of every plane is the linear profile u_x = U (2 (k + 1)/(n_z + 1) - 1) of the faces holding one node
+ * beyond the box, and the face planes are at equilibrium around it: the momentum along the flow and across the
+ * faces has the variance rho kT, the density mu rho.
+ */
+void testMovingFaceFluctuations(Platform& platform) {
+    double temperature = 300.0, U = 0.02;
+    int n = 8, nz = 10, numSamples = 500, interval = 10;
+    double kT = latticeKT(temperature), mu = 3.0*kT;
+    LBMForce* force;
+    System* system = createFluidSystem(force, n, n, nz, 0.62);
+    force->setFluidFluctuations(true);
+    force->setTemperature(temperature);
+    force->setRandomNumberSeed(29);
+    force->setFaceBoundary(LBMForce::ZMin, LBMForce::DensityVelocity);
+    force->setFaceBoundary(LBMForce::ZMax, LBMForce::DensityVelocity);
+    force->setFaceVelocity(LBMForce::ZMin, Vec3(-U*fluidDx/fluidDt, 0, 0));
+    force->setFaceVelocity(LBMForce::ZMax, Vec3(U*fluidDx/fluidDt, 0, 0));
+    VerletIntegrator integrator(fluidDt);
+    Context context(*system, integrator, platform);
+    context.setPositions(vector<Vec3>(1, Vec3(0.1, 0.2, 0.3)));
+    integrator.step(3000);                       // the profile builds up in about 300 steps, (n_z + 1)^2/(pi^2 nu)
+    vector<double> sum(4*nz, 0.0), sum2(4*nz, 0.0), state;
+    for (int sample = 0; sample < numSamples; sample++) {
+        integrator.step(interval);
+        force->getFluidState(context, state);
+        for (int k = 0; k < nz; k++)
+            for (int node = n*n*k; node < n*n*(k+1); node++) {
+                double modes[19];
+                nodeModes(state, node, modes);
+                for (int m = 0; m < 4; m++) {
+                    sum[4*k+m] += modes[m];
+                    sum2[4*k+m] += modes[m]*modes[m];
+                }
+            }
+    }
+    double count = (double) n*n*numSamples;
+    for (int k = 0; k < nz; k++)
+        ASSERT_EQUAL_TOL(U*(2.0*(k+1)/(nz+1)-1.0), sum[4*k+1]/count, 0.05*U);
+    for (int k : {0, nz-1}) {
+        double variance[4];
+        for (int m = 0; m < 4; m++)
+            variance[m] = sum2[4*k+m]/count - pow(sum[4*k+m]/count, 2);
+        ASSERT_EQUAL_TOL(1.0, variance[0]/mu, 0.05);
+        ASSERT_EQUAL_TOL(1.0, variance[1]/kT, 0.05);
+        ASSERT_EQUAL_TOL(1.0, variance[3]/kT, 0.05);
+    }
+    delete system;
+}
+
+/**
  * With the fluctuations switched on at zero temperature the run is identical, bit for bit, to the run without
  * them: walls, body force and coupled particles with the NVE scheme.
  */
@@ -605,6 +657,7 @@ void runFluctuationTests(Platform& platform) {
     testFluctuationsEquilibrium(platform, 0.8);
     testFluctuationsEquilibrium(platform, 2.5);
     testBoundaryFluctuations(platform);
+    testMovingFaceFluctuations(platform);
     testVelocitySpectrum(platform, Vec3(), Vec3());
     testVelocitySpectrum(platform, Vec3(0.05, 0.02, -0.03), Vec3());
     testVelocitySpectrum(platform, Vec3(), Vec3(1e-5, 0.0, 0.0));

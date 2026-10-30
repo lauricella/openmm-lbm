@@ -3,6 +3,13 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Tests
+- `testMovingFaceFluctuations` (C++, all platforms): a fluctuating fluid between two `DensityVelocity` faces moving
+  at -1 and +1 nm/ps has the linear mean profile of the faces, and the planes of the faces are at equilibrium
+  around it (momentum along the flow and across the faces, density).
+
 ## 0.6.5 (2026-10-29)
 
 The viscosity and the temperature as the inputs of every example and of the documentation; the protein kick aligned
