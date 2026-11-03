@@ -63,9 +63,9 @@ Options (python shear.py --help lists them with their defaults):
   run         --steps (default 1000000, 10 ns), --seed, --platform CUDA|OpenCL|HIP|Reference (default the fastest
               available), --precision single|mixed|double (default mixed)
   output      --output PREFIX (default shear), --report N (steps between reports, default 1000: 10 ps),
-              --profile N (reports between profiles of the fluid, default 100; 0 = none), --vtk N (steps between
-              VTK files, default 0 = none), --checkpoint N (steps between checkpoints, a multiple of --report; default
-              100 reports, 0 = none), --restart
+              --profile N (steps between profiles of the fluid, default 10000: 100 ps; 0 = none), --vtk N (steps
+              between VTK files, default 0 = none), --checkpoint N (steps between checkpoints, a multiple of --report;
+              default 100 reports, 0 = none), --restart
 
 Files written, with the prefix given by --output (default shear):
   <prefix>.dcd               trajectory, every --report steps (OpenMM's DCDReporter: positions in Angstrom)
@@ -78,7 +78,7 @@ Files written, with the prefix given by --output (default shear):
                              the masses); angle of rotation about y accumulated since the start (rad, the sum of
                              the rotations about y between two reports, written with all its digits so that a
                              restarted run continues it exactly)
-  <prefix>_profile.txt       every --profile reports: time (ps) and the mean velocity u_x of the fluid on each
+  <prefix>_profile.txt       every --profile steps: time (ps) and the mean velocity u_x of the fluid on each
                              plane of nodes k = 0 ... n_z - 1 (nm/ps), averaged over x and y
   <prefix>.chk               checkpoint of the whole run, fluid included, every --checkpoint steps; the same
                              command with --restart continues the run up to --steps (docs/user_guide/restart.md)
@@ -131,8 +131,8 @@ def parse_arguments():
                         help='a fluid without thermal fluctuations (the default fluctuates at --temperature)')
     parser.add_argument('--steps', type=int, default=1000000, help='number of steps (default 1000000: 10 ns)')
     parser.add_argument('--report', type=int, default=1000, help='steps between reports (default 1000)')
-    parser.add_argument('--profile', type=int, default=100,
-                        help='reports between profiles of the fluid (default 100; 0 = none)')
+    parser.add_argument('--profile', type=int, default=10000,
+                        help='steps between profiles of the fluid (default 10000: 100 ps; 0 = none)')
     parser.add_argument('--seed', type=int, default=1234, help='random number seed (default 1234)')
     parser.add_argument('--domain', type=int, nargs=2, default=[1, 108], metavar=('FIRST', 'LAST'),
                         help='folded domain of SOD1 for the exposure scaling and, without --enm-domain, the elastic '
@@ -393,8 +393,7 @@ def main():
     simulation.reporters.append(MotionReporter(args.output + '_motion.txt', args.report, weights, reference, flow,
                                                append, start))
     if args.profile > 0:
-        simulation.reporters.append(ProfileReporter(args.output + '_profile.txt', args.profile*args.report, force,
-                                                    nodes, append))
+        simulation.reporters.append(ProfileReporter(args.output + '_profile.txt', args.profile, force, nodes, append))
     if args.checkpoint > 0:
         simulation.reporters.append(openmmlbm.LBMCheckpointReporter(checkpointFile, args.checkpoint, force))
     if args.vtk > 0:

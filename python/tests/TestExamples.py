@@ -271,7 +271,7 @@ def test_shear_profile(tmp_path):
     decimals)."""
     import numpy as np
     command = [sys.executable, os.path.join(EXAMPLES, 'cocomo', 'shear.py'), '--platform', 'Reference', '--box', '10',
-               '10', '--height', '12', '--temperature', '0', '--steps', '20', '--report', '10', '--profile', '1']
+               '10', '--height', '12', '--temperature', '0', '--steps', '20', '--report', '10', '--profile', '10']
     result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
     profile = np.loadtxt(tmp_path/'shear_profile.txt', ndmin=2)
@@ -298,8 +298,8 @@ def test_shear_restart(tmp_path):
     the accumulated angle of rotation and the VTK files included: the collection lists every step once, and the files
     written after the checkpoint by the first part are written again, the same."""
     script = os.path.join(EXAMPLES, 'cocomo', 'shear.py')
-    common = [sys.executable, script, '--platform', 'Reference', '--box', '10', '10', '--height', '12', '--report', '10',
-              '--profile', '1', '--checkpoint', '20', '--vtk', '10']
+    common = [sys.executable, script, '--platform', 'Reference', '--box', '10', '10', '--height', '12', '--report',
+              '10', '--profile', '10', '--checkpoint', '20', '--vtk', '10']
     def run(arguments):
         result = subprocess.run(common + arguments, cwd=tmp_path, capture_output=True, text=True, timeout=600)
         assert result.returncode == 0, result.stdout + result.stderr

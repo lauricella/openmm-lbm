@@ -234,7 +234,7 @@ python $EX/cocomo/shear.py --velocity 0.5 --steps 1000000 --output shear
   velocity of the imposed flow at its height, the rotation of the protein from its starting structure as a
   quaternion (best fit weighted by the masses) and the angle of rotation about $`y`$ accumulated since the start.
   `<prefix>_profile.txt` has the mean velocity $`u_x`$ of the fluid on each plane of nodes, every `--profile`
-  reports. The trajectory, the temperature of the beads, the checkpoints and `--restart` work as in `diffusion.py`;
+  steps (default 10000, 100 ps). The trajectory, the temperature of the beads, the checkpoints and `--restart` work as in `diffusion.py`;
   the accumulated angle is written with all its digits, so that a restarted run continues it exactly.
 - **ParaView.** `--vtk N` writes every N steps the fluid, density and velocity on the nodes, and the beads, with
   their positions, velocities and masses, in VTK files in OpenMM units (`openmmlbm.LBMVTKReporter`, as in

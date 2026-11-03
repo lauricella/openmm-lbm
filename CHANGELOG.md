@@ -12,7 +12,9 @@ versions the API may still change.
   The script refuses faces faster than Mach 0.1 of the lattice and recommends 1 nm/ps at most (Mach 0.035). It writes
   the centre of mass with the velocity of the flow at its height, the rotation of the protein (quaternion and angle
   accumulated about y) and the profile of the fluid; checkpoints and `--restart` as in `diffusion.py`; with `--vtk N`
-  the fluid and the beads in VTK files for ParaView every N steps. Tests
+  the fluid and the beads in VTK files for ParaView every N steps. `--profile N` counts steps, like the other
+  intervals (default 10000, 100 ps): in the first version on `main` it counted reports, a profile every 1 ns, and a
+  shorter run wrote none. Tests
   `test_shear_profile`, `test_shear_refuses`, `test_shear_restart` and two cases of `test_example_runs`.
 
 ### Tests
