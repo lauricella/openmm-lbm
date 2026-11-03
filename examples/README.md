@@ -15,6 +15,7 @@ the [tutorial](../docs/user_guide/tutorial.md), which goes through these example
 | [cocomo/diffusion.py](cocomo/diffusion.py) | diffusion of a protein (COCOMO2): the folded SOD1 (110 beads) or a disordered one, with and without the fluid | $`30^3`$ nodes, 2000 steps (`--preset smoke`) to 2e7 steps (200 ns) | 2 s (smoke), 30 min (200 ns) | 25 s (smoke) |
 | [cocomo/kick.py](cocomo/kick.py) | a peptide, ubiquitin or SOD1 kicked in the fluid | $`100^3`$ nodes, 2000 steps | 10 s | 20 s with `--nodes 30` |
 | [cocomo/shear.py](cocomo/shear.py) | SOD1 in a double Couette flow between two open faces moving in opposite directions: drift, rotation, profile of the fluid | 60 x 60 x 100 nodes, 1e6 steps (10 ns) | 11 min on an NVIDIA A30 | 20 s with `--box 10 10 --height 12 --steps 1000` |
+| [cocomo/poiseuille.py](cocomo/poiseuille.py) | SOD1 in a Poiseuille flow, a channel between two walls driven by a uniform acceleration: drift, rotation, profile of the fluid | 60 x 60 x 100 nodes, 1e6 steps (10 ns) | - | 22 s with `--box 10 10 --height 12 --steps 1000` |
 | [cocomo/msd.py](cocomo/msd.py) | mean square displacement and diffusion coefficient of the centre of mass | - | - | seconds |
 | [cocomo/surface.py](cocomo/surface.py) | solvent accessible surface of each residue of an all-atom structure, the input of the exposure scaling | - | - | 2 s (159 residues) |
 
@@ -38,7 +39,8 @@ The output files are written in the current directory. Options common to the sim
 - `--platform NAME`: `Reference`, `CUDA`, `OpenCL` or `HIP`. Without it the script takes CUDA, then
   OpenCL, then Reference, the first that is available.
 - `--precision single|mixed|double`: precision on CUDA, OpenCL and HIP (default `mixed`).
-- `--drag Explicit|Centered`: drag scheme of the coupling (default `Explicit`, `Centered` in `cocomo/shear.py`; see
+- `--drag Explicit|Centered`: drag scheme of the coupling (default `Explicit`, `Centered` in `cocomo/shear.py` and
+  `cocomo/poiseuille.py`; see
   [choosing the drag](../docs/user_guide/lattice.md#choosing-the-drag)); not in `fluid/initial_state.py`,
   which has no particles.
 - `--viscosity NU`: kinematic viscosity in nm²/ps, in physical units. The plugin converts it to the relaxation time
@@ -48,7 +50,7 @@ The output files are written in the current directory. Options common to the sim
   default. At $`T = 0`$ there is nothing stochastic, no random force on the particles and no thermal fluctuations of
   the fluid, but the drag stays: particles and fluid exchange momentum without a thermostat (the same as the coupling
   scheme `NVE`). The default is 0 in the kick and uniform-flow examples and in `fluid/initial_state.py`, 300 K in
-  `particle/thermal.py` and 298 K in `cocomo/diffusion.py` and `cocomo/shear.py`.
+  `particle/thermal.py` and 298 K in `cocomo/diffusion.py`, `cocomo/shear.py` and `cocomo/poiseuille.py`.
 - `--steps N`: number of steps. Every other parameter has an option too: see `--help`.
 
 ## The examples
@@ -253,6 +255,48 @@ python $EX/cocomo/shear.py --velocity 0.5 --steps 1000000 --output shear
   blocks: the changes of
   the rate come from the shape, not from the noise. The beads were at 299.5 K: the temperature of
   `<prefix>_temperature.txt` includes the velocity of the flow at the beads.
+
+### cocomo/poiseuille.py
+
+SOD1 in a Poiseuille flow, the companion of `shear.py`: a channel between two walls, driven along $`x`$ by a
+uniform acceleration $`g`$ of the fluid (`setBodyAcceleration()`), the force of a pressure gradient $`\rho g`$. The
+plane of nodes $`k = 0`$ is solid, with bounce-back walls, and the lattice is periodic, so the plane bounds the channel
+on both sides: the walls lie halfway between the solid plane and the first fluid planes, at $`z = \Delta x/2`$ and
+$`z = (n_z - 1/2)\Delta x`$, the channel is $`H = (n_z - 1)\Delta x`$ wide and its centre line is the middle of the
+box. The steady profile is the parabola
+$`u_x(z) = g/(2\nu)\,(z - \Delta x/2)\,((n_z - 1/2)\Delta x - z)`$ plus the uniform slip of the bounce-back walls,
+$`g\Delta x^2(16\Lambda - 3)/(24\nu)`$ with $`\Lambda = (\tau - 1/2)/2`$, the exact solution of the scheme
+([theory.md](../docs/theory.md#solid-nodes-and-walls)), $`-7\cdot10^{-5}`$ of the centre-line speed with the
+defaults. The script takes the speed at the centre line (`--velocity`, default 0.5 nm/ps) and computes
+$`g = 8\nu v/H^2`$; the fluid starts with the steady profile and the beads with the flow at their height. The
+protein starts on the centre line, or `--position` nm away from it (negative below), and nothing holds it.
+
+```bash
+python $EX/cocomo/poiseuille.py                       # SOD1 on the centre line, v = 0.5 nm/ps, 10 ns
+python $EX/cocomo/poiseuille.py --position -10        # 10 nm below the centre line
+```
+
+- **What to expect.** On the centre line the shear rate is zero: the protein is carried along $`x`$ at about the
+  centre-line speed and does not turn on average. The curvature of the profile makes it lag slightly behind the fluid
+  at its centre of mass ($`a^2 g/(6\nu)`$ for a sphere of radius $`a`$, Faxen's law). Away from the centre line it
+  turns about $`y`$ with the local vorticity, at about half the local shear rate, $`(g/2\nu)(z_c - z)`$, in opposite
+  directions on the two sides of the centre line. The end of the run prints the mean velocity of the centre of mass
+  along $`x`$ and the mean flow at its height, and the mean rate of rotation.
+- **Speed.** As in `shear.py`: the script refuses a centre line faster than Mach 0.1 (2.9 nm/ps), and 1 nm/ps or
+  less (Mach 0.035) is recommended. With $`v`$ = 0.5 nm/ps in a channel of 49.5 nm, $`g = 1.5\cdot10^{-3}`$ nm/ps²
+  (a pressure gradient of $`1.5\cdot10^{15}`$ Pa/m), the shear rate is 0.04/ps at the walls and 0.004/ps at 2.5 nm
+  from the centre line, and the Reynolds number of the channel, $`vH/\nu`$, is 28.
+- **Walls.** A coupled bead whose nearest node is solid and that moves into the wall has its velocity reversed
+  ([coupled particles](../docs/user_guide/api_reference.md#coupled-particles), Walls): unlike the open faces of `shear.py`, nothing crosses the
+  walls. Bounce-back walls keep the fluctuating fluid at equilibrium up to the wall. The script refuses a
+  `--position` that puts a bead within one spacing of a wall.
+- **Temperature.** `<prefix>_temperature.txt` has the temperature of the beads from their velocities relative to the
+  imposed flow at the height of each bead: the translation with the flow, 0.5 nm/ps on the centre line, would add
+  about 1000 K to the temperature of `openmmlbm.LBMTemperatureReporter`.
+- **Output.** The other files are those of `shear.py`: motion (centre of mass, flow at its height, rotation),
+  profile of the fluid every `--profile` steps (the solid plane has zero velocity), trajectory, checkpoints with
+  `--restart`, and `--vtk N` for ParaView. `poiseuille.py` takes the reporters from `shear.py`, which must stay next
+  to it.
 
 ### cocomo/cocomo2.py
 

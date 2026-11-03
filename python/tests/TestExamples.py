@@ -54,6 +54,9 @@ CASES = [
     ('cocomo/shear.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10']),
     ('cocomo/shear.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10', '--velocity', '1',
                          '--no-fluid-fluctuations', '--drag', 'Explicit']),
+    ('cocomo/poiseuille.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10']),
+    ('cocomo/poiseuille.py', ['--box', '10', '10', '--height', '14', '--steps', '20', '--report', '10', '--position',
+                              '-2', '--no-fluid-fluctuations', '--drag', 'Explicit', '--vtk', '10']),
 ]
 
 
@@ -309,6 +312,63 @@ def test_shear_restart(tmp_path):
     for suffix in ('_motion.txt', '_profile.txt', '_temperature.txt'):
         assert (tmp_path/('whole' + suffix)).read_text() == (tmp_path/('split' + suffix)).read_text()
     assert (tmp_path/'split_20.dcd').exists()
+    assert (tmp_path/'split.pvd').read_text().replace('split_', 'whole_') == (tmp_path/'whole.pvd').read_text()
+    for step in range(10, 70, 10):
+        for name in ('density_%010d.vti', 'velocity_%010d.vti', 'particles_%010d.vtp'):
+            assert (tmp_path/('whole_' + name % step)).read_bytes() == (tmp_path/('split_' + name % step)).read_bytes()
+
+
+def test_poiseuille_profile(tmp_path):
+    """poiseuille.py starts the fluid with the steady profile of the scheme between bounce-back walls (docs/theory.md):
+    at zero temperature the planes next to the walls, far from the protein, stay on it within 1e-3 nm/ps (a transient
+    of 4e-4 nm/ps, since the fluid starts at equilibrium; a wall misplaced by half a spacing would give 4e-2), the
+    solid plane holds no fluid, and the temperature of the beads relative to the flow is far below the 1000 K that the
+    translation with the flow would add."""
+    import numpy as np
+    command = [sys.executable, os.path.join(EXAMPLES, 'cocomo', 'poiseuille.py'), '--platform', 'Reference', '--box',
+               '10', '10', '--height', '12', '--temperature', '0', '--steps', '20', '--report', '10', '--profile', '10']
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    profile = np.loadtxt(tmp_path/'poiseuille_profile.txt', ndmin=2)
+    nz, dx, nu, v = 24, 0.5, 0.893, 0.5
+    g = 8*nu*v/((nz - 1)*dx)**2
+    tau = 3*nu*0.01/dx**2 + 0.5
+    z = np.arange(nz)*dx
+    exact = g/(2*nu)*(z - dx/2)*((nz - 0.5)*dx - z) + g*dx**2*(16*(tau - 0.5)/2 - 3)/(24*nu)
+    assert profile.shape == (2, nz + 1)
+    assert np.all(profile[:, 1] == 0)
+    for k in (1, 2, nz - 2, nz - 1):
+        assert np.all(np.abs(profile[:, 1 + k] - exact[k]) < 1e-3)
+    temperature = np.loadtxt(tmp_path/'poiseuille_temperature.txt', ndmin=2)
+    assert np.all(temperature[:, 2] < 100)
+
+
+@pytest.mark.parametrize('options, message', [(['--velocity', '3'], 'Mach'),
+                                               (['--box', '10', '10', '--height', '12', '--position', '4'], 'wall'),
+                                               (['--report', '10', '--checkpoint', '25'], 'multiple')],
+                         ids=['Mach', 'wall', 'checkpoint'])
+def test_poiseuille_refuses(tmp_path, options, message):
+    """poiseuille.py refuses a centre line faster than Mach 0.1, a protein started against a wall and checkpoints
+    between two reports."""
+    command = [sys.executable, os.path.join(EXAMPLES, 'cocomo', 'poiseuille.py'), '--platform', 'Reference'] + options
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode != 0 and message in result.stderr
+
+
+def test_poiseuille_restart(tmp_path):
+    """A run of poiseuille.py split in two with --checkpoint and --restart gives the same output as an uninterrupted
+    run, VTK files included."""
+    script = os.path.join(EXAMPLES, 'cocomo', 'poiseuille.py')
+    common = [sys.executable, script, '--platform', 'Reference', '--box', '10', '10', '--height', '12', '--report',
+              '10', '--profile', '10', '--checkpoint', '20', '--vtk', '10', '--position', '-1']
+    def run(arguments):
+        result = subprocess.run(common + arguments, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+        assert result.returncode == 0, result.stdout + result.stderr
+    run(['--steps', '60', '--output', 'whole'])
+    run(['--steps', '30', '--output', 'split'])          # stops 10 steps after the checkpoint at step 20
+    run(['--steps', '60', '--output', 'split', '--restart'])
+    for suffix in ('_motion.txt', '_profile.txt', '_temperature.txt'):
+        assert (tmp_path/('whole' + suffix)).read_text() == (tmp_path/('split' + suffix)).read_text()
     assert (tmp_path/'split.pvd').read_text().replace('split_', 'whole_') == (tmp_path/'whole.pvd').read_text()
     for step in range(10, 70, 10):
         for name in ('density_%010d.vti', 'velocity_%010d.vti', 'particles_%010d.vtp'):

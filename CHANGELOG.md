@@ -17,6 +17,14 @@ versions the API may still change.
   shorter run wrote none. Tests
   `test_shear_profile`, `test_shear_refuses`, `test_shear_restart` and two cases of `test_example_runs`.
 
+- `cocomo/poiseuille.py` (new): SOD1 in a Poiseuille flow, a channel between bounce-back walls (one solid plane in
+  a periodic lattice) driven by a uniform acceleration of the fluid. The script takes the speed at the centre line
+  and computes the acceleration; the fluid starts with the exact steady profile of the scheme, parabola and slip of
+  the walls, and the protein on the centre line or `--position` nm away from it. The temperature of the beads is
+  measured relative to the imposed flow. Same outputs, limits on the Mach number, checkpoints and VTK files as
+  `shear.py`, whose reporters it uses. Tests `test_poiseuille_profile`, `test_poiseuille_refuses`,
+  `test_poiseuille_restart` and two cases of `test_example_runs`.
+
 ### Tests
 - `testMovingFaceFluctuations` (C++, all platforms): a fluctuating fluid between two `DensityVelocity` faces moving
   at -1 and +1 nm/ps has the linear mean profile of the faces, and the planes of the faces are at equilibrium
