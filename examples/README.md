@@ -232,6 +232,19 @@ python $EX/cocomo/shear.py --velocity 0.5 --steps 1000000 --output shear
   other way: the coupling wraps the positions into the periodic box of OpenMM, and the faces are not a Lees-Edwards
   boundary. `--box LX LY` gives the sides along $`x`$ and $`y`$: the protein interacts through the fluid with its
   periodic images at that distance.
+- **Wall potential.** The faces neither reflect the beads nor push them back. `--wall-potential wca` or `hertz` adds a
+  repulsive potential of the two faces on every bead, an OpenMM `CustomExternalForce` (`wall_potential()` in the
+  script), with $`d`$ the distance of the bead from the face, $`z + \Delta x/2`$ from `ZMin` and
+  $`(n_z - 1/2)\Delta x - z`$ from `ZMax`:
+  - `wca`: $`U(d) = 4\varepsilon[(\sigma/d)^{12} - (\sigma/d)^6] + \varepsilon`$ for $`d < 2^{1/6}\sigma`$, zero beyond:
+    impenetrable;
+  - `hertz`: $`U(d) = \varepsilon\,\max(0, 1 - d/\sigma)^{5/2}`$: soft, at most $`\varepsilon`$ at the face, so a
+    bead pushed hard can still cross it.
+
+  `--wall-epsilon` gives $`\varepsilon`$ in kJ/mol (default 2.5 for `wca`, about $`k_BT`$ at 300 K, and 125 for
+  `hertz`, about $`50\,k_BT`$) and `--wall-sigma` gives $`\sigma`$ in nm (default 0.5, one lattice spacing). The
+  force is along $`z`$ only: along the faces the protein slides freely, and only the fluid drags it. The default,
+  `none`, gives the runs without the potential. A run continued with `--restart` needs the same options.
 - **Output.** `<prefix>_motion.txt` has, every `--report` steps, the centre of mass (not wrapped into the box), the
   velocity of the imposed flow at its height, the rotation of the protein from its starting structure as a
   quaternion (best fit weighted by the masses) and the angle of rotation about $`y`$ accumulated since the start.
@@ -287,9 +300,12 @@ python $EX/cocomo/poiseuille.py --position -10        # 10 nm below the centre l
   (a pressure gradient of $`1.5\cdot10^{15}`$ Pa/m), the shear rate is 0.04/ps at the walls and 0.004/ps at 2.5 nm
   from the centre line, and the Reynolds number of the channel, $`vH/\nu`$, is 28.
 - **Walls.** A coupled bead whose nearest node is solid and that moves into the wall has its velocity reversed
-  ([coupled particles](../docs/user_guide/api_reference.md#coupled-particles), Walls): unlike the open faces of `shear.py`, nothing crosses the
-  walls. Bounce-back walls keep the fluctuating fluid at equilibrium up to the wall. The script refuses a
-  `--position` that puts a bead within one spacing of a wall.
+  ([coupled particles](../docs/user_guide/api_reference.md#coupled-particles), Walls): unlike the open faces of
+  `shear.py`, nothing crosses the walls. Bounce-back walls keep the fluctuating fluid at equilibrium up to the wall.
+  The script refuses a `--position` that puts a bead within one spacing of a wall. `--wall-potential wca` or `hertz`,
+  with `--wall-epsilon` and `--wall-sigma`, adds the repulsive potential of `shear.py` on the wall planes
+  $`z = \Delta x/2`$ and $`(n_z - 1/2)\Delta x`$, which keeps the beads off the walls before they reach the solid
+  nodes; the reflection stays.
 - **Temperature.** `<prefix>_temperature.txt` has the temperature of the beads from their velocities relative to the
   imposed flow at the height of each bead: the translation with the flow, 0.5 nm/ps on the centre line, would add
   about 1000 K to the temperature of `openmmlbm.LBMTemperatureReporter`.

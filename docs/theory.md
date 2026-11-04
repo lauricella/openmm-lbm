@@ -349,7 +349,8 @@ densities.
 - With open faces the fluid exchanges momentum with the outside, so its momentum cannot be removed:
   `setFluidMomentumRemovalFrequency(0)` is required. The reaction of a coupled particle acts on the face nodes
   as on any fluid node. The particles themselves still live in OpenMM's periodic box: a particle that crosses
-  an open face reappears on the opposite one, so keep them away from the open faces.
+  an open face reappears on the opposite one, so keep them away from the open faces, for example with a repulsive
+  wall potential of OpenMM (`docs/user_guide/api_reference.md`, A wall potential for the particles).
 - The body acceleration (`setBodyAcceleration()`) acts on the face nodes as on the others, and the velocity of a
   face is the velocity of the fluid $`(\mathbf j + \mathbf F/2)/\rho`$.
 - The local regularized boundary condition of Latt [20] (all 19 populations of the face node rebuilt, with the

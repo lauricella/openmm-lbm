@@ -17,7 +17,15 @@ gamma_dot/2 and changes along the run.  The protein is the SOD1 of diffusion.py 
 data/sod1.pdb, the same exposure and elastic network).  Nothing keeps it in the middle: make the box high enough that
 it does not reach the faces during the run (with D of about 15 A^2/ns it moves by about 5 nm in 100 ns).  The beads
 still live in the periodic box of OpenMM, and a bead that crossed a face would be coupled to the fluid next to the
-opposite face, which moves the other way.
+opposite face, which moves the other way: the faces neither reflect the beads nor push them back.  --wall-potential
+wca or hertz adds a repulsive potential of the two faces on every bead, which keeps the protein inside:
+
+    wca     U(d) = 4 epsilon ((sigma/d)^12 - (sigma/d)^6) + epsilon for d < 2^(1/6) sigma, 0 beyond: impenetrable
+    hertz   U(d) = epsilon max(0, 1 - d/sigma)^(5/2): soft, at most epsilon, so a bead pushed hard can still cross
+
+with d the distance of the bead from the face, z + dx/2 from ZMin and (n_z - 1/2) dx - z from ZMax
+(wall_potential() below, an OpenMM CustomExternalForce).  The force is along z only, so along the faces the
+protein slides freely and only the fluid drags it.
 
 The fluid starts with the linear profile of the Couette flow (setFluidState()), so that the protein does not wait for
 the flow to build up.  By default the fluid fluctuates at the temperature of the run and the drag is centred, so
@@ -45,6 +53,7 @@ shear.py stands for /path/to/openmm-lbm/examples/cocomo/shear.py.
   python shear.py --velocity 1 --steps 5000000 --output v1             # faster faces, 50 ns, files v1*
   python shear.py --box 40 40 --height 80                              # a larger box
   python shear.py --vtk 10000                                          # VTK files for ParaView every 100 ps
+  python shear.py --wall-potential wca                                 # faces that push the beads back
   python shear.py --restart                                            # continue a stopped run from shear.chk
   python shear.py --temperature 0 --no-fluid-fluctuations --drag Explicit --steps 100000
                                                                        # 1 ns without noise: the deterministic flow
@@ -58,6 +67,9 @@ Options (python shear.py --help lists them with their defaults):
               --no-fluid-fluctuations (a fluid without thermal fluctuations), --spacing (nm, default 0.5),
               --dt (ps, default 0.01)
   coupling    --friction (1/ps, default 30), --drag Centered|Explicit (default Centered)
+  faces       --wall-potential none|wca|hertz (default none: the faces do not act on the beads), --wall-epsilon
+              (kJ/mol, default 2.5 for wca, about k_B T at 300 K, and 125 for hertz, about 50 k_B T), --wall-sigma
+              (nm, default 0.5)
   protein     --domain FIRST LAST and --enm-domain FIRST LAST: folded domain of SOD1 for the exposure scaling and
               for the elastic network (as in diffusion.py; default 1 108 and 2 109)
   run         --steps (default 1000000, 10 ns), --seed, --platform CUDA|OpenCL|HIP|Reference (default the fastest
@@ -129,6 +141,11 @@ def parse_arguments():
                         help='drag scheme of LBMForce (default Centered)')
     parser.add_argument('--no-fluid-fluctuations', action='store_true',
                         help='a fluid without thermal fluctuations (the default fluctuates at --temperature)')
+    parser.add_argument('--wall-potential', choices=['none', 'wca', 'hertz'], default='none',
+                        help='repulsive potential of the faces on the beads (default none)')
+    parser.add_argument('--wall-epsilon', type=float,
+                        help='strength of the wall potential in kJ/mol (default 2.5 for wca, 125 for hertz)')
+    parser.add_argument('--wall-sigma', type=float, default=0.5, help='range of the wall potential in nm (default 0.5)')
     parser.add_argument('--steps', type=int, default=1000000, help='number of steps (default 1000000: 10 ns)')
     parser.add_argument('--report', type=int, default=1000, help='steps between reports (default 1000)')
     parser.add_argument('--profile', type=int, default=10000,
@@ -161,7 +178,16 @@ def parse_arguments():
         args.checkpoint = 100*args.report
     if args.checkpoint % args.report != 0:
         parser.error('--checkpoint must be a multiple of --report, so that a restart continues the reports exactly')
+    check_wall_arguments(parser, args)
     return args
+
+
+def check_wall_arguments(parser, args):
+    """The default strength of the wall potential, and positive values."""
+    if args.wall_epsilon is None:
+        args.wall_epsilon = 125.0 if args.wall_potential == 'hertz' else 2.5
+    if args.wall_epsilon <= 0 or args.wall_sigma <= 0:
+        parser.error('--wall-epsilon and --wall-sigma must be positive')
 
 
 def select_platform(name, precision):
@@ -176,6 +202,28 @@ def select_platform(name, precision):
             continue
         properties = {'Precision': precision} if candidate in ('CUDA', 'OpenCL', 'HIP') else {}
         return platform, properties
+
+
+def wall_potential(kind, epsilon, sigma, lower, upper, height):
+    """A CustomExternalForce that pushes every particle away from the planes z = lower and z = upper (nm), between
+    which the particles belong; upper - lower is at most height, the side of the periodic box along z.
+
+    d is the distance of a particle from a plane, d1 = s - lower and d2 = upper - s, where s is z folded into the period
+    that starts halfway across the gap between upper and the image of lower, lower + height (between two open faces
+    the gap is empty; between bounce-back walls it is the solid plane), so that the potential is the same for every
+    periodic image of the particle:
+      wca     U(d) = 4 epsilon ((sigma/d)^12 - (sigma/d)^6) + epsilon for d < 2^(1/6) sigma, 0 beyond
+      hertz   U(d) = epsilon max(0, 1 - d/sigma)^(5/2)
+    epsilon in kJ/mol and sigma in nm.  Add the particles with addParticle(i, []); add the force to the System before
+    the LBMForce, which the centred drag requires to be the last force."""
+    energy = {'wca': 'step(rc - d1)*(4*eps*((sig/d1)^12 - (sig/d1)^6) + eps) + '
+                     'step(rc - d2)*(4*eps*((sig/d2)^12 - (sig/d2)^6) + eps)',
+              'hertz': 'eps*(max(0, 1 - d1/sig)^2.5 + max(0, 1 - d2/sig)^2.5)'}[kind]
+    force = mm.CustomExternalForce(energy + '; d1 = s - zlow; d2 = zhigh - s; s = z - Lz*floor((z - zfold)/Lz)')
+    for name, value in (('eps', epsilon), ('sig', sigma), ('rc', 2**(1/6)*sigma), ('zlow', lower), ('zhigh', upper),
+                        ('zfold', 0.5*(upper - height + lower)), ('Lz', height)):
+        force.addGlobalParameter(name, value)
+    return force
 
 
 def best_rotation(reference, current, weights):
@@ -305,6 +353,12 @@ def main():
     system.setDefaultPeriodicBoxVectors(mm.Vec3(box[0], 0, 0), mm.Vec3(0, box[1], 0), mm.Vec3(0, 0, box[2]))
     masses = np.array([system.getParticleMass(i).value_in_unit(unit.dalton) for i in range(system.getNumParticles())])
     weights = masses/masses.sum()
+    if args.wall_potential != 'none':                 # before the LBMForce, which must be the last force
+        wall = wall_potential(args.wall_potential, args.wall_epsilon, args.wall_sigma, -0.5*dx,
+                              (nodes[2] - 0.5)*dx, box[2])
+        for i in range(system.getNumParticles()):
+            wall.addParticle(i, [])
+        system.addForce(wall)
 
     v = args.velocity
     def flow(z):
@@ -352,6 +406,9 @@ def main():
         ', fluctuating fluid' if fluctuations else ''))
     print('Faces at -/+ %g nm/ps along x (Mach %.4f): shear rate %.5f 1/ps, rotation of the flow %.5f rad/ps about y'
           % (v, v/(dx/(math.sqrt(3)*args.dt)), rate, rate/2))
+    if args.wall_potential != 'none':
+        print('Wall potential %s of the faces z = %g and %g nm: epsilon %g kJ/mol, sigma %g nm' % (
+            args.wall_potential, -0.5*dx, (nodes[2] - 0.5)*dx, args.wall_epsilon, args.wall_sigma))
 
     checkpointFile = args.output + '.chk'
     reference = positions

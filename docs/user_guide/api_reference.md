@@ -402,8 +402,10 @@ True Vec3(x=0.0, y=0.1, z=0.0) nm/ps
   Bounce-back is never applied across an open face.
 - **The body acceleration** (`setBodyAcceleration()`) still acts on all the fluid.
 - **Particles** still live in OpenMM's periodic box: a particle that crosses an open face reappears on the
-  opposite side. Keep coupled particles away from the open faces. With an interpolation stencil the stencil stops at
-  the last nodes ([interpolation.md](interpolation.md#4-what-the-plugin-does-with-the-weights)).
+  opposite side, and it is coupled to the fluid there. The faces neither reflect the particles nor push them back.
+  Keep coupled particles away from the open faces, with a box large enough or with a repulsive wall potential (below).
+  With an interpolation stencil the stencil stops at the last nodes
+  ([interpolation.md](interpolation.md#4-what-the-plugin-does-with-the-weights)).
 - **Fluctuating fluid.** `Density` faces cannot be used with fluid fluctuations: since version 0.5.0 they are an
   error when the Context is created. Next to them the fluid was not at equilibrium: its velocity across the face
   fluctuated more than at the set temperature (+55% on the plane of the face, +6% on the next plane, about +1% four
@@ -440,6 +442,40 @@ Context with `updateParametersInContext()`. Ignored on the other faces.
 The density of the fluid beyond a `Density` or `DensityVelocity` face, in Da/nm³; the default, 0, means the
 density of the fluid at rest. It can be changed in a Context with `updateParametersInContext()`. Ignored on the other faces.
 
+### A wall potential for the particles
+
+The plugin does not act on the particles at the open faces, and at the walls it only reverses the velocity of the
+coupled particles that enter a solid node ([coupled particles](#coupled-particles)). To keep particles away from a
+pair of faces or walls perpendicular to z, add a repulsive potential of OpenMM to the System, before the `LBMForce`
+(the centred drag requires it to be the last force). With $`d`$ the distance of a particle from a plane:
+
+- WCA, impenetrable: $`U(d) = 4\varepsilon[(\sigma/d)^{12} - (\sigma/d)^6] + \varepsilon`$ for
+  $`d < 2^{1/6}\sigma`$, zero beyond;
+- Hertz, soft: $`U(d) = \varepsilon\,\max(0, 1 - d/\sigma)^{5/2}`$, at most $`\varepsilon`$, so a particle pushed
+  hard can still cross.
+
+Two open faces along z lie at $`z = -\Delta x/2`$ and $`(n_z - 1/2)\Delta x`$; bounce-back walls on the solid plane
+$`k = 0`$ of a periodic lattice at $`z = \Delta x/2`$ and $`(n_z - 1/2)\Delta x`$. The coordinate is first folded into
+one period of the box, so that the potential is the same for every periodic image of the particle, which the GPU
+platforms may keep instead of the coordinate given to the Context. For the two faces of an 8-node lattice:
+
+```python
+dx, nz = 0.5, 8
+wall = mm.CustomExternalForce(
+    'step(rc - d1)*(4*eps*((sig/d1)^12 - (sig/d1)^6) + eps) + step(rc - d2)*(4*eps*((sig/d2)^12 - (sig/d2)^6) + eps);'
+    'd1 = s - zlow; d2 = zhigh - s; s = z - Lz*floor((z - zlow)/Lz)')
+for name, value in (('eps', 2.5), ('sig', 0.5), ('rc', 2**(1/6)*0.5), ('zlow', -dx/2), ('zhigh', (nz - 0.5)*dx),
+                    ('Lz', nz*dx)):
+    wall.addGlobalParameter(name, value)        # kJ/mol and nm
+for i in range(system.getNumParticles()):
+    wall.addParticle(i, [])
+# then system.addForce(wall), before system.addForce(force)
+```
+
+`examples/cocomo/shear.py` (two moving faces) and `examples/cocomo/poiseuille.py` (bounce-back walls) have it as
+`--wall-potential wca|hertz`, with `--wall-epsilon` and `--wall-sigma`; their function `wall_potential()` also folds the
+coordinate correctly when the two planes do not touch across the periodic boundary, as with the walls.
+
 ## Coupled particles
 
 Each coupled particle feels a friction force $`-\gamma m(\mathbf v - \mathbf u)`$ relative to the fluid velocity
@@ -456,7 +492,9 @@ temperature, and the fluid at that node (or at those nodes, with the same weight
   coupling is zero.
 - **Walls.** A coupled particle whose nearest node is solid and that moves into the wall has every
   component of its velocity reversed at the start of the step, as for a no-slip wall. A particle that
-  already moves out of the wall keeps its velocity. Uncoupled particles do not see the walls.
+  already moves out of the wall keeps its velocity. Uncoupled particles do not see the walls. A repulsive potential
+  can keep the particles off the walls and the open faces
+  ([a wall potential for the particles](#a-wall-potential-for-the-particles)).
 - **Stability.** With the explicit drag (the default), in one step the drag multiplies the velocity of a particle
   relative to the fluid by $`1 - \gamma\Delta t`$. A warning is printed when $`\gamma\Delta t > 1`$, and the motion
   is unstable for $`\gamma\Delta t \ge 2`$. The centred drag is stable for any friction and prints no warning.

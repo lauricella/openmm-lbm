@@ -25,6 +25,15 @@ versions the API may still change.
   `shear.py`, whose reporters it uses. Tests `test_poiseuille_profile`, `test_poiseuille_refuses`,
   `test_poiseuille_restart` and two cases of `test_example_runs`.
 
+- `cocomo/shear.py` and `cocomo/poiseuille.py`: `--wall-potential wca|hertz`, with `--wall-epsilon` and
+  `--wall-sigma`, adds a repulsive potential of the faces (shear) or of the walls (Poiseuille) on every bead, an
+  OpenMM `CustomExternalForce` with the coordinate folded into one period of the box: WCA, impenetrable, or Hertz,
+  soft. The default, `none`, gives the same runs as before. The open faces neither reflect nor push back the
+  particles, so in `shear.py` this is the way to keep the protein inside. `api_reference.md` has a new section, "A
+  wall potential for the particles", with the formulas and the force for two open faces. Test
+  `test_wall_potential` (energy and force against the formulas, also for periodic images) and two cases of
+  `test_example_runs`.
+
 ### Tests
 - `testMovingFaceFluctuations` (C++, all platforms): a fluctuating fluid between two `DensityVelocity` faces moving
   at -1 and +1 nm/ps has the linear mean profile of the faces, and the planes of the faces are at equilibrium

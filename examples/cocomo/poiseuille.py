@@ -26,8 +26,10 @@ is zero: the protein is carried along x at about the centre-line speed and does 
 the profile makes it lag slightly behind the fluid at its centre of mass (by a^2 g/(6 nu) for a sphere of radius a,
 Faxen's law).  Away from the centre line it turns about y with the local vorticity, at about half the local shear
 rate, (g/(2 nu)) (z_c - z), and changes direction across the centre line.  A coupled bead that reaches a wall has its
-velocity reversed (docs/user_guide/api_reference.md, Coupled particles, Walls): unlike the open faces of shear.py, nothing crosses the
-walls.
+velocity reversed (docs/user_guide/api_reference.md, Coupled particles, Walls): unlike the open faces of shear.py,
+nothing crosses the walls.  --wall-potential wca or hertz adds, as in shear.py, a repulsive potential of the two
+walls on every bead (wall_potential() of shear.py, with d the distance from the wall planes z = dx/2 and
+(n_z - 1/2) dx), which keeps the beads away from the walls before they reach the solid nodes; the reflection stays.
 
 By default the fluid fluctuates at the temperature of the run and the drag is centred, so that the protein diffuses
 with its hydrodynamic mobility (docs/theory.md, sections 2 and 7); bounce-back walls keep the fluctuating fluid at
@@ -51,6 +53,7 @@ copying it alone.  Below, poiseuille.py stands for /path/to/openmm-lbm/examples/
   python poiseuille.py --velocity 1 --steps 5000000 --output v1        # faster flow, 50 ns, files v1*
   python poiseuille.py --box 40 40 --height 80                         # a larger box and a wider channel
   python poiseuille.py --vtk 10000                                     # VTK files for ParaView every 100 ps
+  python poiseuille.py --position -20 --wall-potential wca             # near a wall, kept off it by a potential
   python poiseuille.py --restart                                       # continue a stopped run
   python poiseuille.py --temperature 0 --no-fluid-fluctuations --drag Explicit --steps 100000
                                                                        # 1 ns without noise: the deterministic flow
@@ -66,6 +69,8 @@ Options (python poiseuille.py --help lists them with their defaults):
               --no-fluid-fluctuations (a fluid without thermal fluctuations), --spacing (nm, default 0.5),
               --dt (ps, default 0.01)
   coupling    --friction (1/ps, default 30), --drag Centered|Explicit (default Centered)
+  walls       --wall-potential none|wca|hertz (default none: only the reflection at the solid nodes), --wall-epsilon
+              (kJ/mol, default 2.5 for wca and 125 for hertz), --wall-sigma (nm, default 0.5), as in shear.py
   run         --steps (default 1000000, 10 ns), --seed, --platform CUDA|OpenCL|HIP|Reference (default the fastest
               available), --precision single|mixed|double (default mixed)
   output      --output PREFIX (default poiseuille), --report N (steps between reports, default 1000: 10 ps),
@@ -107,7 +112,8 @@ import openmmlbm
 from openmmlbm import LBMForce
 
 import cocomo2
-from shear import MotionReporter, ProfileReporter, select_platform, truncate, truncate_pvd
+from shear import (MotionReporter, ProfileReporter, check_wall_arguments, select_platform, truncate, truncate_pvd,
+                   wall_potential)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, 'data')
@@ -137,6 +143,11 @@ def parse_arguments():
                         help='drag scheme of LBMForce (default Centered)')
     parser.add_argument('--no-fluid-fluctuations', action='store_true',
                         help='a fluid without thermal fluctuations (the default fluctuates at --temperature)')
+    parser.add_argument('--wall-potential', choices=['none', 'wca', 'hertz'], default='none',
+                        help='repulsive potential of the walls on the beads, besides the reflection (default none)')
+    parser.add_argument('--wall-epsilon', type=float,
+                        help='strength of the wall potential in kJ/mol (default 2.5 for wca, 125 for hertz)')
+    parser.add_argument('--wall-sigma', type=float, default=0.5, help='range of the wall potential in nm (default 0.5)')
     parser.add_argument('--steps', type=int, default=1000000, help='number of steps (default 1000000: 10 ns)')
     parser.add_argument('--report', type=int, default=1000, help='steps between reports (default 1000)')
     parser.add_argument('--profile', type=int, default=10000,
@@ -169,6 +180,7 @@ def parse_arguments():
         args.checkpoint = 100*args.report
     if args.checkpoint % args.report != 0:
         parser.error('--checkpoint must be a multiple of --report, so that a restart continues the reports exactly')
+    check_wall_arguments(parser, args)
     return args
 
 
@@ -231,6 +243,11 @@ def main():
     system.setDefaultPeriodicBoxVectors(mm.Vec3(box[0], 0, 0), mm.Vec3(0, box[1], 0), mm.Vec3(0, 0, box[2]))
     masses = np.array([system.getParticleMass(i).value_in_unit(unit.dalton) for i in range(system.getNumParticles())])
     weights = masses/masses.sum()
+    if args.wall_potential != 'none':                 # before the LBMForce, which must be the last force
+        wall = wall_potential(args.wall_potential, args.wall_epsilon, args.wall_sigma, walls[0], walls[1], box[2])
+        for i in range(system.getNumParticles()):
+            wall.addParticle(i, [])
+        system.addForce(wall)
 
     g = 8*args.viscosity*args.velocity/width**2
     fluctuations = not args.no_fluid_fluctuations and args.temperature > 0
@@ -282,6 +299,9 @@ def main():
                                                                      flow(centre), mach, 4*args.velocity/width))
     print('The protein starts at z = %g nm: flow %.5f nm/ps, rotation of the flow %.5f rad/ps about y' % (
         start, flow(start), g/(2*args.viscosity)*(centre - start)))
+    if args.wall_potential != 'none':
+        print('Wall potential %s of the walls z = %g and %g nm: epsilon %g kJ/mol, sigma %g nm' % (
+            args.wall_potential, walls[0], walls[1], args.wall_epsilon, args.wall_sigma))
 
     checkpointFile = args.output + '.chk'
     if args.restart:

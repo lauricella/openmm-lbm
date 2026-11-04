@@ -55,6 +55,10 @@ CASES = [
     ('cocomo/shear.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10', '--velocity', '1',
                          '--no-fluid-fluctuations', '--drag', 'Explicit']),
     ('cocomo/poiseuille.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10']),
+    ('cocomo/shear.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10', '--wall-potential',
+                         'wca']),
+    ('cocomo/poiseuille.py', ['--box', '10', '10', '--height', '12', '--steps', '20', '--report', '10',
+                              '--wall-potential', 'hertz', '--wall-epsilon', '50', '--wall-sigma', '0.8']),
     ('cocomo/poiseuille.py', ['--box', '10', '10', '--height', '14', '--steps', '20', '--report', '10', '--position',
                               '-2', '--no-fluid-fluctuations', '--drag', 'Explicit', '--vtk', '10']),
 ]
@@ -373,3 +377,46 @@ def test_poiseuille_restart(tmp_path):
     for step in range(10, 70, 10):
         for name in ('density_%010d.vti', 'velocity_%010d.vti', 'particles_%010d.vtp'):
             assert (tmp_path/('whole_' + name % step)).read_bytes() == (tmp_path/('split_' + name % step)).read_bytes()
+
+
+@pytest.mark.parametrize('kind', ['wca', 'hertz'])
+@pytest.mark.parametrize('lower, upper', [(-0.25, 5.75), (0.25, 5.75)], ids=['open faces', 'bounce-back walls'])
+def test_wall_potential(kind, lower, upper):
+    """The wall potential of shear.py and poiseuille.py: energy and force along z of particles near the two planes,
+    far from them and in other periodic images, against the formulas; nothing along x and y."""
+    sys.path.insert(0, os.path.join(EXAMPLES, 'cocomo'))
+    import numpy as np
+    import openmm as mm
+    from shear import wall_potential
+    epsilon, sigma, height = 2.0, 0.5, 6.0
+    z = np.array([lower + 0.15, lower + 0.45, 3.0, upper - 0.3, upper - 0.5, lower + 0.2 + height,
+                  lower + 0.35 - 2*height, upper - 0.1 + height])
+    system = mm.System()
+    system.setDefaultPeriodicBoxVectors(mm.Vec3(3, 0, 0), mm.Vec3(0, 3, 0), mm.Vec3(0, 0, height))
+    wall = wall_potential(kind, epsilon, sigma, lower, upper, height)
+    for i in range(len(z)):
+        system.addParticle(100.0)
+        wall.addParticle(i, [])
+    system.addForce(wall)
+    context = mm.Context(system, mm.VerletIntegrator(0.01), mm.Platform.getPlatformByName('Reference'))
+    context.setPositions([mm.Vec3(1.0, 2.0, value) for value in z])
+    state = context.getState(getEnergy=True, getForces=True)
+    s = z - height*np.floor((z - 0.5*(upper - height + lower))/height)
+    distances = (s - lower, upper - s)
+    if kind == 'wca':
+        def u(d):
+            return np.where(d < 2**(1/6)*sigma, 4*epsilon*((sigma/d)**12 - (sigma/d)**6) + epsilon, 0.0)
+        def du(d):
+            return np.where(d < 2**(1/6)*sigma, 4*epsilon*(-12*sigma**12/d**13 + 6*sigma**6/d**7), 0.0)
+    else:
+        def u(d):
+            return epsilon*np.maximum(0.0, 1 - d/sigma)**2.5
+        def du(d):
+            return -2.5*epsilon/sigma*np.maximum(0.0, 1 - d/sigma)**1.5
+    energy = u(distances[0]).sum() + u(distances[1]).sum()
+    force = -du(distances[0]) + du(distances[1])        # d1 grows with z, d2 decreases
+    assert abs(state.getPotentialEnergy()._value - energy) < 1e-9*max(1.0, abs(energy))
+    forces = np.array(state.getForces()._value)
+    assert np.allclose(forces[:, 2], force, rtol=1e-9, atol=1e-9)
+    assert np.all(forces[:, :2] == 0)
+    assert energy > 0 and np.any(force > 0) and np.any(force < 0)
