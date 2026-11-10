@@ -1430,48 +1430,6 @@ with $`2 \times 2 \times 2`$ domains on two nodes 300.30 ± 0.08 K, with the par
 between samples, and 299.8 to 300.8 K (errors 0.23 to 0.36 K) for the particles of each of the 8 domains; with one
 domain 300.11 ± 0.13 K. The decomposition changes the temperature by 0.19 ± 0.15 K.
 
-## Equivalence with the reference implementation: coupled particles (E0)
-
-The Reference platform was compared with the validation campaign of the reference CUDA library (version
-tagged `ref-explicit-2026-10`, built in double precision), run with the same scripts, at $`T = 0`$, with all
-particles coupled and no removal of the fluid momentum: 80 cases.
-- **Cases.**
-  - Nearest-node artefacts of a dragged particle (8 cases);
-  - kick of a particle in a fluid at rest (6 cases, lattices up to $`64^3`$, 20000 steps);
-  - pair mobility (15 cases);
-  - composite sphere of 300 beads in translation and rotation (7 cases);
-  - mobility of a dragged particle (44 cases) as a function of mass, friction, force, direction, box size,
-    $`\tau`$ and time step.
-- **Result.**
-  - Trajectories agree within 5e-13 relative over 30000 steps.
-  - Derived quantities (mobilities, self-mobility $`y`$, hydrodynamic radii, velocity decay) agree within
-    2e-6, and within 1.1e-5 for the velocity of a kicked particle at its last plateau (5e-6 of its initial
-    velocity).
-  - The criterion was 1e-4.
-- **Rounding of small momenta.** With 10 Da nm/ps spread over a fluid of 2e7 Da ($`64^3`$ nodes, 20000 steps),
-  the total momentum of particles and fluid drifts by at most 1e-8 of the momentum; the reference library
-  drifts by 4.5e-6 (read from its single-precision output). Such a momentum is a difference between
-  populations of order 0.05 at the ninth digit; the populations are stored as deviations from the rest equilibrium
-  for this reason (`docs/theory.md`, section 4): stored whole, the drift was 3e-5.
-
-## Equivalence with the reference implementation: fluid only
-
-The Reference platform was compared in double precision with the CUDA lattice Boltzmann library from
-which openmm-lbm is derived (the library of the DragOpenMM plugin, version tagged `ref-explicit-2026-10`),
-built in double precision.
-- **Setup.** 16x12x10 nodes, 500 steps, no particles acting on the fluid.
-- **Initial state, the same in both codes.** Density modulated by up to 1.5% around $`\rho_0`$, a shear wave
-  and smaller velocity modes, and a non-zero non-equilibrium stress, given as moments; the populations
-  are rebuilt from them as $`f^{\mathrm{eq}}(\rho, \mathbf j/\rho) + f^{\mathrm{neq,reg}}(\Pi^{\mathrm{neq}})`$.
-- **Cases.** $`\tau = 1.102`$ with a body force, without and with removal of the fluid momentum at every
-  step; $`\tau = 0.62`$ with $`\rho_0 = 0.98`$ and a body force.
-- **Result.** Density and momentum agree within the float32 rounding of the output of the reference
-  library: relative differences of at most 5e-8. The non-equilibrium stress agrees within 5e-16 in
-  absolute value, the double-precision rounding of $`f - f^{\mathrm{eq}}`$ for populations of order 0.05.
-- **Sensitivity.** A difference in the algorithm would appear at 1e-3 or above. For example, a Guo
-  prefactor of $`1 - \omega/2`$ instead of $`1/2`$ changes the momentum input by 4.6% at $`\tau = 1.102`$, and
-  shifting the velocity instead of the momentum by half a force changes it by 1% at $`\rho_0 = 0.98`$.
-
 ## GPU platforms against the Reference platform: fluid and walls
 
 The Python test `test_fluid_agrees_with_reference` runs the same fluid on the Reference platform and on each available
@@ -1550,8 +1508,7 @@ single precision; the OpenCL platform also rounds the total force on a particle 
 
 **Speed.** With 110 coupled particles on a $`30^3`$ lattice at 300 K and the removal of the fluid momentum at
 every step, a step takes 61 µs with CUDA in mixed precision (54 µs in single, 58 µs in double) and 67 µs
-with OpenCL in mixed precision, on an NVIDIA A100 with OpenMM 8.6.1. The CUDA library of the DragOpenMM
-project takes 517 µs for the same system. The centred drag changes the time per step by -4% to +6% (A100, OpenMM 8.6.1, 300 K,
+with OpenCL in mixed precision, on an NVIDIA A100 with OpenMM 8.6.1. The centred drag changes the time per step by -4% to +6% (A100, OpenMM 8.6.1, 300 K,
 removal at every step, 5000 steps after 200), in µs per step:
 
 | System | precision | CUDA explicit | CUDA centred | OpenCL explicit | OpenCL centred |
@@ -1566,46 +1523,18 @@ removal at every step, 5000 steps after 200), in µs per step:
 | | single | 88.0 | 93.1 | 101.7 | 104.7 |
 | | double | 100.8 | 104.6 | 114.1 | 118.6 |
 
-## Examples compared with the DragOpenMM plugin
+## Proteins with a fluid without fluctuations (`examples/cocomo/diffusion.py`, CUDA, NVIDIA A100)
 
-The scripts of `examples/` are ports of the examples of the DragOpenMM plugin, with the Euler-Maruyama
-coupling and `VerletIntegrator`. Run with the same parameters, the DragOpenMM plugin (reference library
-in double precision, CUDA platform in double precision, OpenMM 8.2) and openmm-lbm (OpenMM 8.6.1, NVIDIA
-A100) give the same trajectories:
+Runs of the protein examples with the Euler-Maruyama coupling and a fluid without thermal fluctuations of its own.
 
-- **Kick of a bead** (`particle/kick.py`, $`100^3`$ nodes, 2000 steps, $`T = 0`$): velocities within 1e-13 of
-  $`v_0`$ and positions within 1e-11 of the distance travelled, with CUDA in double and mixed precision;
-  5e-8 in single precision. With the parameters of the alanine bead ($`30^3`$ nodes, 100 steps) the
-  Reference platform agrees within 7e-14.
-- **Thermalization of a bead** (`particle/thermal.py`, 300 K, 20000 steps, same seed): velocities within
-  3e-11 of their largest value with CUDA in double and mixed precision, random force included, because
-  both plugins draw the same numbers from OpenMM's generator ([theory.md](theory.md), section 2);
-  2e-6 in single precision and 5e-6 with OpenCL, whose generator rounds differently.
-- **Bead in a uniform flow** (`particle/uniform_flow.py`, NVE, 400 steps): equal to the 6 printed digits.
-- **Kick of the peptide GRGDSPYS** (`cocomo/kick.py --preset peptide`, COCOMO2 forces, 2000 steps,
-  $`T = 0`$, the density of the original script): velocity of the centre of mass within 1e-13 of $`v_0`$, with
-  CUDA in double precision.
-
-The reference outputs of the examples of the old plugin came from its Langevin scheme, in
-which OpenMM's `LangevinIntegrator` supplies friction and noise (first step $`v_1/v_0 = \exp(-\gamma\Delta t)`$); they
-were regenerated with the Euler-Maruyama scheme for this comparison ($`v_1/v_0 = 1 - \gamma\Delta t`$).
 - **Disordered protein rlp** (`cocomo/diffusion.py --preset rlp`, 166 beads, friction 100/ps, $`\Delta t`$ = 2 fs,
-  298 K): full-step temperature 259.1 K and half-step 293.6 K over 10 ns; the DragOpenMM plugin with the
-  same parameters gives 259.9 K and 294.7 K. The 13% deficit is that of the model without thermal
-  fluctuations of the fluid, large at this friction (T2 and T6 below).
-- **COCOMO2 model** (`cocomo/cocomo2.py`), written from the article: on SOD1 (`cocomo/data/sod1.pdb`,
-  box 15 nm, Reference platform) the energy of every term (bonds, angles, electrostatics, short range,
-  cation-pi, pi-pi, elastic network with 478 bonds) is identical to that of the COCOMO2 script of the
-  DragOpenMM runs, and the forces agree within 1e-16 of the largest force, at the reference structure
-  and with the beads displaced at random by 0.03 nm.
+  298 K): full-step temperature 259.1 K and half-step 293.6 K over 10 ns. The 13% deficit is that of the model
+  without thermal fluctuations of the fluid, large at this friction (T2 and T6 below).
 - **Diffusion of SOD1** (`cocomo/diffusion.py --preset sod1`, three runs of 200 ns with seeds 1, 2, 3, CUDA in mixed
   precision): the apparent diffusion coefficient of the centre of mass, $`\mathrm{MSD}(t)/(6t)`$, is 2.34, 2.41, 2.42,
   2.49, 2.64, 2.83 and 2.86 Å²/ns (mean of the three runs; standard error 0.01 to 0.03 up to 2 ns, 0.06 to 0.19 at
-  longer lags) at lag times of 0.1, 1, 2, 3, 5, 10 and 18 ns. Three runs of the DragOpenMM plugin with the same
-  parameters and the Euler-Maruyama coupling give 2.3, 2.4, 2.3, 2.3, 2.4, 2.4 and 2.6 Å²/ns, with a spread between
-  runs of 1.9 to 3.4 Å²/ns at 18 ns. Both stay close to $`k_BT/(M\gamma)`$ = 2.26 Å²/ns, as expected without thermal
-  fluctuations of the fluid. At the longest lags the two sets differ by about 1.5 standard errors. The full-step
-  temperature is 293-294 K at 298 K.
+  longer lags) at lag times of 0.1, 1, 2, 3, 5, 10 and 18 ns, close to $`k_BT/(M\gamma)`$ = 2.26 Å²/ns, as expected
+  without thermal fluctuations of the fluid. The full-step temperature is 293-294 K at 298 K.
 - **Diffusion of SOD1 with the centred drag** (`--drag Centered`, same three seeds, CUDA in mixed precision,
   NVIDIA A100): 2.34, 2.41, 2.42, 2.49, 2.64, 2.87 and 2.95 Å²/ns at the same lag times (standard error 0.01
   to 0.07 up to 5 ns, 0.04 to 0.17 at longer lags), against 2.34, 2.41, 2.42, 2.49, 2.64, 2.83 and 2.86 with
@@ -1732,39 +1661,38 @@ difference below 1e-3 between the two Mach numbers.
 
 ## Stochastic tests T2, T6, T7 (CUDA, mixed precision, NVIDIA A100)
 
-The stochastic tests of the reference campaign of the DragOpenMM plugin, run with openmm-lbm with the same
-cases, seeds, protocol and analysis (zero initial total momentum in T6). Both plugins draw the random
-numbers from OpenMM's generator in the same order, so the agreement is closer than the statistical error.
-The fluid has no thermal fluctuations of its own: the diffusion coefficient is $`k_BT/(m\gamma)`$ and the
-Einstein relation with the hydrodynamic mobility is not satisfied, as in the reference.
+Stochastic tests of the coupling, with fixed seeds: equipartition (T2), diffusion (T6, zero initial total momentum)
+and the velocity autocorrelation against the response to a kick (T7). Without thermal fluctuations of the fluid the
+diffusion coefficient is $`k_BT/(m\gamma)`$ and the Einstein relation with the hydrodynamic mobility is not
+satisfied.
 
 **T2, equipartition** (100 free particles of 100 Da, 300 K, $`L`$ = 8 nm, viscosity fixed, 200 ps). Mean
-temperatures in K, openmm-lbm / reference; statistical error about 0.5 K.
+temperatures in K; statistical error about 0.5 K.
 
 | $`\Delta t`$ (ps) | $`\tau`$ | $`\gamma`$ (1/ps) | half step | full step |
 |---|---|---|---|---|
-| 0.005 | 0.80 | 1 | 299.7 / 299.7 | 298.9 / 298.9 |
-| 0.005 | 0.80 | 5 | 299.0 / 299.2 | 295.4 / 295.3 |
-| 0.005 | 0.80 | 10 | 300.5 / 300.1 | 292.9 / 292.6 |
-| 0.01 | 1.10 | 1 | 303.6 / 303.6 | 302.0 / 302.1 |
-| 0.01 | 1.10 | 5 | 306.5 / 306.6 | 298.9 / 298.8 |
-| 0.01 | 1.10 | 10 | 310.6 / 311.0 | 294.8 / 295.0 |
-| 0.02 | 1.70 | 1 | 302.8 / 302.5 | 299.8 / 299.6 |
-| 0.02 | 1.70 | 5 | 315.6 / 316.1 | 300.1 / 300.0 |
-| 0.02 | 1.70 | 10 | 333.1 / 333.1 | 299.6 / 299.8 |
+| 0.005 | 0.80 | 1 | 299.7 | 298.9 |
+| 0.005 | 0.80 | 5 | 299.0 | 295.4 |
+| 0.005 | 0.80 | 10 | 300.5 | 292.9 |
+| 0.01 | 1.10 | 1 | 303.6 | 302.0 |
+| 0.01 | 1.10 | 5 | 306.5 | 298.9 |
+| 0.01 | 1.10 | 10 | 310.6 | 294.8 |
+| 0.02 | 1.70 | 1 | 302.8 | 299.8 |
+| 0.02 | 1.70 | 5 | 315.6 | 300.1 |
+| 0.02 | 1.70 | 10 | 333.1 | 299.6 |
 
-**T6, diffusion** (64 particles of 1000 Da, 300 K, 5 ns), openmm-lbm / reference:
+**T6, diffusion** (64 particles of 1000 Da, 300 K, 5 ns):
 
 | $`\gamma`$ (1/ps) | $`L`$ (nm) | $`D/(k_BT/m\gamma)`$, MSD | $`D/(k_BT/m\gamma)`$, Green-Kubo | full-step $`T`$ (K) |
 |---|---|---|---|---|
-| 1 | 16 | 1.038 / 1.038 | 1.010 / 1.010 | 292.4 / 292.4 |
-| 5 | 16 | 0.984 / 0.984 | 0.984 / 0.985 | 270.4 / 270.4 |
-| 10 | 16 | 1.010 / 1.011 | 1.007 / 1.004 | 254.0 / 254.0 |
-| 5 | 8 | 0.979 / 0.983 | 0.979 / 0.980 | 271.4 / 271.4 |
+| 1 | 16 | 1.038 | 1.010 | 292.4 |
+| 5 | 16 | 0.984 | 0.984 | 270.4 |
+| 10 | 16 | 1.010 | 1.007 | 254.0 |
+| 5 | 8 | 0.979 | 0.979 | 271.4 |
 
 **T7, velocity autocorrelation against the kick response** ($`\gamma`$ = 10/ps, $`L`$ = 16 nm): the ratio of the
 normalized VACF at half steps to the kick response minus its plateau is 0.93, 0.90, 0.85, 0.81, 0.69 and
-0.50 at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps (reference: 0.93, 0.90, 0.85, 0.81, 0.70, 0.47). With thermal
+0.50 at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps. With thermal
 fluctuations of the fluid the two curves would coincide (fluctuation-dissipation theorem).
 
 **With the centred drag** (same cases, seeds and protocol, with the centred drag). The
@@ -1784,8 +1712,7 @@ temperature is 274.7, 207.7, 161.1 and 204.2 K: the deficit of a fluid without f
 $`\gamma\Delta t\,m/m_c`$, as predicted (`docs/theory.md`, section 2, Temperature with a fluid without fluctuations).
 
 T7, with the response to a kick (particle of 1000 Da, $`\gamma`$ = 10/ps, $`L`$ = 16 nm) computed with the same drag
-on CUDA (with the explicit drag it
-reproduces the kick of the reference campaign): ratio of the normalized VACF to the kick response minus its
+on CUDA: ratio of the normalized VACF to the kick response minus its
 plateau at 0.05, 0.1, 0.2, 0.3, 0.5 and 1 ps:
 
 | drag | 0.05 | 0.1 | 0.2 | 0.3 | 0.5 | 1 ps |
@@ -1825,7 +1752,7 @@ T6, particles of 1000 Da ($`m/m_c`$ = 13.3), $`L`$ = 16 nm except the last row:
 
 $`\zeta = m\gamma`$, and $`y_{\mathrm{centred}} = y_{\mathrm{explicit}} + \Delta t/(2m_c)`$ is the self-mobility of
 the centred drag measured with a constant force (`docs/theory.md`, section 2): 9.59e-5 ps/Da at $`L`$ = 8 nm and
-9.88e-5 ps/Da at $`L`$ = 16 nm, with $`y_{\mathrm{explicit}}`$ from the reference campaign at $`L`$ = 16 nm. The
+9.88e-5 ps/Da at $`L`$ = 16 nm, with $`y_{\mathrm{explicit}}`$ measured with a constant force at $`L`$ = 16 nm. The
 diffusion coefficient now contains the hydrodynamic contribution of the thermal flows, about 2.5e-4 nm²/ps whatever
 the friction, and is the same for both drags: the Einstein relation holds with the mobility of the centred drag
 (within 2%, the statistical error of D), and not with that of the explicit one

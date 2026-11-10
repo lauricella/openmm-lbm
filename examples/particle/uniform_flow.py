@@ -16,7 +16,7 @@ its own: bead and fluid exchange momentum without a thermostat (above zero the r
 heats the bead).
 
 The viscosity is given in physical units (--viscosity, nm^2/ps); the plugin converts it to the relaxation time
-tau of the lattice, which the script prints.  The default parameters are those of the old plugin's NVE test:
+tau of the lattice, which the script prints.  The default parameters are those of an NVE test:
 20^3 nodes of 0.3 nm, time step 1 fs, nu = 15 nm^2/ps (tau = 1), friction 10/ps, u0 = 0.09 nm/ps.  The script
 prints, every --interval steps, the velocity of the bead, the momentum of bead and fluid relative to the
 initial one, and the kinetic energies.  The momentum and energy of the fluid are sums over the nodes of the

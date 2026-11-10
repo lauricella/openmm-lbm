@@ -8,7 +8,7 @@
 
 The beads start at the centre of the box with velocity v0 along x, sqrt(kT/m) by default, and the
 friction and the random force of LBMForce bring them to the temperature T.  The default parameters are
-those of the old plugin's single-particle test: one bead of 5 lattice cells (80.7 Da) in a box of 3 nm
+those of a single-particle test: one bead of 5 lattice cells (80.7 Da) in a box of 3 nm
 with 10^3 nodes, time step 1 fs, friction 0.1/ps, nu = 15 nm^2/ps (tau = 1), 300 K, 20000 steps.  With --beads N
 the beads are placed at random in the box.  The viscosity is given in physical units (--viscosity, nm^2/ps); the
 plugin converts it to the relaxation time tau of the lattice, which the script prints.  At --temperature 0 there is

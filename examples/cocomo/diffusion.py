@@ -16,7 +16,7 @@ Parameter sets (--preset):
   sod1       the folded protein SOD1 (110 beads, data/sod1.pdb), held folded by the elastic network of
              COCOMO2, with the nonbonded terms scaled by the solvent exposure of each residue
              (data/sod1.surface); box 15 nm, friction 10/ps, time step 10 fs, nu = 5.0175 nm^2/ps
-             (five times the viscosity of water at 20 C, tau = 1.10), 200 ns: the runs of the DragOpenMM project
+             (five times the viscosity of water at 20 C, tau = 1.10), 200 ns
   sod1-g30   SOD1 in a box of 30 nm, friction 30/ps, 50 ns
   smoke      SOD1 with friction 5/ps for 2000 steps: a quick check that everything runs
   rlp        an intrinsically disordered protein (166 beads, data/rlp.pdb), no elastic network; box
@@ -25,7 +25,7 @@ All use a lattice spacing of 0.5 nm, water density, 298 K and the removal of the
 every step.  For a protein in water pass the viscosity of water at the temperature of the run, in nm^2/ps:
 --viscosity 0.893 at 298 K, --viscosity 0.696 --temperature 310 at 310 K.
 
-The protocol is that of the original scripts: velocities at T, energy minimization, new velocities at
+The protocol: velocities at T, energy minimization, new velocities at
 T, production.  Files written, with the prefix given by --output (default <preset>_lb_on, <preset>_lb_on_centered with
 --drag Centered, <preset>_lb_on_fluct with --fluid-fluctuations, or <preset>_lb_off):
   <prefix>.dcd               trajectory (DCD), every --report steps, written by OpenMM's DCDReporter: positions

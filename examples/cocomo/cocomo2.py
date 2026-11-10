@@ -34,13 +34,13 @@ disordered regions, and min(S_i/S_ref,i, lambda)/lambda in folded domains, with 
 accessible surface of residue i in the reference structure, S_ref,i that of the same amino acid in
 an alanine helix, and lambda = 0.7 (eq 6 of the article).
 
-Differences from the text of the article, which follow the reference implementation of the authors:
+Differences from the text of the article:
 - the cation-pi and pi-pi terms, written in eq 5 as eps_ij + eps_mod inside the 10-5 potential, are a
   separate potential of the same form with eps_mod, which is the same energy;
 - A0_ij is the sum A0_i + A0_j, while eq 7 writes the product.  With A0 = 0 or 0.0002 kJ nm/mol the
   difference is at most 4e-4 kJ nm/mol;
 - eq 7 has a factor rho in front of the electrostatic term that the article does not define; it is 1
-  here, as in the reference implementation.
+  here.
 
 The table below gives, for each amino acid, the mass (Da), the charge (e), the radius r of the sphere
 of the same volume (nm), and S_ref (nm^2, Table S2 of the supporting information of the article).

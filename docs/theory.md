@@ -2,10 +2,7 @@
 
 This document describes the physics implemented by `LBMForce`, the conversion between OpenMM and
 lattice units, and the conventions every platform must follow. Every section is implemented on all
-platforms. The fluid and the explicit drag reproduce the CUDA
-lattice Boltzmann library of the DragOpenMM project; the centred drag (section 2), the regularized walls and
-the open faces (section 1), the fluctuating fluid (section 7) and the interpolation stencils of the coupling
-(section 9) are extensions of this plugin.
+platforms.
 
 ## 1. Fluid model (implemented on all platforms)
 
@@ -62,8 +59,7 @@ the first moment $`f^{\mathrm{neq,reg}}`$ has no part, $`f^{\mathrm{eq}}(\rho, \
 $`\mathbf j + \mathbf F/2`$ and $`\tfrac12 S_i`$ gives $`\mathbf F/2`$: the momentum increases by exactly
 $`\mathbf F`$ per step, at every relaxation time [3, 4].
 
-**How the plugin computes $`\Pi^{\mathrm{neq}}`$.** As in the reference library, the moments of a node are
-computed before the coupling forces of the step are known (the coupling comes after them, section 2), with the
+**How the plugin computes $`\Pi^{\mathrm{neq}}`$.** The moments of a node are computed before the coupling forces of the step are known (the coupling comes after them, section 2), with the
 equilibrium at the unshifted velocity:
 
 ```math
@@ -79,7 +75,7 @@ and leaves density and momentum unchanged. These identities were checked in exac
 lattice, with random populations off equilibrium and random forces. In $`\Pi^{\mathrm{neq}}`$ the $`-c_s^2 I`$ part
 of $`H^{(2)}`$ does not contribute, because the equilibrium has the same density as the populations and
 $`\sum_i (f_i - f_i^{\mathrm{eq}}) = 0`$: $`\Pi^{\mathrm{neq}}`$ is also the plain second moment of
-$`f - f^{\mathrm{eq}}`$, which is how the reference library computes it.
+$`f - f^{\mathrm{eq}}`$, which is how the plugin computes it.
 
 The forcing is checked by the Poiseuille flows driven by a body force, between bounce-back walls and between
 regularized walls, whose steady profiles match the exact solutions of the scheme (`docs/validation.md`, Fluid on its
@@ -117,7 +113,7 @@ halfway bounce-back (`BounceBack`, the default, described first) or the regulari
   where $`f_q^{*} = f_q^{\mathrm{eq}}(\rho, \mathbf u^{*}) + (1 - \omega)\, f_q^{\mathrm{neq,reg}} + S_q/2`$, plus
   the random part $`\xi_q`$ with a fluctuating fluid (section 7), is the post-collision population of $`\mathbf x`$.
   This halfway bounce-back places the wall halfway between the fluid and the solid node and conserves the mass of
-  the fluid. It is the scheme of the reference implementation.
+  the fluid.
 - With the regularized collision $`f_q^{*}`$ depends only on the moments $`\rho`$, $`\mathbf j`$ and
   $`\Pi^{\mathrm{neq}}`$ of $`\mathbf x`$, its force and its random part, so the population that arrives from the
   wall is the population that $`\mathbf x`$ rebuilds from its own moments for the direction towards the wall, put in
@@ -401,8 +397,7 @@ as in Ahlrichs and Dünweg [5], reviewed in [6]). Each coupled particle $`k`$ of
   $`\mathbf F = -\gamma m\,(\mathbf v - \mathbf u) + \sqrt{2\gamma m k_BT}\,\boldsymbol\xi`$, with
   $`\boldsymbol\xi`$ three independent $`N(0, 1)`$ numbers.
 - Drag and noise are part of the force, so the System is integrated with `VerletIntegrator`.
-- This is the explicit scheme of the reference CUDA library. openmm-lbm reproduces it, and offers a
-  time-centred drag as an alternative (Drag schemes, below).
+- This is the explicit scheme. The plugin also offers a time-centred drag (Drag schemes, below).
 
 **Coupling schemes** (`setCouplingScheme()`).
 - `EulerMaruyama`, the default: friction and random force as above.
@@ -494,16 +489,12 @@ force (SFMT, Box-Muller transform).
   simulation.
 - Its state is not part of OpenMM checkpoints; `LBMForce::createCheckpoint()` saves it.
 
-On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's generator, as in the reference library
+On the CUDA, OpenCL and HIP platforms the random numbers come from OpenMM's generator
 (`IntegrationUtilities`, Gaussian numbers in single precision), seeded with `setRandomNumberSeed()`. OpenMM keeps
 one generator per Context: another component that uses it with a different seed (an `AndersenThermostat`, for
 example) makes OpenMM stop with an error, and the two seeds must then be set equal. At every step the plugin
 reserves one Gaussian float4 per (padded) atom of the System and uses element $`i`$, components $`x`$, $`y`$, $`z`$,
-for coupled particle $`i`$. This is how the reference library consumes the generator, so with the same seed both
-draw the same numbers and a run with the random force can be compared with it step by step: the thermal example
-agrees to 3e-11 over 20000 steps on CUDA in double precision
-([examples/README.md](../examples/README.md#comparison-with-the-dragopenmm-plugin)). OpenCL generates the same
-sequence with slightly different rounding. The random forces of the GPU platforms and of the Reference platform are
+for coupled particle $`i`$. OpenCL generates the same sequence as CUDA with slightly different rounding. The random forces of the GPU platforms and of the Reference platform are
 different sequences with the same statistics; at $`T = 0`$ (or with the NVE scheme) the platforms agree to rounding.
 
 **Walls.** A coupled particle whose nearest node is solid has entered a wall.
@@ -537,8 +528,7 @@ $`\tau`$ and changes sign. Measured on the Reference platform ($`L`$ = 8 nm, $`\
 | $`y\,\eta\,\Delta x`$ | 0.0609 | 0.0577 | 0.0442 | 0.0202 | 0.0134 | 0.0065 | -0.0007 | -0.0080 | -0.0154 | -0.1406 |
 
 (The scan with both drags below gives 0.0443 at $`\tau = 1.1`$, a separate run with the same analysis.) $`y`$
-vanishes at $`\tau = 1.79`$ (1.79 also for $`m`$ = 100 Da, $`\gamma`$ = 10/ps), the value found with the reference
-library. Above it, particles move less than Langevin particles with the same friction. A warning is printed when a
+vanishes at $`\tau = 1.79`$ (1.79 also for $`m`$ = 100 Da, $`\gamma`$ = 10/ps). Above it, particles move less than Langevin particles with the same friction. A warning is printed when a
 Context with coupled particles and the explicit drag has $`\tau > 1.7`$, except with the three-point stencil
 (section 9), whose self-mobility stays positive.
 
@@ -830,15 +820,6 @@ viscosity at 20 °C):
 - at $`T`$ = 298 K, $`(k_BT)_{\mathrm{lattice}} = 1.3166\cdot 10^{-5}`$;
 - $`\gamma`$ = 5 /ps gives $`\gamma_{\mathrm{lattice}} = 0.05`$.
 
-**Correspondence with the reference implementation.** These conversions coincide with those of the CUDA lattice
-Boltzmann plugin of the DragOpenMM project, which uses the same base units $`\Delta x`$, $`\Delta t`$ and $`m_c`$.
-There are two interface differences:
-
-- That plugin takes $`\Delta t`$ and the box from explicit arguments. openmm-lbm reads them from the integrator and
-  the System.
-- Its body force argument is a force per cell divided by the density, that is $`g\,\Delta x^3`$ for an acceleration
-  $`g`$. openmm-lbm takes the acceleration $`g`$ directly.
-
 **The time step is set by the molecular dynamics.** In a stand-alone LB simulation $`\Delta t`$ is a numerical
 parameter, chosen to keep the Mach number small [7]. Here the fluid advances once per integrator step, so
 $`\Delta t`$ is the step size of OpenMM. Viscosity and resolution are therefore coupled:
@@ -935,7 +916,7 @@ range. The plugin checks both.
 
 **At Context creation.**
 - $`\tau > 1/2`$ holds by construction, since a viscosity that is not positive is an error.
-- A warning is printed on stderr if $`\tau`$ is outside [0.505, 2], the range used by the reference implementation.
+- A warning is printed on stderr if $`\tau`$ is outside [0.505, 2].
 - With coupled particles and the explicit drag, warnings for $`\tau > 1.7`$ (not with the three-point stencil) and
   $`\gamma\Delta t > 1`$ (section 2),
   and, with fluid fluctuations and the `EulerMaruyama` scheme at $`T > 0`$, a warning that the particles will be too hot, with
@@ -1162,7 +1143,7 @@ $`y_{\mathrm{explicit}} = y_{\mathrm{centred}} - \Delta t/(2m_c)`$, so its parti
 ```
 
 the mirror image of the deficit without fluctuations. Measured on CUDA (mixed precision; stochastic tests T2
-and T6 with the fluctuating fluid, `docs/validation.md`), with $`y`$ from section 2 and from the reference campaign:
+and T6 with the fluctuating fluid, `docs/validation.md`), with $`y`$ measured as in section 2:
 
 | System | $`m/m_c`$ | $`\gamma\Delta t`$ | `Explicit`, full step | predicted | `Centered`, half step |
 |---|---|---|---|---|---|

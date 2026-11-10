@@ -27,17 +27,19 @@ reproducible and understandable by someone who arrives without any prior context
 
 ## Physics and numerics
 
-- **Reference implementation.** The algorithm is the one of the validated CUDA lattice Boltzmann library (`libc-cuda`) of the DragOpenMM project:
+- **The algorithm** (`docs/theory.md`):
   - D3Q19 with regularized, thread-safe collision (populations rebuilt from moments up to second order);
   - Guo forcing with prefactor 1/2;
   - exact weakly compressible density convention;
-  - explicit Euler-Maruyama particle–fluid coupling at the half step.
+  - explicit Euler-Maruyama particle–fluid coupling at the half step, and the centred drag (section 2);
+  - bounce-back and regularized walls, open faces (section 1), the fluctuating fluid (section 7) and the
+    interpolation stencils of the coupling (section 9).
 
-  Until equivalence is reached, any difference from the reference values of that library in double precision is a defect, unless a written decision says otherwise. The centred drag (`LBMForce::Centered`, version 0.2.0) is an extension beyond that library, derived in `docs/theory.md` (section 2) and validated in `docs/validation.md`; so are the regularized walls and the open faces (section 1) and the fluctuating fluid (section 7). The explicit drag stays identical to it.
+  The results of the existing schemes are fixed by the tests of `docs/validation.md`: a change that alters them is a defect, unless a written decision says otherwise.
 - **Changes to the physics** (fluctuating LB, interpolation, boundaries; the centred drag followed this rule) require three things:
   - a written derivation in `docs/theory.md`;
   - a test that checks it;
-  - a comparison with reference values, with their protocol, platform and version (the details of the runs are kept in the notes of the maintainers).
+  - a comparison with reference values (exact solutions, theory, or independent codes), with their protocol, platform and version (the details of the runs are kept in the notes of the maintainers).
 - **Units.** The public API uses OpenMM units only. Lattice units stay internal; the conversion is documented in `docs/theory.md` (section 3) and done with the same factors on every platform (`docs/architecture.md`, Invariants).
 
 ## Tests and acceptance
@@ -88,7 +90,7 @@ reproducible and understandable by someone who arrives without any prior context
 - **Branches.** `main` is stable and always green. Development happens on `develop` or on topic branches (`feature/...`), merged after the tests pass.
 - **Commits.** Small and focused, authored by the person who signs them.
 - **Do not commit** build artefacts, data, simulation output or system files.
-- **Versions.** Semantic versioning (`0.x` until equivalence with the reference implementation), annotated tags, and a `CHANGELOG.md`.
+- **Versions.** Semantic versioning (`0.x` while the API may still change), annotated tags, and a `CHANGELOG.md`.
 
 ## Documentation
 

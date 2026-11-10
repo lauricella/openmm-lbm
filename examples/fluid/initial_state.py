@@ -22,7 +22,7 @@ amplitude of the wave fluctuates around the same decay.
 
 The state and the time can be written to a NumPy file with --save and read back with --load: a run that
 loads the file of another one continues it exactly at zero temperature (with fluctuations the random numbers
-of the continued run are new ones).  This replaces the raw restart files of the old plugin.
+of the continued run are new ones).
 """
 
 import argparse

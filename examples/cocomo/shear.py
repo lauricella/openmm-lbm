@@ -30,7 +30,7 @@ protein slides freely and only the fluid drags it.
 The fluid starts with the linear profile of the Couette flow (setFluidState()), so that the protein does not wait for
 the flow to build up.  By default the fluid fluctuates at the temperature of the run and the drag is centred, so
 that the protein diffuses with its hydrodynamic mobility (docs/theory.md, sections 2 and 7); --no-fluid-fluctuations
-and --drag Explicit give the coupling of the original scripts.  The viscosity is given in physical units
+and --drag Explicit give the default coupling of diffusion.py.  The viscosity is given in physical units
 (--viscosity, nm^2/ps, water at 298 K by default); the plugin converts it to the relaxation time tau of the lattice,
 which the script prints.
 

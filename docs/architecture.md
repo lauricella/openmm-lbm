@@ -19,7 +19,7 @@ openmm-lbm follows the structure of the OpenMM example plugin
 | `platforms/cuda/`, `platforms/opencl/`, `platforms/hip/` | only the kernel factories, which create `CommonCalcLBMForceKernel` with the context of the platform (on CUDA its subclass `CudaCalcLBMForceKernel`, which gives the MPI library the address of the device buffers of the exchange, `getDeviceAddress()`; on OpenCL its subclass `OpenCLCalcLBMForceKernel`, step 3 below; the CUDA and HIP factories also pass the platform property `DeterministicForces`), and the tests |
 | `serialization/` | XML proxy of `LBMForce` (parameters only; version 9, which reads versions 1 to 8) |
 | `python/` | SWIG wrapper `openmmlbm`, with the Python helpers `LBMTemperatureReporter`, `LBMVTKReporter`, `saveCheckpoint()`, `loadCheckpoint()` and `LBMCheckpointReporter`, and its tests (`TestExamples.py` runs every script of `examples/` for a few steps) |
-| `examples/` | example scripts, ports of the examples of the DragOpenMM plugin (`examples/README.md`) |
+| `examples/` | example scripts (`examples/README.md`) |
 | `tests/TestLBMForce.h` | tests shared by all platforms; each platform has a `Test<Platform>LBMForce.cpp` |
 | `tests/TestLBMFluid.h` | tests of the fluid on its own, `runFluidTests()`, and of the walls, with both wall schemes, and the open faces, `runWallTests()`, on every platform (`docs/validation.md`) |
 | `tests/TestLBMCoupling.h` | tests of the particle-fluid coupling, `runCouplingTests()`, on every platform |

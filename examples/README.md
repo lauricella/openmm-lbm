@@ -125,15 +125,14 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
 # --vtk 10000 writes the fluid and the beads every 10000 steps for ParaView: open sod1_lb_on.pvd
 ```
 
-- `--preset sod1` reproduces the runs of the DragOpenMM project with the folded protein SOD1 (box 15 nm, friction
+- `--preset sod1` runs the folded protein SOD1 (box 15 nm, friction
   10/ps, 298 K, $`\Delta t`$ 10 fs, $`\nu = 5.0175`$ nm²/ps, five times the viscosity of water at 20 °C, removal of the
   fluid momentum at every step);
   `--preset sod1-g30` a larger box (30 nm) with friction 30/ps for 50 ns.
 - `--preset rlp` is an intrinsically disordered protein of 166 residues, without elastic network (box 20 nm,
-  friction 100/ps, $`\Delta t`$ 2 fs, $`\nu = 1.0035`$ nm²/ps, water at 20 °C, 10 ns), from the thermal-diffusion
-  example of the DragOpenMM plugin. Its full-step temperature stays at about 260 K, 13% below 298 K: with this large
-  friction the fluid, which has no thermal fluctuations of its own without `--fluid-fluctuations`, takes a large part
-  of the momentum of the beads (docs/validation.md, T2 and T6). The DragOpenMM plugin gives the same value.
+  friction 100/ps, $`\Delta t`$ 2 fs, $`\nu = 1.0035`$ nm²/ps, water at 20 °C, 10 ns). Its full-step temperature
+  stays at about 260 K, 13% below 298 K: with this large friction the fluid, which has no thermal fluctuations of its
+  own without `--fluid-fluctuations`, takes a large part of the momentum of the beads (docs/validation.md, T2 and T6).
 - The script writes the trajectory (DCD, positions in Å as in every DCD file, wrapped into the box), the energies
   (OpenMM's log), the temperature of the beads and the centre of mass of the protein (`<prefix>_com.txt`, in nm, not
   wrapped into the box), which `msd.py` reads.
@@ -148,8 +147,7 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
   without fluctuations the fluid is cold and the beads are 16% below $`T`$ with the centred drag, 0.7% with the
   explicit one; the explicit drag with a fluctuating fluid makes them 20% too hot (numbers in
   [validation.md](../docs/validation.md#temperature-of-sod1-with-a-fluctuating-fluid-examplescocomodiffusionpy-cuda-nvidia-a100)).
-- **Viscosity.** The presets `sod1` and `sod1-g30` use five times the viscosity of water, as the runs of the
-  DragOpenMM project. For a protein in water pass the viscosity of water at the temperature of the run, in nm²/ps:
+- **Viscosity.** The presets `sod1` and `sod1-g30` use five times the viscosity of water. For a protein in water pass the viscosity of water at the temperature of the run, in nm²/ps:
   `--viscosity 0.893` at 298 K, `--viscosity 0.696 --temperature 310` at 310 K; the plugin converts it to the
   relaxation time. With the preset `sod1-g30`, the centred drag and the fluctuating fluid the temperatures are right
   at this viscosity as well, and the protein diffuses 3 to 6 times faster: 11 to 22 Å²/ns instead of 3 to 4 Å²/ns
@@ -163,9 +161,8 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
 - `--domain FIRST LAST` chooses the folded domain (residues counted from 1, both included): the residues whose
   nonbonded terms are scaled by their solvent exposure and, unless `--enm-domain` is also given, the residues
   joined by the elastic network. A folded domain normally has both, so `--domain` alone is the safe choice for a
-  new protein. The SOD1 presets keep two ranges, 1-108 for the exposure and 2-109 for the elastic network: that is
-  what the original scripts did with their option `-d 1 109`, because of an offset of one residue in their loops,
-  and the presets reproduce those runs. With `--domain` alone both ranges become the same.
+  new protein. The SOD1 presets keep two ranges, 1-108 for the exposure and 2-109 for the elastic network. With
+  `--domain` alone both ranges become the same.
 
 ### cocomo/kick.py
 
@@ -191,10 +188,8 @@ fluid is never removed, so the protein ends at the velocity of the whole system,
       --equilibration 5000 --repeats 100 --output kick_sod1_300K.txt
   ```
 
-Compared with the original scripts, the centre of mass is weighted by the masses (the original used
-the plain mean of the positions), and the elastic network of ubiquitin covers the whole chain: the
-original command line gave one-residue domains and therefore no elastic bonds. The exposure threshold
-is the lambda = 0.7 of COCOMO2 (`--lam`; the original command used 0.9).
+The centre of mass is weighted by the masses, and the elastic network of ubiquitin covers the whole chain. The
+exposure threshold is the lambda = 0.7 of COCOMO2 (`--lam`).
 
 ### cocomo/shear.py
 
@@ -221,7 +216,7 @@ python $EX/cocomo/shear.py --velocity 0.5 --steps 1000000 --output shear
   adds to the flow a thermal velocity of standard deviation $`\sqrt{k_BT/(\rho\Delta x^3)}`$ per node and component,
   0.18 nm/ps at 298 K, and its largest values on the lattice reach about five times that. Faces moving at 1 nm/ps
   keep the fluid at the temperature of the run on every plane, the planes of the faces included
-  ([validation.md](../docs/validation.md#fluctuating-fluid-testslbmfluctuationsh-all-platforms)).
+  ([validation.md](../docs/validation.md#fluctuating-fluid-teststestlbmfluctuationsh-all-platforms)).
 - **Shear rate.** The shear rates within reach are those of molecular dynamics: $`v`$ = 0.5 nm/ps over 50 nm gives
   $`\dot\gamma = 2\cdot10^{10}`$ /s. With a rotation time of SOD1 in water of about 7 ns (Stokes-Einstein-Debye with
   a hydrodynamic radius of 2 nm) the Weissenberg number $`\dot\gamma\tau_r`$ is about 140, and about 30 at
@@ -321,16 +316,14 @@ for these examples from the description in the article: bonds, angles, elastic n
 short-range potential with cation-pi and pi-pi terms, Debye-Hueckel electrostatics, scaling of the
 nonbonded terms by the solvent exposure. The text at the top of the file gives every term and
 parameter. `read_beads()`, `exposure()`, `elastic_network()` and `create_system()` can be used for other
-proteins. On SOD1 its energies and forces are equal, term by term, to those of the COCOMO2 script used
-in the DragOpenMM project (energies identical to the last digit, forces within 1e-16 relative, also
-away from the reference structure).
+proteins.
 
 The surface file given to `exposure()` holds, for each residue, its solvent accessible surface area in nm²,
 computed from the all-atom structure of the protein with atomic radii, as in COCOMO2: the reference surfaces
 of the residues in `cocomo2.RESIDUES` are of the same kind. `ubiquitin.surface` is such a file. `sod1.surface`,
 instead, was computed from the coarse-grained structure `sod1.pdb`, with one sphere of radius 0.2 nm per bead
-(the default radius of Biopython for an atom that is not a chemical element) and a probe of 0.14 nm; it is the
-file of the original runs of the DragOpenMM project, and the SOD1 presets keep it to reproduce them.
+(the default radius of Biopython for an atom that is not a chemical element) and a probe of 0.14 nm; the SOD1
+presets use it.
 
 `surface.py` writes such a file from an all-atom PDB file, by the method of Shrake and Rupley with the van der
 Waals radii of Bondi and a probe of 0.14 nm, one area per residue in nm², in the order of the residues:
@@ -351,29 +344,7 @@ the default 960 points per atom the error on the area of an atom is 0.14 % of it
 |---|---|---|
 | `cocomo/data/sod1.pdb` | SOD1 coarse grained with one bead per residue (110 beads, positions in Angstrom) | prepared by the IBPC group (L. E. Coronas-Serna, F. Sterpone) for the thermal-diffusion runs of SOD1 with COCOMO2 |
 | `cocomo/data/sod1.surface` | solvent accessible surface of each residue of `sod1.pdb`, in nm², computed from the coarse-grained structure (see cocomo2.py above) | same |
-| `cocomo/data/GRGDSPYS.pdb` | the peptide GRGDSPYS, one bead per residue | kick examples of the DragOpenMM plugin (IBPC group) |
-| `cocomo/data/ubiquitin.pdb`, `cocomo/data/ubiquitin.surface` | ubiquitin, one bead per residue at the C-alpha positions (`ubione.min.pdb` of the original example), and the solvent accessible surface of each residue in nm² | same |
-| `cocomo/data/rlp.pdb` | an intrinsically disordered protein of 166 residues, one bead per residue | thermal-diffusion example of the DragOpenMM plugin (IBPC group) |
+| `cocomo/data/GRGDSPYS.pdb` | the peptide GRGDSPYS, one bead per residue | IBPC group |
+| `cocomo/data/ubiquitin.pdb`, `cocomo/data/ubiquitin.surface` | ubiquitin, one bead per residue at the C-alpha positions, and the solvent accessible surface of each residue in nm² | same |
+| `cocomo/data/rlp.pdb` | an intrinsically disordered protein of 166 residues, one bead per residue | IBPC group |
 
-## Comparison with the DragOpenMM plugin
-
-These scripts are ports of the examples of the DragOpenMM plugin (the reference CUDA library of the
-project), with the Euler-Maruyama coupling of openmm-lbm instead of OpenMM's Langevin integrator. With
-the same parameters, the DragOpenMM plugin in double precision gives the same trajectories:
-
-| Example | Platform of openmm-lbm | Largest difference from DragOpenMM |
-|---|---|---|
-| kick, bead, 2000 steps | CUDA double and mixed | velocity 1e-13 of $`v_0`$, position 1e-11 of the distance |
-| kick, bead, 2000 steps | CUDA single | velocity 5e-8 of $`v_0`$ |
-| kick, alanine, 100 steps | Reference | 7e-14 of $`v_0`$ |
-| thermal, 300 K, 20000 steps, same seed | CUDA double and mixed | 3e-11 of the largest velocity, including the random force |
-| thermal, 300 K, 20000 steps, same seed | CUDA single, OpenCL | 2e-6 and 5e-6 |
-| uniform flow, 400 steps | CUDA double | equal to the 6 digits printed |
-| protein kick, peptide (COCOMO2), 2000 steps | CUDA double | velocity of the centre of mass 1e-13 of $`v_0`$; positions equal to the printed digits |
-| SOD1 diffusion, `--preset sod1`, three runs of 200 ns | CUDA mixed | apparent diffusion coefficient of the centre of mass 2.3-2.9 Å²/ns at lag times from 0.1 to 18 ns, against 2.3-2.6 in three runs of the DragOpenMM plugin (spread between runs 1.9-3.4 at 18 ns); $`k_BT/(M\gamma) = 2.26`$ Å²/ns |
-| `--preset rlp`, 10 ns | CUDA mixed | full-step temperature 259.1 K and half-step 293.6 K at 298 K, against 259.9 K and 294.7 K for the DragOpenMM plugin (0.2 ns, double precision) |
-| `--preset sod1-g30`, 50 ns | CUDA mixed | 0.89-1.0 Å²/ns between 0.1 and 1 ns, against 0.86 for a run of the DragOpenMM plugin (explicit drag); $`k_BT/(M\gamma) = 0.75`$ Å²/ns |
-
-The thermal run can be compared step by step because both plugins draw their random numbers from
-OpenMM's generator in the same order. OpenCL generates them with slightly different rounding from
-CUDA, hence the 5e-6.

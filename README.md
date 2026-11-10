@@ -7,8 +7,8 @@ fluid. Native OpenMM plugin with Reference, CUDA, OpenCL and HIP platforms.
 velocity, density or both, thermal fluctuations of the fluid and the particle-fluid coupling, with the explicit or the
 centred drag, at the nearest node or through an interpolation stencil, run on all platforms (Reference, CUDA, OpenCL,
 HIP), with one domain or with the lattice divided over MPI ranks, one GPU per rank ([running on several
-GPUs](docs/user_guide/parallel.md)); the platforms agree with each other, and the explicit drag at the nearest node
-with the reference CUDA library of the DragOpenMM project. Version 0.6.5 makes the viscosity and the temperature the
+GPUs](docs/user_guide/parallel.md)); the platforms agree with each other.
+Version 0.6.5 makes the viscosity and the temperature the
 inputs of every example and of the documentation, aligns the protein kick with the diffusion example (SOD1, a fluctuating
 fluid, kicks at a temperature averaged over seeds), adds `examples/cocomo/surface.py` for the surface file of a protein
 and the corrections of a test of the tutorial; version 0.6.4 gives the units of the output files (the DCD files of
@@ -124,7 +124,7 @@ the OpenMM checkpoint and the fluid together ([restart](docs/user_guide/restart.
   `openmm.app.Simulation`, Couette flow and a duct between open faces).
 - [examples/](examples/README.md): example scripts (a kicked bead, thermalization, a bead in a uniform
   flow, a fluid started from a shear wave, and proteins with the COCOMO2 model: diffusion of SOD1 and
-  of a disordered protein, kicks of a peptide and of ubiquitin), compared with the DragOpenMM plugin.
+  of a disordered protein, kicks of a peptide and of ubiquitin, SOD1 in a Couette and in a Poiseuille flow).
 - [docs/theory.md](docs/theory.md): model, units and conventions.
 - [docs/architecture.md](docs/architecture.md): structure of the code.
 - [docs/validation.md](docs/validation.md): tests, tolerances and measured values.

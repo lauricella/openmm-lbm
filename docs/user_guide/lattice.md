@@ -204,7 +204,7 @@ Context is created.
 | Velocity with the right temperature | full step: the temperature of `StateDataReporter` | half step: the velocities of the State; `StateDataReporter` reports less |
 | Requirements | none | `LBMForce` is the last force of the System; no virtual sites |
 | Cost on a GPU | | 0 to 6% more |
-| Same results as | version 0.1.0 and the DragOpenMM library | |
+| Same results as | version 0.1.0 | |
 
 **With the fluctuating fluid**
 ([`setFluidFluctuations(True)`](api_reference.md#setfluidfluctuationsfluctuations-getfluidfluctuations)) **use the
@@ -212,8 +212,7 @@ centred drag**: its particles have the set temperature (at half steps), while th
 (below).
 
 **Without fluid fluctuations use the explicit drag** (the default) in most cases: it is accurate for
-$`\text{friction}\times\Delta t`$ up to about 0.1, it reproduces the results of version 0.1.0 and of the DragOpenMM
-library, the temperature that OpenMM
+$`\text{friction}\times\Delta t`$ up to about 0.1, it reproduces the results of version 0.1.0, the temperature that OpenMM
 reports is right, and its particles are the closest to $`T`$ (below).
 
 **Use the centred drag** when the explicit drag is unstable: large friction, or several heavy beads at a node. With

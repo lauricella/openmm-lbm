@@ -480,7 +480,7 @@ void CommonCalcLBMForceKernel::initialize(const System& system, const LBMForce& 
         hostReceive.resize(receiveBuffer.getSize()*elementSize);
         // The populations go from device to device between the ranks of the same node if the MPI library of every rank
         // can read device memory: within a node over NVLink.  Between nodes they go through the host, which was faster
-        // on Leonardo (InfiniBand, one port of UCX) for blocks of 128^3 nodes; the transfer from the device was faster
+        // on a cluster with InfiniBand (one port of UCX) for blocks of 128^3 nodes; the transfer from the device was faster
         // only for larger blocks, whose interior collides long enough to hide it.  The library (UCX, under Open MPI)
         // binds its transfers between devices to the CUDA context of the first one, while OpenMM gives every Context its
         // own CUDA context and destroys it with the Context: so only the first Context of the process that exchanges
@@ -1547,9 +1547,8 @@ void CommonCalcLBMForceKernel::uploadPopulations(const void* data) {
 void CommonCalcLBMForceKernel::computeCouplingForces(bool isStep) {
     // The N(0,1) numbers of a step are drawn once, when there is a random force, by the first computation that
     // needs them, and copied into the array noise.  One float4 per padded atom is reserved, although only the
-    // first numCoupled are used: this is how the DragOpenMM plugin consumes the generator, so with the same seed
-    // both plugins draw the same numbers and their stochastic runs can be compared step by step.  In a lattice
-    // step (isStep) the keys are sorted and the reactions of the particles are summed per node.
+    // first numCoupled are used; changing this would change the random forces of every run with a given seed.
+    // In a lattice step (isStep) the keys are sorted and the reactions of the particles are summed per node.
     int numCoupled = lattice.particles.size();
     bool draw = (lattice.kT > 0 && lattice.friction > 0 && !noiseDrawn);
     int randomIndex = 0;

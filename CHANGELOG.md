@@ -77,7 +77,7 @@ tutorial. The C++ code of the plugin is that of version 0.6.0 (only comments of 
 - `examples/README.md` and `exposure()` in `cocomo2.py` say what the surface file of a protein holds: the solvent
   accessible surface of each residue in nm², computed from the all-atom structure with atomic radii, as in COCOMO2.
   `ubiquitin.surface` is such a file; `sod1.surface` was computed from the coarse-grained structure (one sphere of
-  0.2 nm per bead), and the SOD1 presets keep it to reproduce the original runs.
+  0.2 nm per bead), and the SOD1 presets use it.
 - `particle/thermal.py` accepts `--particles` as a second name for `--beads`, and `particle/kick.py` the preset
   `particle` for `bead`: the same runs. The documentation keeps "bead", the usual word of coarse-grained models, and
   defines it in the glossary and in the tutorial: a coupled particle, one per amino acid in the protein examples.
@@ -129,7 +129,7 @@ diffusion validated at the viscosity of water. The C++ code of the plugin is tha
 
 ### Documentation
 - The viscosity of the SOD1 presets of `examples/cocomo/diffusion.py`, 5.0175 nm²/ps, is described as what it is,
-  five times the viscosity of water at 20 °C, chosen to reproduce the runs of the DragOpenMM project: `docs/theory.md`
+  five times the viscosity of water at 20 °C: `docs/theory.md`
   called it a water-like fluid and the tutorial a protein in water. The script, `examples/README.md` and the API
   reference say how to pass the viscosity of water (0.893 nm²/ps at 25 °C, 0.696 nm²/ps at 37 °C), in physical units,
   which the plugin converts to the relaxation time.
@@ -607,11 +607,9 @@ version 0.1.0.
 
 First release. A native OpenMM plugin (OpenMM 8.3 to 8.6) with a D3Q19 regularized lattice Boltzmann fluid
 coupled to the particles by friction and random force (Euler-Maruyama, or NVE at zero temperature), solid
-walls with momentum exchange, checkpoints of the fluid, on the Reference, CUDA, OpenCL and HIP platforms. It
-reproduces the reference CUDA library of the DragOpenMM project: trajectories of the deterministic tests within
-1e-12 and the quantities derived from them within 1e-5,
-stochastic tests (equipartition, diffusion, velocity autocorrelation) and the examples of that project
-within their statistical error (`docs/validation.md`). Tested on NVIDIA A100 with OpenMM 8.3.1 and 8.6.1,
+walls with momentum exchange, checkpoints of the fluid, on the Reference, CUDA, OpenCL and HIP platforms, with
+deterministic and stochastic tests (equipartition, diffusion, velocity autocorrelation) and examples
+(`docs/validation.md`). Tested on NVIDIA A100 with OpenMM 8.3.1 and 8.6.1,
 and in continuous integration with every minor version from 8.3 to 8.6 and a HIP build.
 
 ### Added
@@ -632,7 +630,7 @@ and in continuous integration with every minor version from 8.3 to 8.6 and a HIP
 - CMake check that SWIG has the version used for the OpenMM Python module.
 - HIP platform compiled and linked against ROCm 6.3 (no AMD GPU available for tests yet).
 - Fluid update on the Reference platform: moments, removal of the fluid momentum, regularized collision
-  with Guo forcing (prefactor 1/2) and push streaming, with the conventions of the reference library.
+  with Guo forcing (prefactor 1/2) and push streaming.
   The fluid advances once per integration step, triggered by `updateContextState()`; other force
   evaluations do not advance it.
 - Stability checks (`docs/theory.md`, section 6): Mach number of the fluid checked every N steps
@@ -670,15 +668,14 @@ and in continuous integration with every minor version from 8.3 to 8.6 and a HIP
 - Warning at Context creation on the CUDA, OpenCL and HIP platforms when particles are coupled, while the
   coupling was implemented only on the Reference platform (removed when the coupling was ported, below).
 
-- Equivalence of the coupling with the reference library (E0, 80 cases at $`T = 0`$): trajectories within
-  5e-13, derived quantities within 2e-5. Measured self-mobility as a function of $`\tau`$
+- Measured self-mobility as a function of $`\tau`$
   (`docs/theory.md`, section 2), and a warning for coupled particles when $`\tau > 1.7`$. Equipartition test.
 
 - The populations are stored as deviations from the rest equilibrium, $`f_q - w_q`$, on all platforms, so
   that small hydrodynamic signals keep the full precision of the type. The fluid state of
   `getFluidState()`/`setFluidState()` is made of these deviations (a population is the value plus $`w_q`$);
   saving and restoring it remains exact. In double precision the rounding drift of the total momentum on a
-  $`64^3`$ lattice drops from 3e-5 to 1e-8 (E0 repeated: all 80 cases still agree with the reference library).
+  $`64^3`$ lattice drops from 3e-5 to 1e-8.
 
 - Coupling schemes, `setCouplingScheme()`: `EulerMaruyama` (default) or `NVE`, friction only without random
   force. Saved by the serialization (version 3, which still reads versions 1 and 2).
@@ -704,18 +701,14 @@ and in continuous integration with every minor version from 8.3 to 8.6 and a HIP
   `getWallForce()`, forces computed once per step and added at every force evaluation. The coupling tests
   run on every platform and precision mode; at $`T = 0`$ in double precision particles and fluid agree with the
   Reference platform to 2e-11 (`test_coupling_agrees_with_reference`). 61 us per step for 110 particles on
-  a $`30^3`$ lattice on an NVIDIA A100, against 517 us for the reference library. The warning of the GPU
+  a $`30^3`$ lattice on an NVIDIA A100. The warning of the GPU
   platforms is removed.
-- On the GPU platforms the generator of OpenMM is consumed as in the reference library (one float4 per
-  padded atom per step), so that runs with the random force can be compared with it step by step.
+- On the GPU platforms the generator of OpenMM is consumed with one float4 per padded atom per step.
 - `examples/`: kick of a bead with and without the fluid, thermalization of beads, a bead in a uniform
   flow (NVE), a fluid started from a shear wave with saving and loading of the state, and a plotting
-  script. They are ports of the examples of the DragOpenMM plugin with the Euler-Maruyama coupling, and
-  reproduce its trajectories (`examples/README.md`). A Python test runs each of them for a few steps.
-- `examples/cocomo/`: the COCOMO2 model of proteins written from its article (`cocomo2.py`; on SOD1 its
-  energies and forces equal those of the COCOMO2 script of the DragOpenMM project), the diffusion of
-  SOD1 and of a disordered protein with and without the fluid (`diffusion.py`, with the parameter sets
-  of the DragOpenMM runs), kicks of a peptide and of ubiquitin (`kick.py`), and the diffusion
+  script (`examples/README.md`). A Python test runs each of them for a few steps.
+- `examples/cocomo/`: the COCOMO2 model of proteins written from its article (`cocomo2.py`), the diffusion of
+  SOD1 and of a disordered protein with and without the fluid (`diffusion.py`), kicks of a peptide and of ubiquitin (`kick.py`), and the diffusion
   coefficient of the centre of mass (`msd.py`).
 - CMake reads the version of OpenMM from its library and stops with an error that names it below 8.3, or
   warns above 8.6, the newest tested version (before, only the presence of `ComputeSort.h` was checked).
