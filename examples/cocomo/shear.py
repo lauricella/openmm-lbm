@@ -9,16 +9,17 @@
 The box is open along z: the face z = 0 (ZMin) moves with -v along x and the face z = L_z (ZMax) with +v, both
 DensityVelocity faces at the density of the fluid (docs/user_guide/api_reference.md, Open faces); x and y stay
 periodic.  The velocity of a face holds one node beyond it, so the fluid is sheared at the rate
-gamma_dot = 2 v/((n_z + 1) dx) and its velocity is zero at z0 = (n_z - 1) dx/2, half a spacing below the middle of
-the box, where the protein starts.  There the protein turns about y with the vorticity of the flow, and it is carried
-along x only when it diffuses away from the middle.  A sphere would turn at gamma_dot/2; a body of another shape
-turns faster or slower as its orientation changes (the Jeffery orbits of an ellipsoid), so its rate differs from
-gamma_dot/2 and changes along the run.  The protein is the SOD1 of diffusion.py (COCOMO2, 110 beads,
-data/sod1.pdb, the same exposure and elastic network).  Nothing keeps it in the middle: make the box high enough that
-it does not reach the faces during the run (with D of about 15 A^2/ns it moves by about 5 nm in 100 ns).  The beads
-still live in the periodic box of OpenMM, and a bead that crossed a face would be coupled to the fluid next to the
-opposite face, which moves the other way: the faces neither reflect the beads nor push them back.  --wall-potential
-wca or hertz adds a repulsive potential of the two faces on every bead, which keeps the protein inside:
+gamma_dot = 2 v/((n_z + 1) dx) and its velocity is zero at z0 = (n_z - 1) dx/2, half a spacing below the middle of the
+box, where the protein starts.  There the protein turns about y with the vorticity of the flow, and it is carried
+along x only when it diffuses away from the middle.  A sphere would turn at gamma_dot/2; a body of another shape turns
+faster or slower as its orientation changes (the Jeffery orbits of an ellipsoid), so its rate differs from gamma_dot/2
+and changes along the run.  The protein is, by default, the SOD1 of diffusion.py (COCOMO2, 110 beads, data/sod1.pdb,
+the same exposure and elastic network; other structures below).  Nothing keeps it in the middle: make the box high
+enough that it does not reach the faces during the run (with D of about 15 A^2/ns it moves by about 5 nm in 100 ns).
+The beads still live in the periodic box of OpenMM, and a bead that crossed a face would be coupled to the fluid next
+to the opposite face, which moves the other way: the faces neither reflect the beads nor push them back.
+--wall-potential wca or hertz adds a repulsive potential of the two faces on every bead, which keeps the protein
+inside:
 
     wca     U(d) = 4 epsilon ((sigma/d)^12 - (sigma/d)^6) + epsilon for d < 2^(1/6) sigma, 0 beyond: impenetrable
     hertz   U(d) = epsilon max(0, 1 - d/sigma)^(5/2): soft, at most epsilon, so a bead pushed hard can still cross
@@ -43,6 +44,25 @@ height of 50 nm, gamma_dot = 0.02/ps = 2e10/s, and with a rotation time of SOD1 
 Weissenberg number gamma_dot*tau_r is about 140; a Weissenberg number of 1 needs v of about 0.004 nm/ps, well below
 the thermal velocity of the fluid.
 
+Another structure, or several proteins.  --pdb gives a coarse-grained PDB file with one bead per residue and
+--surface the solvent accessible surface of each residue (surface.py); without a domain option a structure other
+than the default is a disordered protein.  The file may hold several chains (several proteins, or several copies of
+one), each with its own identifier (segment identifier, columns 73-76, or chain identifier, column 22): consecutive
+beads with the same identifier form one chain and are bonded.  Their folded domains are given by --domains FILE, one
+line per chain in the order of the PDB file, with the domains of the chain as pairs FIRST LAST separated by commas,
+in residue numbers counted from 1 inside the chain, or "-" for a chain without folded domain ("#" starts a comment):
+
+    1 108            # chain 1
+    10 60, 70 150    # chain 2: two folded domains
+    -                # chain 3: disordered
+
+The script converts them to the numbering of the whole structure (cocomo2.read_domains()) and checks them.  The
+elastic network joins only beads of the same domain: it holds each folded structure on its own and never joins two
+chains.  --enm-domains FILE gives other domains to the elastic network; --surface takes one file or one per chain,
+with "-" in place of the file of a chain without folded domain.
+The structure is centred as a whole on the plane at rest, and with several chains the motion of every chain is
+written to its own file (<prefix>_motion_<k>.txt below).
+
 How to run it.  Activate the environment where OpenMM and openmm-lbm are installed, go to a working directory, where
 the output files are written, and give Python the path of the script in the repository: the script reads
 cocomo2.py, data/ and ../fluid/initial_state.py next to itself, so keep it there instead of copying it alone.  Below,
@@ -54,6 +74,7 @@ shear.py stands for /path/to/openmm-lbm/examples/cocomo/shear.py.
   python shear.py --box 40 40 --height 80                              # a larger box
   python shear.py --vtk 10000                                          # VTK files for ParaView every 100 ps
   python shear.py --wall-potential wca                                 # faces that push the beads back
+  python shear.py --pdb two.pdb --surface a.surface b.surface --domains two.domains   # two proteins
   python shear.py --restart                                            # continue a stopped run from shear.chk
   python shear.py --temperature 0 --no-fluid-fluctuations --drag Explicit --steps 100000
                                                                        # 1 ns without noise: the deterministic flow
@@ -70,8 +91,11 @@ Options (python shear.py --help lists them with their defaults):
   faces       --wall-potential none|wca|hertz (default none: the faces do not act on the beads), --wall-epsilon
               (kJ/mol, default 2.5 for wca, about k_B T at 300 K, and 125 for hertz, about 50 k_B T), --wall-sigma
               (nm, default 0.5)
-  protein     --domain FIRST LAST and --enm-domain FIRST LAST: folded domain of SOD1 for the exposure scaling and
-              for the elastic network (as in diffusion.py; default 1 108 and 2 109)
+  structure   --pdb FILE (default data/sod1.pdb), --surface FILE [FILE ...] (one file, or one per chain, "-" for a
+              chain without folded domain; default data/sod1.surface), --domain FIRST LAST and --enm-domain FIRST
+              LAST (one folded domain of the whole structure for the exposure scaling and the elastic network;
+              default 1 108 and 2 109 for SOD1), or --domains FILE and --enm-domains FILE (the domains of every
+              chain, one line per chain; see above)
   run         --steps (default 1000000, 10 ns), --seed, --platform CUDA|OpenCL|HIP|Reference (default the fastest
               available), --precision single|mixed|double (default mixed)
   output      --output PREFIX (default shear), --report N (steps between reports, default 1000: 10 ps),
@@ -90,6 +114,8 @@ Files written, with the prefix given by --output (default shear):
                              the masses); angle of rotation about y accumulated since the start (rad, the sum of
                              the rotations about y between two reports, written with all its digits so that a
                              restarted run continues it exactly)
+  <prefix>_motion_<k>.txt    with several chains, the same for chain k = 1, 2, ... (the order of the PDB file),
+                             instead of <prefix>_motion.txt
   <prefix>_profile.txt       every --profile steps: time (ps) and the mean velocity u_x of the fluid on each
                              plane of nodes k = 0 ... n_z - 1 (nm/ps), averaged over x and y
   <prefix>.chk               checkpoint of the whole run, fluid included, every --checkpoint steps; the same
@@ -151,11 +177,7 @@ def parse_arguments():
     parser.add_argument('--profile', type=int, default=10000,
                         help='steps between profiles of the fluid (default 10000: 100 ps; 0 = none)')
     parser.add_argument('--seed', type=int, default=1234, help='random number seed (default 1234)')
-    parser.add_argument('--domain', type=int, nargs=2, default=[1, 108], metavar=('FIRST', 'LAST'),
-                        help='folded domain of SOD1 for the exposure scaling and, without --enm-domain, the elastic '
-                        'network (default 1 108)')
-    parser.add_argument('--enm-domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
-                        help='residues joined by the elastic network (default 2 109 with the default --domain)')
+    add_structure_arguments(parser)
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA, OpenCL and HIP (default mixed)')
     parser.add_argument('--output', default='shear', help='prefix of the output files (default shear)')
@@ -165,8 +187,7 @@ def parse_arguments():
     parser.add_argument('--restart', action='store_true',
                         help='continue from <prefix>.chk, appending to the output files, up to --steps')
     args = parser.parse_args()
-    if args.enm_domain is None:
-        args.enm_domain = [2, 109] if args.domain == [1, 108] else args.domain
+    check_structure_arguments(parser, args)
     cs = args.spacing/(math.sqrt(3)*args.dt)
     if abs(args.velocity) > 0.1*cs:
         parser.error('the faces move at Mach %.3f of the lattice: keep |--velocity| below 0.1 c_s = %.3f nm/ps'
@@ -180,6 +201,64 @@ def parse_arguments():
         parser.error('--checkpoint must be a multiple of --report, so that a restart continues the reports exactly')
     check_wall_arguments(parser, args)
     return args
+
+
+def add_structure_arguments(parser):
+    """The options of the structure: the PDB file, the surface of the residues and the folded domains."""
+    parser.add_argument('--pdb', help='coarse-grained structure, one bead per residue (default data/sod1.pdb)')
+    parser.add_argument('--surface', nargs='+', metavar='FILE',
+                        help='solvent accessible surface of each residue in nm^2: one file, or one per chain in the '
+                        'order of the chains, "-" for a chain without folded domain (default data/sod1.surface with '
+                        'the default structure)')
+    parser.add_argument('--domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
+                        help='folded domain, residues counted from 1: the exposure scaling and, without --enm-domain, '
+                        'the elastic network (SOD1: 1 108)')
+    parser.add_argument('--enm-domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
+                        help='residues joined by the elastic network, when they differ from --domain (SOD1: 2 109)')
+    parser.add_argument('--domains', metavar='FILE',
+                        help='folded domains of every chain, one line per chain: the exposure scaling and, without '
+                        '--enm-domains, the elastic network; instead of --domain')
+    parser.add_argument('--enm-domains', metavar='FILE',
+                        help='domains of the elastic network of every chain, in the format of --domains, when they '
+                        'differ from it; instead of --enm-domain')
+
+
+def check_structure_arguments(parser, args):
+    """The default structure, SOD1 with its two ranges, and the checks of the options of the structure."""
+    if (args.domains or args.enm_domains) and (args.domain or args.enm_domain):
+        parser.error('give the domains either as ranges (--domain, --enm-domain) or as files (--domains, '
+                     '--enm-domains), not both')
+    if args.pdb is None:
+        args.pdb = os.path.join(DATA, 'sod1.pdb')
+        if args.surface is None:
+            args.surface = [os.path.join(DATA, 'sod1.surface')]
+        if not (args.domain or args.enm_domain or args.domains or args.enm_domains):
+            args.domain, args.enm_domain = [1, 108], [2, 109]
+    if args.domain is not None and args.enm_domain is None:
+        args.enm_domain = args.domain                 # one folded domain for both
+    if (args.domain or args.domains) and not args.surface:
+        parser.error('folded domains need the surface of every residue (--surface)')
+
+
+def build_structure(args):
+    """Names, chains, positions (nm), the chains as bead ranges, the scaling factors xi and the pairs of the
+    elastic network of the structure of the options."""
+    names, chains, positions = cocomo2.read_beads(args.pdb)
+    exposed, network = cocomo2.folded_domains(chains, args.domain, args.enm_domain, args.domains, args.enm_domains)
+    xi = cocomo2.exposure(names, cocomo2.read_surfaces(args.surface, chains), exposed) if exposed else None
+    pairs = cocomo2.elastic_network(positions, network)
+    print('Structure %s: %d beads in %d chain(s); folded domains %s; elastic network %s' % (
+        args.pdb, len(names), len(cocomo2.chain_ranges(chains)),
+        ', '.join('%d-%d' % d for d in exposed) or 'none', ', '.join('%d-%d' % d for d in network) or 'none'))
+    return names, chains, positions, cocomo2.chain_ranges(chains), xi, pairs
+
+
+def motion_files(prefix, ranges):
+    """The files of the motion: <prefix>_motion.txt for one chain, <prefix>_motion_<k>.txt for chain k = 1, 2, ...
+    with several; with the bead range of each."""
+    if len(ranges) == 1:
+        return [(prefix + '_motion.txt',) + tuple(ranges[0])]
+    return [('%s_motion_%d.txt' % (prefix, k + 1), start, end) for k, (start, end) in enumerate(ranges)]
 
 
 def check_wall_arguments(parser, args):
@@ -255,14 +334,18 @@ def rotation_vector(r):
 
 
 class MotionReporter:
-    """Centre of mass, rotation from the starting structure and angle of rotation about y accumulated."""
+    """Centre of mass, rotation from the starting structure and angle of rotation about y accumulated, of the beads
+    start ... end - 1 (default all: one chain of a structure with several)."""
 
-    def __init__(self, file, interval, weights, reference, flow, append=False, positions=None):
-        """With append, the run continues from a checkpoint: the accumulated angle is read from the last line of the
-        file and the orientation is computed from the positions of the checkpoint, as the uninterrupted run did at
-        that report."""
+    def __init__(self, file, interval, weights, reference, flow, append=False, positions=None, start=0, end=None):
+        """weights are the masses or the mass fractions of all the beads.  With append, the run continues from a
+        checkpoint: the accumulated angle is read from the last line of the file and the orientation is computed from
+        the positions of the checkpoint, as the uninterrupted run did at that report."""
         self._interval = interval
-        self._weights = np.asarray(weights)
+        self._slice = slice(start, end)
+        self._weights = np.asarray(weights, dtype=float)[self._slice]
+        self._weights = self._weights/self._weights.sum()
+        reference = np.asarray(reference)[self._slice]
         self._reference = reference - self._weights @ reference
         self._flow = flow
         self._previous = np.eye(3)
@@ -271,6 +354,7 @@ class MotionReporter:
             last = [line for line in open(file) if line.strip() and not line.startswith('#')]
             if last:
                 self._angle = float(last[-1].split()[9])
+                positions = np.asarray(positions)[self._slice]
                 self._previous = best_rotation(self._reference, positions - self._weights @ positions, self._weights)
         self._out = open(file, 'a' if append else 'w')
         if not append:
@@ -282,7 +366,7 @@ class MotionReporter:
         return {'steps': steps, 'periodic': False, 'include': ['positions']}
 
     def report(self, simulation, state):
-        x = state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+        x = state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)[self._slice]
         com = self._weights @ x
         r = best_rotation(self._reference, x - com, self._weights)
         self._angle += float(rotation_vector(r @ self._previous.T)[1])
@@ -342,13 +426,11 @@ def main():
     dx = args.spacing
     nodes = [round(args.box[0]/dx), round(args.box[1]/dx), round(args.height/dx)]
     box = np.array([nodes[0]*dx, nodes[1]*dx, nodes[2]*dx])
-    names, chains, positions = cocomo2.read_beads(os.path.join(DATA, 'sod1.pdb'))
-    # The protein starts where the flow is at rest: z0 = (n_z - 1) dx/2, half a spacing below the middle of the box,
-    # since the plates are at -dx and n_z dx.
+    names, chains, positions, ranges, xi, pairs = build_structure(args)
+    # The structure starts where the flow is at rest: z0 = (n_z - 1) dx/2, half a spacing below the middle of the
+    # box, since the plates are at -dx and n_z dx.
     positions = cocomo2.centred(positions, box)
     positions[:, 2] += 0.5*(nodes[2] - 1)*dx - 0.5*box[2]
-    xi = cocomo2.exposure(names, np.loadtxt(os.path.join(DATA, 'sod1.surface')), [tuple(args.domain)])
-    pairs = cocomo2.elastic_network(positions, [tuple(args.enm_domain)])
     system = cocomo2.create_system(names, chains, float(box.min()), xi, pairs)
     system.setDefaultPeriodicBoxVectors(mm.Vec3(box[0], 0, 0), mm.Vec3(0, box[1], 0), mm.Vec3(0, 0, box[2]))
     masses = np.array([system.getParticleMass(i).value_in_unit(unit.dalton) for i in range(system.getNumParticles())])
@@ -399,7 +481,7 @@ def main():
 
     dxl, dtl, tau = force.getLatticeParametersInContext(simulation.context)
     rate = 2*v/((nodes[2] + 1)*dx)
-    print('Platform %s; SOD1, %d beads, %d elastic bonds; box %g x %g x %g nm, %d x %d x %d nodes' % (
+    print('Platform %s; %d beads, %d elastic bonds; box %g x %g x %g nm, %d x %d x %d nodes' % (
         platform.getName(), len(names), len(pairs), *box, *nodes))
     print('Viscosity %g nm^2/ps (tau %.4f), %g K, friction %g 1/ps, %s drag%s' % (
         args.viscosity, tau, args.temperature, args.friction, args.drag.lower(),
@@ -436,7 +518,8 @@ def main():
         time = simulation.context.getTime().value_in_unit(unit.picosecond)
         truncate(args.output + '.log', step)
         truncate(args.output + '_temperature.txt', step)
-        truncate(args.output + '_motion.txt', time)
+        for file, first, last in motion_files(args.output, ranges):
+            truncate(file, time)
         truncate(args.output + '_profile.txt', time)
         truncate_pvd(args.output + '.pvd', time)
         dcdFile = '%s_%d.dcd' % (args.output, step)
@@ -447,8 +530,9 @@ def main():
     temperatureFile = open(args.output + '_temperature.txt', 'a' if append else 'w')
     simulation.reporters.append(openmmlbm.LBMTemperatureReporter(temperatureFile, args.report, force))
     start = simulation.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
-    simulation.reporters.append(MotionReporter(args.output + '_motion.txt', args.report, weights, reference, flow,
-                                               append, start))
+    for file, first, last in motion_files(args.output, ranges):
+        simulation.reporters.append(MotionReporter(file, args.report, weights, reference, flow, append, start, first,
+                                                   last))
     if args.profile > 0:
         simulation.reporters.append(ProfileReporter(args.output + '_profile.txt', args.profile, force, nodes, append))
     if args.checkpoint > 0:
@@ -457,12 +541,14 @@ def main():
         simulation.reporters.append(openmmlbm.LBMVTKReporter(args.output, args.vtk, force, append=append))
     simulation.step(max(0, args.steps - simulation.currentStep))
 
-    motion = np.loadtxt(args.output + '_motion.txt', ndmin=2)
-    if len(motion) > 0:
-        z0 = 0.5*(nodes[2] - 1)*dx
-        print('Centre of mass at z = %.3f nm, %.3f nm from the plane at rest; angle about y %.3f rad in %.1f ps: mean '
-              'rate %.5f rad/ps (the flow turns at %.5f)' % (motion[-1, 3], motion[-1, 3] - z0, motion[-1, 9],
-                                                            motion[-1, 0], motion[-1, 9]/motion[-1, 0], rate/2))
+    z0 = 0.5*(nodes[2] - 1)*dx
+    for file, first, last in motion_files(args.output, ranges):
+        motion = np.loadtxt(file, ndmin=2)
+        if len(motion) > 0:
+            print('%s: centre of mass at z = %.3f nm, %.3f nm from the plane at rest; angle about y %.3f rad in %.1f '
+                  'ps: mean rate %.5f rad/ps (the flow turns at %.5f)' % (
+                      file, motion[-1, 3], motion[-1, 3] - z0, motion[-1, 9], motion[-1, 0],
+                      motion[-1, 9]/motion[-1, 0], rate/2))
     temperature = np.loadtxt(args.output + '_temperature.txt', ndmin=2)
     print('Mean temperature of the beads over %d reports: %.1f K' % (len(temperature), temperature[:, 2].mean()))
     print('Files written with prefix', args.output)

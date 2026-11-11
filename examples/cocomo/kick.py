@@ -27,11 +27,21 @@ fluctuates at the same temperature (use it with --drag Centered, which gives the
 should then start from equilibrium: --equilibration N first runs N steps with the velocities drawn at T, then adds
 v0 along x to every bead.  A single kick is lost in the thermal motion of the centre of mass, of size
 sqrt(kT/M), after about a picosecond: --repeats N runs N independent kicks in one run of the script, with the
-seeds seed, seed + 1, ..., and writes their mean.  In linear response the mean decay at temperature T is the decay at zero temperature.
+seeds seed, seed + 1, ..., and writes their mean.  In linear response the mean decay at temperature T is the decay
+at zero temperature.
 
 The output file has one line per step from the kick: time (ps), velocity of the centre of mass vx vy vz and the
 norm of that velocity (nm/ps), position of the centre of mass x y z (nm), radius of gyration (nm).  With --repeats
 these are the means over the kicks, and a last column gives the standard error of the mean of vx.
+
+Another structure, or several proteins: --pdb gives a coarse-grained PDB file instead of the preset, --surface the
+surface of each residue (one file, or one per chain in the order of the chains, "-" for a chain without folded
+domain), and the folded domains are given as
+in diffusion.py: --domain FIRST LAST (and --enm-domain) for one range of the whole structure, or --domains FILE (and
+--enm-domains FILE) with one line per chain, "FIRST LAST, FIRST LAST" in residue numbers counted from 1 inside the
+chain, or "-" for a chain without folded domain.  Every chain needs its own identifier in the PDB file; the elastic
+network joins only beads of the same domain, never two chains (diffusion.py --help and cocomo2.read_domains() give
+the details).  Every bead of every chain receives the kick, and the output is that of all the beads together.
 """
 
 import argparse
@@ -73,6 +83,15 @@ def parse_arguments():
                         'the elastic network (default from the preset)')
     parser.add_argument('--enm-domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
                         help='residues joined by the elastic network, when they differ from --domain')
+    parser.add_argument('--pdb', help='coarse-grained structure instead of that of the preset')
+    parser.add_argument('--surface', nargs='+', metavar='FILE',
+                        help='surface of each residue in nm^2 for --pdb: one file, or one per chain in their order, '
+                        '"-" for a chain without folded domain')
+    parser.add_argument('--domains', metavar='FILE',
+                        help='folded domains of every chain, one line per chain (as in diffusion.py), instead of '
+                        '--domain')
+    parser.add_argument('--enm-domains', metavar='FILE',
+                        help='domains of the elastic network of every chain, when they differ from --domains')
     parser.add_argument('--temperature', type=float, default=0.0,
                         help='temperature in K (default 0: no random force, drag only)')
     parser.add_argument('--fluid-fluctuations', action='store_true',
@@ -103,13 +122,21 @@ def parse_arguments():
     if args.no_lb and args.fluid_fluctuations:
         parser.error('--fluid-fluctuations needs the fluid, so it cannot be used with --no-lb')
     preset = PRESETS[args.preset]
-    if (args.domain or args.enm_domain) and preset['surface'] is None:
-        parser.error('--domain and --enm-domain need a folded protein (presets ubiquitin, sod1)')
+    if (args.domains or args.enm_domains) and (args.domain or args.enm_domain):
+        parser.error('give the domains either as ranges (--domain, --enm-domain) or as files (--domains, '
+                     '--enm-domains), not both')
+    if args.pdb is None:
+        args.pdb = os.path.join(DATA, preset['pdb'])
+        if args.surface is None and preset['surface']:
+            args.surface = [os.path.join(DATA, preset['surface'])]
+        if not (args.domains or args.enm_domains):
+            for key in ('domain', 'enm_domain'):
+                if getattr(args, key) is None:
+                    setattr(args, key, preset[key])
+    if (args.domain or args.domains) and not args.surface:
+        parser.error('folded domains need the surface of every residue (--surface, or the presets ubiquitin, sod1)')
     if args.domain is not None and args.enm_domain is None:
-        args.enm_domain = args.domain          # one folded domain for both, instead of the ranges of the preset
-    for key in ('domain', 'enm_domain'):
-        if getattr(args, key) is None:
-            setattr(args, key, preset[key])
+        args.enm_domain = args.domain          # one folded domain for both
     if args.output is None:
         args.output = 'kick_%s_lb_%s.txt' % (args.preset, 'off' if args.no_lb else 'on')
     return args
@@ -133,13 +160,13 @@ def main():
     args = parse_arguments()
     preset = PRESETS[args.preset]
     box = args.nodes*args.spacing
-    names, chains, positions = cocomo2.read_beads(os.path.join(DATA, preset['pdb']))
+    names, chains, positions = cocomo2.read_beads(args.pdb)
     positions = cocomo2.centred(positions, box)
-    xi, pairs = None, []
-    if args.domain:
-        sasa = np.loadtxt(os.path.join(DATA, preset['surface']))
-        xi = cocomo2.exposure(names, sasa, [tuple(args.domain)], args.lam)
-        pairs = cocomo2.elastic_network(positions, [tuple(args.enm_domain)])
+    exposed, network = cocomo2.folded_domains(chains, args.domain, args.enm_domain, args.domains, args.enm_domains)
+    xi = None
+    if exposed:
+        xi = cocomo2.exposure(names, cocomo2.read_surfaces(args.surface, chains), exposed, args.lam)
+    pairs = cocomo2.elastic_network(positions, network)
     system = cocomo2.create_system(names, chains, box, xi, pairs)
     masses = np.array([system.getParticleMass(i).value_in_unit(unit.dalton) for i in range(system.getNumParticles())])
     weights = masses/masses.sum()
@@ -176,8 +203,9 @@ def main():
         context = mm.Context(system, integrator, platform, properties)
         context.setPositions(positions)
         if r == 0:
-            print('Platform %s; %s: %d beads, %.1f Da, %d elastic bonds; box %.1f nm' % (
-                platform.getName(), args.preset, len(names), masses.sum(), len(pairs), box))
+            print('Platform %s; %s: %d beads in %d chain(s), %.1f Da, %d elastic bonds; box %.1f nm' % (
+                platform.getName(), os.path.basename(args.pdb), len(names), len(cocomo2.chain_ranges(chains)),
+                masses.sum(), len(pairs), box))
             if args.no_lb:
                 fluid = 'no fluid (Langevin)'
             else:

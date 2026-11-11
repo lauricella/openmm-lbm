@@ -44,6 +44,16 @@ Differences from the text of the article:
 
 The table below gives, for each amino acid, the mass (Da), the charge (e), the radius r of the sphere
 of the same volume (nm), and S_ref (nm^2, Table S2 of the supporting information of the article).
+
+Several proteins.  A structure may hold several chains (several proteins, or several copies of one): read_beads()
+gives the chain of every bead, bonds and angles join only consecutive beads of the same chain, and
+chain_ranges() lists the chains in the order of the file.  Every folded chain has its own folded domains, given
+by read_domains() from a file with one line per chain, in residue numbers counted from 1 inside each chain and
+converted to the numbering of the whole structure; exposure() and elastic_network() take that list.  The elastic
+network joins only beads of the same domain, so it never joins two chains, nor two domains of one chain: it holds
+each folded structure on its own.  Springs between chains (a complex) are not part of the model here; they would
+be extra forces added to the System.  read_surfaces() reads the surface of every residue from one file, or from
+one file per chain ("-" for a chain without folded domain).
 """
 
 import math
@@ -118,6 +128,9 @@ def exposure(names, sasa, domains, lam=LAMBDA):
     xi = np.ones(len(names))
     for first, last in domains:
         for i in range(first - 1, last):
+            if np.isnan(sasa[i]):
+                raise ValueError('residue %d lies in the folded domain %d-%d but has no surface (a chain given "-" '
+                                 'in place of its surface file)' % (i + 1, first, last))
             xi[i] = min(sasa[i]/RESIDUES[names[i]][3], lam)/lam
     return xi
 
@@ -133,6 +146,114 @@ def elastic_network(positions, domains):
                 if r0 < ENM_CUTOFF:
                     pairs.append((i, j, r0))
     return pairs
+
+
+def chain_ranges(chains):
+    """The chains of a structure, in the order of the file, as (start, end) bead indices counted from 0, end
+    excluded: a chain is a run of consecutive beads with the same chain identifier (read_beads()).  Two proteins
+    that follow each other with the same identifier form one chain, bonded at the junction: give every protein its
+    own identifier."""
+    ranges = []
+    for i in range(len(chains)):
+        if i == 0 or chains[i] != chains[i - 1]:
+            ranges.append([i, i + 1])
+        else:
+            ranges[-1][1] = i + 1
+    return [tuple(r) for r in ranges]
+
+
+def read_domains(path, chains):
+    """The folded domains of every chain, from a text file with one line per chain, in the order of the chains in
+    the structure (chain_ranges()), returned as a list of (first, last) in the numbering of the whole structure,
+    counted from 1, both included, as exposure() and elastic_network() take them.
+
+    On each line, the domains of the chain as pairs FIRST LAST separated by commas, in residue numbers counted from
+    1 inside the chain (the position of the bead in its chain, not the residue number of the PDB file), both
+    included, in increasing order and without overlaps; a line with only "-" is a chain without folded domain (a
+    disordered protein: no exposure scaling and no elastic network).  Text after "#" is a comment; empty lines are
+    skipped.  For example, for three chains of 100, 150 and 200 beads,
+
+        10 12, 20 23     # chain 1: two domains
+        2 10             # chain 2: one domain
+        -                # chain 3: disordered
+
+    gives [(10, 12), (20, 23), (102, 110)].  The file must have exactly one line per chain, and every domain must
+    lie inside its chain; an error says where it does not."""
+    ranges = chain_ranges(chains)
+    lines = []
+    with open(path) as text:
+        for number, line in enumerate(text, start=1):
+            line = line.split('#', 1)[0].strip()
+            if line:
+                lines.append((number, line))
+    if len(lines) != len(ranges):
+        raise ValueError('%s has %d lines with domains and the structure %d chains: give one line per chain, in the '
+                         'order of the chains, and "-" for a chain without folded domain' % (
+                             path, len(lines), len(ranges)))
+    domains = []
+    for (number, line), (start, end), chain in zip(lines, ranges, (chains[r[0]] for r in ranges)):
+        if line == '-':
+            continue
+        previous = 0
+        for pair in line.split(','):
+            values = pair.split()
+            if len(values) != 2 or not all(value.isdigit() for value in values):
+                raise ValueError('%s, line %d: expected pairs of whole numbers FIRST LAST separated by commas, or "-", '
+                                 'got %r' % (path, number, pair.strip()))
+            first, last = int(values[0]), int(values[1])
+            if not 1 <= first <= last <= end - start:
+                raise ValueError('%s, line %d: the domain %d %d is not inside chain %s, which has %d residues' % (
+                    path, number, first, last, chain, end - start))
+            if first <= previous:
+                raise ValueError('%s, line %d: the domain %d %d overlaps or precedes the one before it, which ends '
+                                 'at %d' % (path, number, first, last, previous))
+            previous = last
+            domains.append((start + first, start + last))
+    return domains
+
+
+def read_surfaces(paths, chains):
+    """The solvent accessible surface of every residue (nm^2), from one file for the whole structure, or from one
+    file per chain, in the order of the chains (chain_ranges()), with "-" in place of the file of a chain without
+    folded domain, whose surfaces are then undefined (NaN; exposure() refuses them in a domain).  Every file must
+    hold one value per residue of its chain, or of the structure."""
+    ranges = chain_ranges(chains)
+    if len(paths) == 1 and paths[0] != '-' and len(ranges) > 1:
+        sasa = np.atleast_1d(np.loadtxt(paths[0]))
+        if len(sasa) != len(chains):
+            raise ValueError('%s holds %d values and the structure has %d beads: give one value per residue of the '
+                             'structure, or one file per chain' % (paths[0], len(sasa), len(chains)))
+        return sasa
+    if len(paths) != len(ranges):
+        raise ValueError('%d surface files for %d chains: give one file for the whole structure, or one per chain in '
+                         'the order of the chains, with "-" for a chain without folded domain' % (
+                             len(paths), len(ranges)))
+    parts = []
+    for k, (path, (start, end)) in enumerate(zip(paths, ranges)):
+        if path == '-':
+            parts.append(np.full(end - start, np.nan))
+            continue
+        values = np.atleast_1d(np.loadtxt(path))
+        if len(values) != end - start:
+            raise ValueError('%s holds %d values and chain %d (%s) has %d residues' % (
+                path, len(values), k + 1, chains[start], end - start))
+        parts.append(values)
+    return np.concatenate(parts)
+
+
+def folded_domains(chains, domain=None, enm_domain=None, domains=None, enm_domains=None):
+    """The folded domains for the exposure scaling and for the elastic network, from the options of the scripts:
+    one range of the whole structure (--domain, --enm-domain: (first, last) counted from 1) or a file with the
+    domains of every chain (--domains, --enm-domains: read_domains()).  The domains of the elastic network are
+    those of the exposure unless given apart.  Returns two lists of (first, last)."""
+    exposed = read_domains(domains, chains) if domains else ([tuple(domain)] if domain else [])
+    if enm_domains:
+        network = read_domains(enm_domains, chains)
+    elif enm_domain:
+        network = [tuple(enm_domain)]
+    else:
+        network = exposed
+    return exposed, network
 
 
 def _pair_force(expression, names, xi, epsilon, cutoff, bonds):

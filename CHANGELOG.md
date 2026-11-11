@@ -34,6 +34,23 @@ versions the API may still change.
   `test_wall_potential` (energy and force against the formulas, also for periodic images) and two cases of
   `test_example_runs`.
 
+- Several proteins in one structure, each folded protein with its own elastic network, in `cocomo/diffusion.py`,
+  `cocomo/kick.py`, `cocomo/shear.py` and `cocomo/poiseuille.py`. `--domains FILE` gives the folded domains of every
+  chain, one line per chain in the order of the PDB file: pairs `FIRST LAST` separated by commas, in residue numbers
+  counted from 1 inside the chain, or `-` for a chain without folded domain; the scripts convert them to the
+  numbering of the whole structure and check them (number of lines, domains inside their chain, no overlaps).
+  `--enm-domains FILE` gives other domains to the elastic network. The elastic network joins only beads of the same
+  domain, so it never joins two chains. `--surface` takes one file for the structure or one per chain, with `-` for
+  a chain without folded domain. `kick.py`, `shear.py` and `poiseuille.py` take `--pdb` and `--surface` too. With
+  several chains `diffusion.py` writes the centre of mass of every chain (`<prefix>_com_<k>.txt`) and `shear.py` and
+  `poiseuille.py` the motion of every chain (`<prefix>_motion_<k>.txt`). New functions of `cocomo2.py`:
+  `chain_ranges()`, `read_domains()`, `read_surfaces()`, `folded_domains()`; `exposure()` refuses a residue without
+  surface in a domain. Documented in `examples/README.md` (Several proteins in one structure) and in the text of
+  the scripts. Tests `test_read_domains`, `test_read_surfaces` and `test_several_chains` (three chains, all four
+  scripts). With a single chain the runs are those of before; in `shear.py` and `poiseuille.py`, `--domain 1 108`
+  alone now sets the elastic network to the same range, as in `diffusion.py` (the default SOD1 keeps 1-108 and
+  2-109).
+
 ### Tests
 - `testMovingFaceFluctuations` (C++, all platforms): a fluctuating fluid between two `DensityVelocity` faces moving
   at -1 and +1 nm/ps has the linear mean profile of the faces, and the planes of the faces are at equilibrium

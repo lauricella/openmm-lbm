@@ -20,8 +20,9 @@ bounce-back; it vanishes at tau = 7/8 and is -7e-5 of the centre-line speed with
 speed at the centre line of the parabola (--velocity) and computes g = 8 nu v/H^2.  The fluid starts with this
 profile (setFluidState()), so that the protein does not wait for the flow to build up.
 
-The protein is the SOD1 of diffusion.py (COCOMO2, 110 beads, data/sod1.pdb, the same exposure and elastic network),
-started on the centre line or --position nm away from it, and nothing holds it.  On the centre line the shear rate
+The protein is, by default, the SOD1 of diffusion.py (COCOMO2, 110 beads, data/sod1.pdb, the same exposure and
+elastic network; other structures and several proteins as in shear.py: --pdb, --surface, --domain, --domains), started
+on the centre line or --position nm away from it, and nothing holds it.  On the centre line the shear rate
 is zero: the protein is carried along x at about the centre-line speed and does not turn on average; the curvature of
 the profile makes it lag slightly behind the fluid at its centre of mass (by a^2 g/(6 nu) for a sphere of radius a,
 Faxen's law).  Away from the centre line it turns about y with the local vorticity, at about half the local shear
@@ -63,8 +64,13 @@ Options (python poiseuille.py --help lists them with their defaults):
   flow        --velocity V (nm/ps, default 0.5: speed along x at the centre line; at most 0.1 c_s, better at most
               1), --height LZ (nm, default 50: the period along z, the channel is LZ - dx wide), --box LX LY (nm,
               default 30 30); every side a whole number of lattice spacings
-  protein     --position DZ (nm, default 0: start of the centre of the protein from the centre line, negative
-              below), --domain FIRST LAST and --enm-domain FIRST LAST (as in diffusion.py; default 1 108 and 2 109)
+  protein     --position DZ (nm, default 0: start of the centre of the structure from the centre line, negative
+              below)
+  structure   --pdb FILE (default data/sod1.pdb), --surface FILE [FILE ...] (one file, or one per chain, "-" for a
+              chain without folded domain), --domain
+              FIRST LAST and --enm-domain FIRST LAST (one folded domain of the whole structure; default 1 108 and
+              2 109 for SOD1), or --domains FILE and --enm-domains FILE (the domains of every chain, one line per
+              chain, "FIRST LAST, FIRST LAST" counted from 1 inside the chain or "-" for none): see shear.py --help
   fluid       --viscosity (nm^2/ps, default 0.893, water at 298 K), --temperature (K, default 298; 0 = no noise),
               --no-fluid-fluctuations (a fluid without thermal fluctuations), --spacing (nm, default 0.5),
               --dt (ps, default 0.01)
@@ -89,6 +95,8 @@ Files written, with the prefix given by --output (default poiseuille):
                              velocity of the imposed flow at the height of the centre of mass (nm/ps); rotation of
                              the protein from its starting structure as a quaternion w x y z (best fit weighted by
                              the masses); angle of rotation about y accumulated since the start (rad), as in shear.py
+  <prefix>_motion_<k>.txt    with several chains, the same for chain k = 1, 2, ... (the order of the PDB file),
+                             instead of <prefix>_motion.txt
   <prefix>_profile.txt       every --profile steps: time (ps) and the mean velocity u_x of the fluid on each plane of
                              nodes k = 0 ... n_z - 1 (nm/ps), averaged over x and y; the solid plane k = 0 has zero
   <prefix>.chk               checkpoint of the whole run, fluid included, every --checkpoint steps; the same command
@@ -112,8 +120,9 @@ import openmmlbm
 from openmmlbm import LBMForce
 
 import cocomo2
-from shear import (MotionReporter, ProfileReporter, check_wall_arguments, select_platform, truncate, truncate_pvd,
-                   wall_potential)
+from shear import (MotionReporter, ProfileReporter, add_structure_arguments, build_structure,
+                   check_structure_arguments, check_wall_arguments, motion_files, select_platform, truncate,
+                   truncate_pvd, wall_potential)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, 'data')
@@ -153,11 +162,7 @@ def parse_arguments():
     parser.add_argument('--profile', type=int, default=10000,
                         help='steps between profiles of the fluid (default 10000: 100 ps; 0 = none)')
     parser.add_argument('--seed', type=int, default=1234, help='random number seed (default 1234)')
-    parser.add_argument('--domain', type=int, nargs=2, default=[1, 108], metavar=('FIRST', 'LAST'),
-                        help='folded domain of SOD1 for the exposure scaling and, without --enm-domain, the elastic '
-                        'network (default 1 108)')
-    parser.add_argument('--enm-domain', type=int, nargs=2, metavar=('FIRST', 'LAST'),
-                        help='residues joined by the elastic network (default 2 109 with the default --domain)')
+    add_structure_arguments(parser)
     parser.add_argument('--platform', help='OpenMM platform (default: CUDA, then OpenCL, then Reference)')
     parser.add_argument('--precision', default='mixed', help='precision on CUDA, OpenCL and HIP (default mixed)')
     parser.add_argument('--output', default='poiseuille', help='prefix of the output files (default poiseuille)')
@@ -167,8 +172,7 @@ def parse_arguments():
     parser.add_argument('--restart', action='store_true',
                         help='continue from <prefix>.chk, appending to the output files, up to --steps')
     args = parser.parse_args()
-    if args.enm_domain is None:
-        args.enm_domain = [2, 109] if args.domain == [1, 108] else args.domain
+    check_structure_arguments(parser, args)
     cs = args.spacing/(math.sqrt(3)*args.dt)
     if abs(args.velocity) > 0.1*cs:
         parser.error('the centre line moves at Mach %.3f of the lattice: keep |--velocity| below 0.1 c_s = %.3f nm/ps'
@@ -231,14 +235,12 @@ def main():
     walls = (0.5*dx, (nodes[2] - 0.5)*dx)              # halfway between the solid plane and the first fluid planes
     width = walls[1] - walls[0]
     centre = 0.5*(walls[0] + walls[1])
-    names, chains, positions = cocomo2.read_beads(os.path.join(DATA, 'sod1.pdb'))
+    names, chains, positions, ranges, xi, pairs = build_structure(args)
     positions = cocomo2.centred(positions, box)         # the middle of the box is the centre line
     positions[:, 2] += args.position
     if positions[:, 2].min() < walls[0] + dx or positions[:, 2].max() > walls[1] - dx:
-        sys.exit('--position %g puts the protein against a wall: the channel is %g nm wide and SOD1 spans %.1f nm '
-                 'along z' % (args.position, width, np.ptp(positions[:, 2])))
-    xi = cocomo2.exposure(names, np.loadtxt(os.path.join(DATA, 'sod1.surface')), [tuple(args.domain)])
-    pairs = cocomo2.elastic_network(positions, [tuple(args.enm_domain)])
+        sys.exit('--position %g puts the protein against a wall: the channel is %g nm wide and the structure spans '
+                 '%.1f nm along z' % (args.position, width, np.ptp(positions[:, 2])))
     system = cocomo2.create_system(names, chains, float(box.min()), xi, pairs)
     system.setDefaultPeriodicBoxVectors(mm.Vec3(box[0], 0, 0), mm.Vec3(0, box[1], 0), mm.Vec3(0, 0, box[2]))
     masses = np.array([system.getParticleMass(i).value_in_unit(unit.dalton) for i in range(system.getNumParticles())])
@@ -332,7 +334,8 @@ def main():
         time = simulation.context.getTime().value_in_unit(unit.picosecond)
         truncate(args.output + '.log', step)
         truncate(args.output + '_temperature.txt', step)
-        truncate(args.output + '_motion.txt', time)
+        for file, first, last in motion_files(args.output, ranges):
+            truncate(file, time)
         truncate(args.output + '_profile.txt', time)
         truncate_pvd(args.output + '.pvd', time)
         dcdFile = '%s_%d.dcd' % (args.output, step)
@@ -343,8 +346,9 @@ def main():
     simulation.reporters.append(FlowTemperatureReporter(args.output + '_temperature.txt', args.report, force, flow,
                                                         box[2], append))
     current = simulation.context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
-    simulation.reporters.append(MotionReporter(args.output + '_motion.txt', args.report, weights, reference, flow,
-                                               append, current))
+    for file, first, last in motion_files(args.output, ranges):
+        simulation.reporters.append(MotionReporter(file, args.report, weights, reference, flow, append, current,
+                                                   first, last))
     if args.profile > 0:
         simulation.reporters.append(ProfileReporter(args.output + '_profile.txt', args.profile, force, nodes, append))
     if args.checkpoint > 0:
@@ -353,15 +357,17 @@ def main():
         simulation.reporters.append(openmmlbm.LBMVTKReporter(args.output, args.vtk, force, append=append))
     simulation.step(max(0, args.steps - simulation.currentStep))
 
-    motion = np.loadtxt(args.output + '_motion.txt', ndmin=2)
-    if len(motion) > 1:
-        t = motion[:, 0]
-        drift = np.polyfit(t, motion[:, 1], 1)[0]
-        print('Centre of mass at z = %.3f nm, %.3f nm from the centre line; along x it moved at %.5f nm/ps, the flow '
-              'at its height at %.5f nm/ps on average' % (motion[-1, 3], motion[-1, 3] - centre, drift,
-                                                          motion[:, 4].mean()))
-        print('Angle about y %.3f rad in %.1f ps: mean rate %.5f rad/ps (the flow turns at %.5f at the start)' % (
-            motion[-1, 9], t[-1], motion[-1, 9]/t[-1], g/(2*args.viscosity)*(centre - start)))
+    for file, first, last in motion_files(args.output, ranges):
+        motion = np.loadtxt(file, ndmin=2)
+        if len(motion) > 1:
+            t = motion[:, 0]
+            drift = np.polyfit(t, motion[:, 1], 1)[0]
+            print('%s: centre of mass at z = %.3f nm, %.3f nm from the centre line; along x it moved at %.5f nm/ps, '
+                  'the flow at its height at %.5f nm/ps on average' % (file, motion[-1, 3], motion[-1, 3] - centre,
+                                                                       drift, motion[:, 4].mean()))
+            print('%s: angle about y %.3f rad in %.1f ps, mean rate %.5f rad/ps (the flow turns at %.5f at the '
+                  'height of its start)' % (file, motion[-1, 9], t[-1], motion[-1, 9]/t[-1],
+                                            g/(2*args.viscosity)*(centre - motion[0, 3])))
     temperature = np.loadtxt(args.output + '_temperature.txt', ndmin=2)
     print('Mean temperature of the beads relative to the flow over %d reports: %.1f K' % (
         len(temperature), temperature[:, 2].mean()))

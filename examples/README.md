@@ -163,6 +163,10 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
   joined by the elastic network. A folded domain normally has both, so `--domain` alone is the safe choice for a
   new protein. The SOD1 presets keep two ranges, 1-108 for the exposure and 2-109 for the elastic network. With
   `--domain` alone both ranges become the same.
+- `--pdb` and `--surface` run another structure with the parameters of the preset (its structure, surface and
+  domains are then not used; a structure without domain options is a disordered protein), also one with several
+  proteins, each with its own folded domains (`--domains FILE`): see
+  [several proteins in one structure](#several-proteins-in-one-structure).
 
 ### cocomo/kick.py
 
@@ -309,6 +313,79 @@ python $EX/cocomo/poiseuille.py --position -10        # 10 nm below the centre l
   `--restart`, and `--vtk N` for ParaView. `poiseuille.py` takes the reporters from `shear.py`, which must stay next
   to it.
 
+### Several proteins in one structure
+
+`cocomo/diffusion.py`, `cocomo/kick.py`, `cocomo/shear.py` and `cocomo/poiseuille.py` run any coarse-grained
+structure (`--pdb`), also one with several proteins, or several copies of one, each folded protein held by its own
+elastic network.
+
+- **The PDB file.** One bead per residue, as `cocomo2.read_beads()` reads it: the residue name in columns 18-20 and
+  the position in Å in columns 31-54. The chain of a bead is its segment identifier (columns 73-76) or, without it,
+  its chain identifier (column 22). Consecutive beads with the same identifier form one chain, and bonds and angles
+  join them. **Give every protein its own identifier**: two proteins that follow each other with the same identifier
+  are one chain, bonded at the junction. The chains are numbered 1, 2, ... in the order of the file.
+- **The folded domains of every chain** are given by `--domains FILE`, a text file with one line per chain, in the
+  order of the chains:
+
+  ```text
+  # one line per chain, in the order of the PDB file
+  1 108            # chain 1: one folded domain, residues 1 to 108 of the chain
+  10 60, 70 150    # chain 2: two folded domains
+  -                # chain 3: no folded domain (a disordered protein)
+  ```
+
+  - On each line, pairs `FIRST LAST` separated by commas: residue numbers counted from 1 inside the chain (the
+    position of the bead in its chain, not the residue number written in the PDB file), both included, in increasing
+    order and without overlaps.
+  - `-` alone: a chain without folded domain.
+  - `#` starts a comment; empty lines are skipped.
+  - The file must have exactly one line per chain. The script stops with an error that names the file, the line and
+    the chain for a wrong number of lines, a domain outside its chain, overlapping domains or a malformed pair.
+
+  The script converts the domains to the numbering of the whole structure (`cocomo2.read_domains()`) and prints them
+  at the start of the run. For chains of 100, 150 and 200 beads, the lines `10 12, 20 23`, `2 10` and
+  `1 5, 13 34, 38 42` become the domains 10-12, 20-23, 102-110, 251-255, 263-284 and 288-292 of the structure.
+- **What a domain does.** In a folded domain the nonbonded terms are scaled by the solvent exposure of each residue,
+  and the elastic network joins the beads at least three residues apart and closer than 0.9 nm in the starting
+  structure ([cocomo2.py](#cocomococomo2py)). The network joins only beads of the same domain: each folded structure is
+  held on its own, and two chains are never joined, nor two domains of one chain (give one range to hold a whole
+  chain). Springs between proteins, to hold a complex together, are not part of the model here: they would be an
+  extra force of the System, for example a `HarmonicBondForce` between chosen beads.
+- **Elastic network and exposure apart.** `--enm-domains FILE`, in the same format, gives the domains of the elastic
+  network when they differ from those of the exposure (as the SOD1 presets, 1-108 and 2-109). Without it,
+  `--domains` sets both. `--domain FIRST LAST` and `--enm-domain FIRST LAST` remain for one range in the numbering
+  of the whole structure; ranges and files cannot be mixed.
+- **Surfaces.** `--surface` takes one file with the surface of every residue of the structure, or one file per chain
+  in the order of the chains, with `-` in place of the file of a chain without folded domain. Each file has one value
+  per residue, in nm² (`surface.py` writes it from the all-atom structure of the protein). A folded domain on a chain
+  given `-` is an error.
+- **Output by chain.** With more than one chain, `diffusion.py` also writes `<prefix>_com_<k>.txt`, the centre of
+  mass of chain $`k`$, which `msd.py` reads like `<prefix>_com.txt`; `shear.py` and `poiseuille.py` write
+  `<prefix>_motion_<k>.txt`, the motion and rotation of chain $`k`$, instead of `<prefix>_motion.txt`. `kick.py`
+  kicks every bead and writes the motion of all the beads together. The structure is centred as a whole: in the box
+  (`diffusion.py`, `kick.py`), on the plane where the flow is at rest (`shear.py`) or on the centre line, moved by
+  `--position` (`poiseuille.py`).
+- **Box.** Make the box large enough for all the proteins, with the distances that the structure gives them: the
+  scripts do not move the proteins apart (the energy minimization at the start removes small clashes).
+
+For example, two copies of SOD1, the second with two domains, and a disordered peptide in one structure:
+
+```bash
+cat > three.domains <<'END'
+1 108
+2 50, 60 109
+-
+END
+python $EX/cocomo/diffusion.py --preset sod1-g30 --pdb three.pdb --surface sod1.surface sod1.surface - \
+    --domains three.domains --output three
+python $EX/cocomo/msd.py three_com_1.txt
+python $EX/cocomo/shear.py --pdb three.pdb --surface $EX/cocomo/data/sod1.surface $EX/cocomo/data/sod1.surface - \
+    --domains three.domains --height 60 --wall-potential wca
+```
+
+`diffusion.py` looks for a `--pdb` or `--surface` file that is not in the working directory in `cocomo/data/`; the
+other scripts take the paths as given.
+
 ### cocomo/cocomo2.py
 
 The COCOMO2 model (Jussupow, Bartley, Lapidus, Feig, J. Chem. Theory Comput. 21, 2095 (2025)) written
@@ -316,7 +393,8 @@ for these examples from the description in the article: bonds, angles, elastic n
 short-range potential with cation-pi and pi-pi terms, Debye-Hueckel electrostatics, scaling of the
 nonbonded terms by the solvent exposure. The text at the top of the file gives every term and
 parameter. `read_beads()`, `exposure()`, `elastic_network()` and `create_system()` can be used for other
-proteins.
+proteins, and `chain_ranges()`, `read_domains()`, `read_surfaces()` and `folded_domains()` for structures with
+several chains ([several proteins in one structure](#several-proteins-in-one-structure)).
 
 The surface file given to `exposure()` holds, for each residue, its solvent accessible surface area in nm²,
 computed from the all-atom structure of the protein with atomic radii, as in COCOMO2: the reference surfaces

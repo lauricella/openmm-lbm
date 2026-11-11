@@ -420,3 +420,98 @@ def test_wall_potential(kind, lower, upper):
     assert np.allclose(forces[:, 2], force, rtol=1e-9, atol=1e-9)
     assert np.all(forces[:, :2] == 0)
     assert energy > 0 and np.any(force > 0) and np.any(force < 0)
+
+
+def _three_chains(path):
+    """A structure of three chains: SOD1 (P001), a second SOD1 5.5 nm away (P002) and the peptide GRGDSPYS (P003),
+    each centred on its place."""
+    import numpy as np
+    data = os.path.join(EXAMPLES, 'cocomo', 'data')
+    lines = []
+    for name, segid, shift in (('sod1.pdb', 'P001', (0, 0, 0)), ('sod1.pdb', 'P002', (55, 0, 0)),
+                               ('GRGDSPYS.pdb', 'P003', (-50, 0, 0))):
+        atoms = [line.rstrip('\n').ljust(76) for line in open(os.path.join(data, name)) if line.startswith('ATOM')]
+        xyz = np.array([[float(a[30:38]), float(a[38:46]), float(a[46:54])] for a in atoms])
+        xyz = xyz - xyz.mean(axis=0) + np.array(shift)
+        lines += [a[:30] + '%8.3f%8.3f%8.3f' % tuple(x) + a[54:72] + segid + '\n' for a, x in zip(atoms, xyz)]
+    with open(path, 'w') as out:
+        out.writelines(lines)
+
+
+def test_read_domains(tmp_path):
+    """cocomo2.read_domains(): one line per chain, residues counted from 1 inside the chain, converted to the
+    numbering of the structure; "-" for a chain without domain, comments; an error for every malformed file."""
+    sys.path.insert(0, os.path.join(EXAMPLES, 'cocomo'))
+    import cocomo2
+    chains = ['A']*100 + ['B']*150 + ['C']*200
+    assert cocomo2.chain_ranges(chains) == [(0, 100), (100, 250), (250, 450)]
+    domains = tmp_path/'d.txt'
+    domains.write_text('10 12 , 20 23\n2 10\n1 5, 13 34,38 42\n')
+    assert cocomo2.read_domains(str(domains), chains) == [(10, 12), (20, 23), (102, 110), (251, 255), (263, 284),
+                                                          (288, 292)]
+    domains.write_text('# comment\n1 100   # chain A\n\n-\n200 200\n')
+    assert cocomo2.read_domains(str(domains), chains) == [(1, 100), (450, 450)]
+    for text, message in (('1 10\n2 10\n', 'one line per chain'), ('1 10\n2 151\n-\n', 'not inside chain'),
+                          ('1 10\n5 20, 20 30\n-\n', 'overlaps'), ('1 10\n2\n-\n', 'expected pairs'),
+                          ('1 10\n2 x\n-\n', 'expected pairs'), ('0 10\n-\n-\n', 'not inside chain')):
+        domains.write_text(text)
+        with pytest.raises(ValueError, match=message):
+            cocomo2.read_domains(str(domains), chains)
+
+
+def test_read_surfaces(tmp_path):
+    """cocomo2.read_surfaces(): one file for the structure, or one per chain with "-" for a chain without folded
+    domain, whose residues then cannot be in a domain of exposure()."""
+    sys.path.insert(0, os.path.join(EXAMPLES, 'cocomo'))
+    import numpy as np
+    import cocomo2
+    chains = ['A']*3 + ['B']*2
+    (tmp_path/'all.txt').write_text('1\n2\n3\n4\n5\n')
+    (tmp_path/'a.txt').write_text('1\n2\n3\n')
+    (tmp_path/'b.txt').write_text('4\n5\n')
+    assert list(cocomo2.read_surfaces([str(tmp_path/'all.txt')], chains)) == [1, 2, 3, 4, 5]
+    assert list(cocomo2.read_surfaces([str(tmp_path/'a.txt'), str(tmp_path/'b.txt')], chains)) == [1, 2, 3, 4, 5]
+    sasa = cocomo2.read_surfaces([str(tmp_path/'a.txt'), '-'], chains)
+    assert np.isnan(sasa[3:]).all()
+    names = ['ALA']*5
+    assert cocomo2.exposure(names, sasa, [(1, 3)])[4] == 1
+    with pytest.raises(ValueError, match='no surface'):
+        cocomo2.exposure(names, sasa, [(4, 5)])
+    for paths, message in (([str(tmp_path/'a.txt')], 'one value per residue'),
+                           ([str(tmp_path/'b.txt'), str(tmp_path/'a.txt')], 'chain 1'),
+                           ([str(tmp_path/'a.txt')]*3, '3 surface files for 2 chains')):
+        with pytest.raises(ValueError, match=message):
+            cocomo2.read_surfaces(paths, chains)
+
+
+@pytest.mark.parametrize('script, options, files', [
+    ('diffusion.py', ['--preset', 'smoke', '--box', '16', '--steps', '20', '--report', '10', '--output', 'three'],
+     ['three_com.txt', 'three_com_1.txt', 'three_com_2.txt', 'three_com_3.txt']),
+    ('kick.py', ['--box', '16.2', '--steps', '5', '--output', 'three.txt'], ['three.txt']),
+    ('shear.py', ['--box', '16', '16', '--height', '16', '--steps', '20', '--report', '10', '--output', 'three'],
+     ['three_motion_1.txt', 'three_motion_2.txt', 'three_motion_3.txt']),
+    ('poiseuille.py', ['--box', '16', '16', '--height', '16', '--steps', '20', '--report', '10', '--output', 'three'],
+     ['three_motion_1.txt', 'three_motion_2.txt', 'three_motion_3.txt'])], ids=lambda value: str(value)[:20])
+def test_several_chains(tmp_path, script, options, files):
+    """The COCOMO2 scripts with a structure of three chains, the folded domains of each from --domains and one
+    surface file per chain: each chain has its own elastic network (no bond between chains; SOD1 with 1-108 has
+    478 bonds, the second copy with 2-50 and 60-109 fewer, the peptide none), and the files of every chain are
+    written."""
+    import re
+    import numpy as np
+    sys.path.insert(0, os.path.join(EXAMPLES, 'cocomo'))
+    import cocomo2
+    _three_chains(str(tmp_path/'three.pdb'))
+    (tmp_path/'three.domains').write_text('1 108\n2 50, 60 109   # second copy\n-\n')
+    surface = os.path.join(EXAMPLES, 'cocomo', 'data', 'sod1.surface')
+    names, chains, positions = cocomo2.read_beads(str(tmp_path/'three.pdb'))
+    pairs = cocomo2.elastic_network(positions, cocomo2.read_domains(str(tmp_path/'three.domains'), chains))
+    assert all(chains[i] == chains[j] for i, j, r0 in pairs)
+    assert sum(1 for i, j, r0 in pairs if chains[i] == 'P001') == 478
+    command = [sys.executable, os.path.join(EXAMPLES, 'cocomo', script), '--platform', 'Reference', '--pdb',
+               'three.pdb', '--surface', surface, surface, '-', '--domains', 'three.domains'] + options
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert re.search(r'\b%d elastic bonds' % len(pairs), result.stdout), result.stdout
+    for name in files:
+        assert len(np.loadtxt(tmp_path/name, ndmin=2)) > 0
