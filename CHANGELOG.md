@@ -3,7 +3,13 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
-## Unreleased
+## 0.6.6 (2026-11-11)
+
+Two examples of a protein in a flow out of equilibrium, a double Couette flow between moving open faces
+(`examples/cocomo/shear.py`) and a Poiseuille flow between walls (`examples/cocomo/poiseuille.py`), with a repulsive
+wall potential for the beads; several proteins in the COCOMO2 examples, each with its own elastic network; a test of
+the fluctuating fluid between moving open faces; the documentation describes and validates the plugin on its own.
+The C++ code of the plugin is that of version 0.6.0, apart from comments: the results of the plugin are the same.
 
 ### Examples
 - `cocomo/shear.py` (new): SOD1 in a double Couette flow, between two `DensityVelocity` faces along z that move along
