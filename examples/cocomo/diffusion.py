@@ -47,7 +47,9 @@ the PDB file), or "-" for a chain without folded domain; "#" starts a comment.  
 The script converts them to the numbering of the whole structure (cocomo2.read_domains()) and checks that there is
 one line per chain and that every domain lies inside its chain.  The elastic network joins only beads of the same
 domain: it holds each folded structure on its own and never joins two chains.  --domains sets the exposure scaling
-and the elastic network; --enm-domains FILE, in the same format, gives other domains to the elastic network.
+and the elastic network; --enm-domains FILE, in the same format, gives other domains to the elastic network.  The
+defaults of every preset and the rules of these options, the same in the four COCOMO2 scripts, are in
+examples/README.md (Folded domains in the scripts).
 --surface takes one file for the whole structure or one file per chain, in the order of the chains, with "-" in
 place of the file of a chain without folded domain.  With more than
 one chain the script also writes the centre of mass of every chain (<prefix>_com_<k>.txt below).

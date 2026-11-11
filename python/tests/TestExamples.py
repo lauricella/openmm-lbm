@@ -515,3 +515,31 @@ def test_several_chains(tmp_path, script, options, files):
     assert re.search(r'\b%d elastic bonds' % len(pairs), result.stdout), result.stdout
     for name in files:
         assert len(np.loadtxt(tmp_path/name, ndmin=2)) > 0
+
+
+DOMAIN_SCRIPTS = {
+    'diffusion.py': ['--preset', 'smoke', '--box', '10', '--steps', '2', '--report', '1', '--checkpoint', '0'],
+    'kick.py': ['--preset', 'sod1', '--box', '9', '--steps', '2'],
+    'shear.py': ['--box', '10', '10', '--height', '12', '--steps', '2', '--report', '1', '--profile', '0'],
+    'poiseuille.py': ['--box', '10', '10', '--height', '12', '--steps', '2', '--report', '1', '--profile', '0'],
+}
+
+
+@pytest.mark.parametrize('script', sorted(DOMAIN_SCRIPTS))
+@pytest.mark.parametrize('options, exposure, network', [
+    ([], '1-108', '2-109'),
+    (['--domain', '1', '110'], '1-110', '1-110'),
+    (['--enm-domain', '1', '110'], '1-108', '1-110'),
+    (['--domain', '3', '100', '--enm-domain', '5', '90'], '3-100', '5-90')],
+    ids=['defaults', 'domain alone', 'enm-domain alone', 'both'])
+def test_domain_rules(tmp_path, script, options, exposure, network):
+    """The four COCOMO2 scripts follow the same rules for the domain options on SOD1 (examples/README.md, Folded
+    domains in the scripts): the defaults 1-108 and 2-109, --domain alone for both, --enm-domain alone with the
+    default exposure."""
+    import re
+    command = [sys.executable, os.path.join(EXAMPLES, 'cocomo', script), '--platform', 'Reference'] + \
+        DOMAIN_SCRIPTS[script] + options
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stdout + result.stderr
+    found = re.search(r'folded domains ([0-9, -]+|none); elastic network ([0-9, -]+|none)', result.stdout, re.I)
+    assert found and (found.group(1), found.group(2)) == (exposure, network), result.stdout

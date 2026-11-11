@@ -94,8 +94,10 @@ Options (python shear.py --help lists them with their defaults):
   structure   --pdb FILE (default data/sod1.pdb), --surface FILE [FILE ...] (one file, or one per chain, "-" for a
               chain without folded domain; default data/sod1.surface), --domain FIRST LAST and --enm-domain FIRST
               LAST (one folded domain of the whole structure for the exposure scaling and the elastic network;
-              default 1 108 and 2 109 for SOD1), or --domains FILE and --enm-domains FILE (the domains of every
-              chain, one line per chain; see above)
+              default 1 108 and 2 109 for SOD1; --domain alone sets both, --enm-domain alone keeps the exposure
+              1 108 of SOD1), or --domains FILE and --enm-domains FILE (the domains of every chain, one line per
+              chain; see above); the rules, the same in the four COCOMO2 scripts, are in examples/README.md
+              (Folded domains in the scripts)
   run         --steps (default 1000000, 10 ns), --seed, --platform CUDA|OpenCL|HIP|Reference (default the fastest
               available), --precision single|mixed|double (default mixed)
   output      --output PREFIX (default shear), --report N (steps between reports, default 1000: 10 ps),
@@ -228,14 +230,17 @@ def check_structure_arguments(parser, args):
     if (args.domains or args.enm_domains) and (args.domain or args.enm_domain):
         parser.error('give the domains either as ranges (--domain, --enm-domain) or as files (--domains, '
                      '--enm-domains), not both')
+    if args.domain is not None and args.enm_domain is None:
+        args.enm_domain = args.domain                 # one folded domain for both
     if args.pdb is None:
         args.pdb = os.path.join(DATA, 'sod1.pdb')
         if args.surface is None:
             args.surface = [os.path.join(DATA, 'sod1.surface')]
-        if not (args.domain or args.enm_domain or args.domains or args.enm_domains):
-            args.domain, args.enm_domain = [1, 108], [2, 109]
-    if args.domain is not None and args.enm_domain is None:
-        args.enm_domain = args.domain                 # one folded domain for both
+        if not (args.domains or args.enm_domains):    # the ranges of SOD1 for those that are not given
+            if args.domain is None:
+                args.domain = [1, 108]
+            if args.enm_domain is None:
+                args.enm_domain = [2, 109]
     if (args.domain or args.domains) and not args.surface:
         parser.error('folded domains need the surface of every residue (--surface)')
 

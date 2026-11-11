@@ -244,8 +244,10 @@ def read_surfaces(paths, chains):
 def folded_domains(chains, domain=None, enm_domain=None, domains=None, enm_domains=None):
     """The folded domains for the exposure scaling and for the elastic network, from the options of the scripts:
     one range of the whole structure (--domain, --enm-domain: (first, last) counted from 1) or a file with the
-    domains of every chain (--domains, --enm-domains: read_domains()).  The domains of the elastic network are
-    those of the exposure unless given apart.  Returns two lists of (first, last)."""
+    domains of every chain (--domains, --enm-domains: read_domains()).  The elastic network takes the domains of
+    the exposure unless it has its own; without a domain or domains file there is no exposure scaling.  The
+    scripts fill in the default ranges of their structure before calling it (examples/README.md, Folded domains
+    in the scripts).  Returns two lists of (first, last)."""
     exposed = read_domains(domains, chains) if domains else ([tuple(domain)] if domain else [])
     if enm_domains:
         network = read_domains(enm_domains, chains)

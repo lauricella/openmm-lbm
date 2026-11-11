@@ -47,9 +47,19 @@ versions the API may still change.
   `chain_ranges()`, `read_domains()`, `read_surfaces()`, `folded_domains()`; `exposure()` refuses a residue without
   surface in a domain. Documented in `examples/README.md` (Several proteins in one structure) and in the text of
   the scripts. Tests `test_read_domains`, `test_read_surfaces` and `test_several_chains` (three chains, all four
-  scripts). With a single chain the runs are those of before; in `shear.py` and `poiseuille.py`, `--domain 1 108`
-  alone now sets the elastic network to the same range, as in `diffusion.py` (the default SOD1 keeps 1-108 and
-  2-109).
+  scripts). With a single chain the runs are those of before.
+- The four COCOMO2 scripts follow the same rules for the domain options, written in `examples/README.md` (Folded
+  domains in the scripts, with the default domains of every script and preset): `--domain` alone sets both the
+  exposure scaling and the elastic network, `--enm-domain` alone keeps the default exposure. In their first versions
+  `shear.py` and `poiseuille.py` kept the elastic network on 2-109 with `--domain` alone and removed the exposure
+  scaling with `--enm-domain` alone. `kick.py` prints its domains, as the other scripts. Test `test_domain_rules`.
+
+### Documentation
+- The documentation, the examples and the comments of the code describe and validate the plugin on its own: exact
+  solutions, theory, agreement between the platforms, and the stochastic tests and protein runs of this plugin.
+  `docs/validation.md` keeps these results only; `CONTRIBUTING.md` lists the algorithm with its sections in
+  `docs/theory.md`, and reference values are exact solutions, theory or independent codes.
+- A broken link of `examples/README.md` to `docs/validation.md` is fixed.
 
 ### Tests
 - `testMovingFaceFluctuations` (C++, all platforms): a fluctuating fluid between two `DensityVelocity` faces moving

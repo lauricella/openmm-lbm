@@ -69,8 +69,10 @@ Options (python poiseuille.py --help lists them with their defaults):
   structure   --pdb FILE (default data/sod1.pdb), --surface FILE [FILE ...] (one file, or one per chain, "-" for a
               chain without folded domain), --domain
               FIRST LAST and --enm-domain FIRST LAST (one folded domain of the whole structure; default 1 108 and
-              2 109 for SOD1), or --domains FILE and --enm-domains FILE (the domains of every chain, one line per
-              chain, "FIRST LAST, FIRST LAST" counted from 1 inside the chain or "-" for none): see shear.py --help
+              2 109 for SOD1; --domain alone sets both, --enm-domain alone keeps the exposure 1 108 of SOD1), or
+              --domains FILE and --enm-domains FILE (the domains of every chain, one line per chain,
+              "FIRST LAST, FIRST LAST" counted from 1 inside the chain or "-" for none): see shear.py --help and
+              examples/README.md (Folded domains in the scripts)
   fluid       --viscosity (nm^2/ps, default 0.893, water at 298 K), --temperature (K, default 298; 0 = no noise),
               --no-fluid-fluctuations (a fluid without thermal fluctuations), --spacing (nm, default 0.5),
               --dt (ps, default 0.01)

@@ -160,9 +160,8 @@ python $EX/cocomo/diffusion.py --preset sod1-g30 --drag Centered --fluid-fluctua
   `<prefix>_<step>.dcd`. See [saving and continuing a simulation](../docs/user_guide/restart.md).
 - `--domain FIRST LAST` chooses the folded domain (residues counted from 1, both included): the residues whose
   nonbonded terms are scaled by their solvent exposure and, unless `--enm-domain` is also given, the residues
-  joined by the elastic network. A folded domain normally has both, so `--domain` alone is the safe choice for a
-  new protein. The SOD1 presets keep two ranges, 1-108 for the exposure and 2-109 for the elastic network. With
-  `--domain` alone both ranges become the same.
+  joined by the elastic network. The defaults of every preset and the rules of these options, the same in the four
+  COCOMO2 scripts, are in [folded domains in the scripts](#folded-domains-in-the-scripts).
 - `--pdb` and `--surface` run another structure with the parameters of the preset (its structure, surface and
   domains are then not used; a structure without domain options is a disordered protein), also one with several
   proteins, each with its own folded domains (`--domains FILE`): see
@@ -415,6 +414,48 @@ atom whose element is not in the table of radii stops the script, so a coarse-gr
 of a surface. The coarse-grained model must have one bead for each residue of the file, in the same order. With
 the default 960 points per atom the error on the area of an atom is 0.14 % of its sphere on average, at most
 0.7 %; on dihydrofolate reductase (OpenMM's `5dfr_minimized.pdb`, 159 residues) the total is 89.8 nm².
+
+#### Folded domains in the scripts
+
+`diffusion.py`, `kick.py`, `shear.py` and `poiseuille.py` choose the folded domains with the same options and rules.
+A folded domain has two parts: the exposure scaling of its nonbonded terms, and the elastic network that holds it
+folded. Each script prints, at the start of the run, the domains of both in the numbering of the whole structure:
+check them there.
+
+Default domains, those of the default structures:
+
+| Script and structure | Exposure scaling | Elastic network |
+|---|---|---|
+| `diffusion.py --preset sod1`, `sod1-g30`, `smoke` (SOD1, 110 beads) | 1-108 | 2-109 |
+| `diffusion.py --preset rlp` (disordered, 166 beads) | none | none |
+| `kick.py --preset sod1` | 1-108 | 2-109 |
+| `kick.py --preset ubiquitin` (76 beads) | 1-76 | 1-76 |
+| `kick.py --preset peptide` (GRGDSPYS, 8 beads) | none | none |
+| `shear.py`, `poiseuille.py` (SOD1 by default) | 1-108 | 2-109 |
+| any script with `--pdb` | none | none |
+
+Options:
+
+- **One range of the whole structure** (residues counted from 1 in the whole structure, both included):
+  - `--domain FIRST LAST` alone sets both parts to that range;
+  - `--domain` and `--enm-domain` set each part to its range;
+  - `--enm-domain FIRST LAST` alone sets the elastic network and keeps the default exposure scaling (1-108 for
+    SOD1; none for a structure given with `--pdb`).
+- **A file with the domains of every chain** (residues counted from 1 inside each chain, one line per chain,
+  [several proteins in one structure](#several-proteins-in-one-structure)):
+  - `--domains FILE` sets both parts;
+  - `--domains` and `--enm-domains` set each part from its file;
+  - `--enm-domains FILE` alone sets the elastic network only, without exposure scaling: the files replace the
+    default domains of the structure.
+- Ranges and files cannot be mixed. With `--pdb` nothing comes from the default structure: a structure without domain
+  options is a disordered protein (no exposure scaling, no elastic network), and a structure with folded domains
+  needs `--surface`.
+- SOD1 has two different default ranges, 1-108 for the exposure and 2-109 for the elastic network; `--domain 1 110`
+  gives one range of the whole chain to both.
+
+In their first versions on `main`, `shear.py` and `poiseuille.py` did not follow these rules: `--domain` alone left
+the elastic network on 2-109, and `--enm-domain` alone removed the exposure scaling. Now the four scripts behave the
+same; the runs with the default domains have not changed.
 
 ### Data
 

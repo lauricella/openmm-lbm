@@ -41,7 +41,8 @@ in diffusion.py: --domain FIRST LAST (and --enm-domain) for one range of the who
 --enm-domains FILE) with one line per chain, "FIRST LAST, FIRST LAST" in residue numbers counted from 1 inside the
 chain, or "-" for a chain without folded domain.  Every chain needs its own identifier in the PDB file; the elastic
 network joins only beads of the same domain, never two chains (diffusion.py --help and cocomo2.read_domains() give
-the details).  Every bead of every chain receives the kick, and the output is that of all the beads together.
+the details; the defaults and the rules of the domain options are in examples/README.md, Folded domains in the
+scripts).  Every bead of every chain receives the kick, and the output is that of all the beads together.
 """
 
 import argparse
@@ -125,6 +126,8 @@ def parse_arguments():
     if (args.domains or args.enm_domains) and (args.domain or args.enm_domain):
         parser.error('give the domains either as ranges (--domain, --enm-domain) or as files (--domains, '
                      '--enm-domains), not both')
+    if args.domain is not None and args.enm_domain is None:
+        args.enm_domain = args.domain          # one folded domain for both, instead of the ranges of the preset
     if args.pdb is None:
         args.pdb = os.path.join(DATA, preset['pdb'])
         if args.surface is None and preset['surface']:
@@ -135,8 +138,6 @@ def parse_arguments():
                     setattr(args, key, preset[key])
     if (args.domain or args.domains) and not args.surface:
         parser.error('folded domains need the surface of every residue (--surface, or the presets ubiquitin, sod1)')
-    if args.domain is not None and args.enm_domain is None:
-        args.enm_domain = args.domain          # one folded domain for both
     if args.output is None:
         args.output = 'kick_%s_lb_%s.txt' % (args.preset, 'off' if args.no_lb else 'on')
     return args
@@ -206,6 +207,8 @@ def main():
             print('Platform %s; %s: %d beads in %d chain(s), %.1f Da, %d elastic bonds; box %.1f nm' % (
                 platform.getName(), os.path.basename(args.pdb), len(names), len(cocomo2.chain_ranges(chains)),
                 masses.sum(), len(pairs), box))
+            print('Folded domains %s; elastic network %s' % (
+                ', '.join('%d-%d' % d for d in exposed) or 'none', ', '.join('%d-%d' % d for d in network) or 'none'))
             if args.no_lb:
                 fluid = 'no fluid (Langevin)'
             else:
