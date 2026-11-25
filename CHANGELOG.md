@@ -3,6 +3,14 @@
 All notable changes to openmm-lbm are recorded here. Versions follow semantic versioning; in the 0.x
 versions the API may still change.
 
+## Unreleased
+
+### Documentation
+- `api_reference.md`, particles held in place: a coupled particle is held in place by a harmonic restraint of OpenMM
+  on its position, added before the `LBMForce`. It still exchanges the drag with the fluid and holds it like a fixed
+  point. A zero mass keeps a particle fixed only if it is not coupled, and the fluid then flows through it. The
+  troubleshooting entry on massless particles points there.
+
 ## 0.6.6 (2026-11-11)
 
 Two examples of a protein in a flow out of equilibrium, a double Couette flow between moving open faces

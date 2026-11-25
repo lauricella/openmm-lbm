@@ -507,9 +507,9 @@ temperature, and the fluid at that node (or at those nodes, with the same weight
 ### `addParticle(particle)`
 
 Couples the particle with index `particle` in the System to the fluid and returns its index among the
-coupled particles. Its mass is taken from the System and must be positive. A particle can be coupled
-only once. Particles that are not added (for example the atoms of a rigid wall) do not interact with
-the fluid.
+coupled particles. Its mass is taken from the System and must be positive (to keep a particle fixed, see
+[particles held in place](#particles-held-in-place)). A particle can be coupled only once. Particles that are
+not added (for example the atoms of a rigid wall) do not interact with the fluid.
 
 ```python
 for i in range(system.getNumParticles()):
@@ -519,6 +519,33 @@ for i in range(system.getNumParticles()):
 ### `getNumParticles()`, `getParticle(index)`, `setParticle(index, particle)`
 
 Number of coupled particles; System index of the coupled particle `index`; change it.
+
+### Particles held in place
+
+To hold particles in place, for example the beads that tie a protein to a membrane, keep them coupled and add a
+harmonic restraint of OpenMM on their positions, before the `LBMForce` (the centred drag requires it to be the last
+force). An anchored particle exchanges with the fluid the friction force $`-\gamma m(\mathbf v - \mathbf u)`$ with
+$`\mathbf v \approx 0`$: it holds the fluid like a fixed point, and the restraint takes up the force. The constant
+$`k`$ only sets how far the particle moves from its anchor: $`\sqrt{k_BT/k}`$ along each axis, 0.016 nm for
+$`k = 10^4`$ kJ/mol/nm² at 310 K. The period of the oscillation, $`2\pi\sqrt{m/k}`$ (0.6 ps for 100 Da), must be
+many time steps long. `periodicdistance` gives the same energy for every periodic image of the particle, which the GPU
+platforms may keep instead of the coordinate given to the Context.
+
+```python
+anchors = [0]                                       # the particles to hold
+positions = context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+restraint = mm.CustomExternalForce('0.5*k*periodicdistance(x, y, z, x0, y0, z0)^2')
+restraint.addGlobalParameter('k', 1.0e4)            # kJ/mol/nm^2
+for name in ('x0', 'y0', 'z0'):
+    restraint.addPerParticleParameter(name)
+for i in anchors:
+    restraint.addParticle(i, list(positions[i]))    # the anchor, in nm
+# then system.addForce(restraint), before system.addForce(force)
+```
+
+A zero mass does not do the same. OpenMM integrators never move a massless particle, but the plugin cannot couple it
+(`coupled particles must have a positive mass`). Left out of the `LBMForce`, such a particle stays fixed and the
+fluid flows through it.
 
 ### `setCouplingScheme(scheme)`, `getCouplingScheme()`
 

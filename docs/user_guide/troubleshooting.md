@@ -21,7 +21,7 @@ the plugin converts the parameters to lattice units.
 | `a solid node is listed more than once` | Remove the duplicates, for example with `np.unique()`. |
 | `all lattice nodes are solid` | At least one node must be fluid. |
 | `expected a sequence of integers` (a `TypeError` from `setSolidNodes()`) | Pass the node indices as a list, a range or a NumPy array of integers. |
-| `a coupled particle index is out of range`, `a particle is coupled more than once`, `coupled particles must have a positive mass` | Check the indices passed to `addParticle()` and the masses in the System. Massless particles (virtual sites) cannot be coupled. |
+| `a coupled particle index is out of range`, `a particle is coupled more than once`, `coupled particles must have a positive mass` | Check the indices passed to `addParticle()` and the masses in the System. Massless particles (virtual sites, or particles kept fixed by a zero mass) cannot be coupled. To keep a coupled particle fixed, leave its mass and restrain its position ([particles held in place](api_reference.md#particles-held-in-place)). |
 | `LBMForce requires a VerletIntegrator: drag and random forces are part of the force` | Use `VerletIntegrator`. Langevin and other thermostatted integrators would add a second friction. |
 | `LBMForce does not support running on multiple devices` | Use a single GPU per Context (`DeviceIndex` with one value). To use several GPUs, divide the lattice into domains, one MPI rank per GPU (`setDomainDecomposition()`, [running on several GPUs](parallel.md)). |
 | `the domain decomposition (setDomainDecomposition()) cannot be negative` | Use positive numbers of domains, or 0 to let MPI choose. |
